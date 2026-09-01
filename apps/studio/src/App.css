@@ -217,42 +217,51 @@ body {
 
 .code-content {
   flex: 1;
-  overflow: auto;
+  position: relative;
+  min-height: 0;
+}
+
+.tab-panel {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+}
+
+.tab-panel.active {
+  visibility: visible;
+}
+
+.tab-panel.padded {
   padding: 14px;
+  overflow: auto;
 }
 
-.blocks-placeholder {
+.blocks-editor {
+  position: absolute;
+  inset: 0;
+}
+
+.python-panel {
+  position: absolute;
+  inset: 0;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  flex-direction: column;
 }
 
-.block {
-  padding: 8px 14px;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #0e1116;
+.python-editor {
+  flex: 1;
+  min-height: 0;
 }
 
-.block-start {
-  background: #ffc94d;
-}
-
-.block-move {
-  background: #5fd38a;
-}
-
-.block-if {
-  background: #6db3ff;
-}
-
-.block-arrow {
+.python-note {
+  padding: 4px 12px;
+  font-size: 11px;
   color: var(--text-dim);
+  border-top: 1px solid var(--border);
+  background: var(--panel-2);
 }
 
-.editor-placeholder pre {
+.cpp-placeholder {
   margin: 0;
   font-family: "JetBrains Mono", "Fira Code", monospace;
   font-size: 13px;

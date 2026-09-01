@@ -51,6 +51,16 @@ def test_forward_stops_at_wall():
     assert robot.distance() < 0.01
 
 
+def test_wait_passes_time_without_moving():
+    robot = Robot()
+    before = robot.world.state()
+    robot.wait(0.5)
+    after = robot.world.state()
+    assert after.tick > before.tick
+    assert math.isclose(after.pose.x, before.pose.x, abs_tol=1e-12)
+    assert math.isclose(after.pose.y, before.pose.y, abs_tol=1e-12)
+
+
 def test_vision_doc_snippet_pattern():
     # The wall avoider from docs/vision.md terminates and ends up turned.
     robot = Robot()

@@ -43,6 +43,11 @@ class Robot:
         """Rotate in place, clockwise."""
         self._turn(-math.radians(degrees))
 
+    def wait(self, seconds: float = 1.0) -> None:
+        """Do nothing while simulation time passes."""
+        if seconds > 0:
+            self._drive_for(0.0, 0.0, seconds)
+
     def distance(self) -> float:
         """Meters from the robot's front edge to the wall it is facing."""
         return self.world.state().distance

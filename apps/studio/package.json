@@ -4,13 +4,17 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/sync-blockly-media.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/sync-blockly-media.mjs",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "preview": "vite preview"
   },
   "dependencies": {
+    "blockly": "^13.2.1",
+    "monaco-editor": "^0.56.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "three": "^0.185.1"

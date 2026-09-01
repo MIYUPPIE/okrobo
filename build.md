@@ -31,7 +31,7 @@ These are settled. Do not re-litigate them in future sessions unless something b
 
 - **Phase 5:** MuJoCo vs Bullet3 vs Jolt for full physics. Re-run the library search then (stars, last commit, issue activity), per the search-before-building rule.
 - **Phase 7:** Web Serial from the webview vs serial from the Python sidecar for ESP32/Arduino. Depends on Tauri webview serial support at that time.
-- **Blockly execution target:** generate Python (one execution path, slower loop) vs generate JS (fast, second path to maintain). Decide in Phase 2 after Monaco+Python exists.
+- ~~Blockly execution target~~ decided in Phase 2: JS for execution (async runner, interruptible), Python for display until Phase 3 makes it the real path.
 
 ---
 
@@ -122,17 +122,19 @@ Deviations from plan: the world always steps (wheels are just zero when idle), w
 
 **Acceptance: verified in headless Chrome** — clicked Run against the built app; robot drove x 1.00 → 1.70 and reported "stopped at wall", sensor at 0.20 m. Works with wifi off (engine and world are bundled/local).
 
-### Phase 2: Code drives the robot
+### Phase 2: Code drives the robot ✅
 
 Goal: students write programs.
 
-- [ ] Monaco editor panel wired into the layout
-- [ ] Blockly panel with a starter toolbox (start, move, turn, wait, if, repeat, distance sensor)
-- [ ] Blockly generates Python source shown read-only in Monaco (decide execution target here, see open decisions)
-- [ ] A TS-side program runner executes the generated program against the WASM engine step loop (interpret, or transpile; keep the sim math in the engine)
-- [ ] Stop button interrupts a running program safely
+- [x] Monaco panel (`src/PythonPanel.tsx`): read-only Python view, dark theme; trimmed to core editor + Python grammar (the full monaco entry ships a 7MB TS worker)
+- [x] Blockly panel (`src/BlocksPanel.tsx`): move/turn/wait/distance blocks plus if/repeat/while/compare, dark theme, media served locally (`scripts/sync-blockly-media.mjs`, offline rule) — the vision doc's wall avoider is preloaded so Run works on first open
+- [x] Execution target decided: blocks generate JavaScript for execution now and Python (exact okrobo package API) for the Monaco preview, which becomes the real path in Phase 3. One executed language, one displayed
+- [x] Program runner (`src/program/ProgramRunner.ts`): async robot API with Python-Robot semantics (duration-based movements, exact partial end step, collision early-stop) driven by the render loop's fixed timestep; generated loops await a checkpoint each iteration so `while (true)` never freezes the UI
+- [x] Stop interrupts at any await point (ProgramStoppedError); teleop keys also preempt a running program
 
-**Acceptance:** the wall-avoider from the vision doc, built in blocks, runs: `if distance < 0.2: turn_left`.
+Tests: 12 new vitest cases run generated programs against the real WASM engine, including the wall avoider (turns at the wall, drives on) and safe interruption.
+
+**Acceptance: verified in headless Chrome** — clicked Run on the preloaded blocks: status showed "program running", the robot crossed the arena, turned at the wall and reached y 1.70 on the far side, Stop cleared it; the Python preview contains `from okrobo import Robot` and `robot.turn_left(90)`.
 
 ### Phase 3: Real local Python
 
@@ -207,4 +209,4 @@ cd apps/studio && npm run dev         # the studio: Run/Stop/Reset + arrow-key d
 python3 -m okrobo.demo                # student API on the reference sim
 ```
 
-Then open Phase 2, take the first unchecked box, build it with its test, check it off here, commit.
+Then open Phase 3, take the first unchecked box, build it with its test, check it off here, commit.

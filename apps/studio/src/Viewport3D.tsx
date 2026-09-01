@@ -5,6 +5,7 @@ import type { State } from "./contracts/robotApi";
 import type { EngineWorld } from "./engine/EngineWorld";
 import { planSteps } from "./lib/fixedStep";
 import type { WorldDef } from "./lib/validateWorld";
+import type { ProgramRunner } from "./program/ProgramRunner";
 
 // 3D view of the arena, stepping the WASM engine at a fixed timestep.
 // World frame: x/y on the ground, theta CCW. Scene frame: y up, so
@@ -18,13 +19,22 @@ const STOP_DISTANCE = 0.2;
 export interface Viewport3DProps {
   engine: EngineWorld;
   world: WorldDef;
+  /** steps the engine and completes program movements */
+  runner: ProgramRunner;
   /** true while the built-in cruise behavior owns the wheels */
   autopilotRef: React.RefObject<boolean>;
   onState: (state: State) => void;
   onAutoStop: () => void;
 }
 
-export function Viewport3D({ engine, world, autopilotRef, onState, onAutoStop }: Viewport3DProps) {
+export function Viewport3D({
+  engine,
+  world,
+  runner,
+  autopilotRef,
+  onState,
+  onAutoStop,
+}: Viewport3DProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -126,10 +136,11 @@ export function Viewport3D({ engine, world, autopilotRef, onState, onAutoStop }:
       const elapsed = Math.min((now - lastTime) / 1000, 1);
       lastTime = now;
 
-      // The world always steps; wheels are zero unless something commands them.
+      // The world always steps; wheels are zero unless something commands
+      // them. The runner steps the engine so program movements complete.
       const plan = planSteps(accumulator, elapsed, DT, MAX_STEPS_PER_FRAME);
       accumulator = plan.accumulator;
-      for (let i = 0; i < plan.steps; i++) engine.step(DT);
+      runner.tick(plan.steps);
 
       // Phase 1 built-in behavior: cruise forward, halt at the wall.
       // Replaced by real student programs in Phase 2.
@@ -167,7 +178,7 @@ export function Viewport3D({ engine, world, autopilotRef, onState, onAutoStop }:
       renderer.dispose();
       container.removeChild(renderer.domElement);
     };
-  }, [engine, world, autopilotRef, onState, onAutoStop]);
+  }, [engine, world, runner, autopilotRef, onState, onAutoStop]);
 
   return <div ref={containerRef} className="viewport-3d" />;
 }

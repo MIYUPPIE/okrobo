@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import arenaJson from "@packs/core/worlds/arena.json";
+import { BlocksPanel } from "./BlocksPanel";
 import type { State } from "./contracts/robotApi";
 import { EngineWorld } from "./engine/EngineWorld";
 import { loadEngine } from "./engine/loader";
 import { validateWorld } from "./lib/validateWorld";
+import { runProgram } from "./program/execute";
+import { ProgramRunner, ProgramStoppedError } from "./program/ProgramRunner";
+import { PythonPanel } from "./PythonPanel";
 import { Viewport } from "./Viewport";
 import { CRUISE_SPEED, Viewport3D } from "./Viewport3D";
 import "./App.css";
@@ -19,29 +23,23 @@ const ROBOTS = [
 const CODE_TABS = ["Blocks", "Python", "C++"] as const;
 type CodeTab = (typeof CODE_TABS)[number];
 
-const PYTHON_SNIPPET = `from okrobo import Robot
-
-robot = Robot()
-
-while True:
-    robot.forward(0.05)
-    if robot.distance() < 0.2:
-        robot.turn_left()
-`;
-
 const TELEOP_SPEED = CRUISE_SPEED;
 const TELEOP_TURN = 0.06;
 
 type EngineStatus = "loading" | "ready" | "missing";
-type RunStatus = "idle" | "running" | "wall";
+type RunStatus = "idle" | "cruise" | "wall" | "program" | "error";
 
 export default function App() {
   const [tab, setTab] = useState<CodeTab>("Blocks");
   const [engineStatus, setEngineStatus] = useState<EngineStatus>("loading");
   const [engine, setEngine] = useState<EngineWorld | null>(null);
+  const [runner, setRunner] = useState<ProgramRunner | null>(null);
   const [runStatus, setRunStatus] = useState<RunStatus>("idle");
+  const [pythonCode, setPythonCode] = useState("");
   const [hud, setHud] = useState<State | null>(null);
   const autopilotRef = useRef(false);
+  const programActiveRef = useRef(false);
+  const jsCodeRef = useRef("");
 
   const world = useMemo(() => validateWorld(arenaJson), []);
 
@@ -53,6 +51,7 @@ export default function App() {
         if (cancelled) return;
         created = new EngineWorld(module, world);
         setEngine(created);
+        setRunner(new ProgramRunner(created, world.wheel_base));
         setEngineStatus("ready");
       })
       .catch(() => {
@@ -62,14 +61,15 @@ export default function App() {
       cancelled = true;
       created?.destroy();
       setEngine(null);
+      setRunner(null);
     };
   }, [world]);
 
   // Keyboard teleop: arrows / WASD drive the wheels directly.
   useEffect(() => {
-    if (!engine) return;
+    if (!engine || !runner) return;
     const held = new Set<string>();
-    const keyFor = (e: KeyboardEvent) => e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    const keyFor = (e: KeyboardEvent) => (e.key.length === 1 ? e.key.toLowerCase() : e.key);
 
     const applyWheels = () => {
       let left = 0;
@@ -83,10 +83,13 @@ export default function App() {
 
     const relevant = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "w", "a", "s", "d"]);
     const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.isContentEditable || /^(input|textarea)$/i.test(target.tagName))) return;
       const key = keyFor(e);
       if (!relevant.has(key)) return;
       e.preventDefault();
       held.add(key);
+      if (programActiveRef.current) runner.abort();
       autopilotRef.current = false;
       setRunStatus("idle");
       applyWheels();
@@ -104,30 +107,62 @@ export default function App() {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [engine]);
+  }, [engine, runner]);
 
   const onState = useCallback((state: State) => setHud(state), []);
   const onAutoStop = useCallback(() => {
     autopilotRef.current = false;
     setRunStatus("wall");
   }, []);
+  const onCode = useCallback((js: string, python: string) => {
+    jsCodeRef.current = js;
+    setPythonCode(python);
+  }, []);
 
   const run = () => {
-    if (!engine) return;
-    engine.apply({ type: "drive", left: CRUISE_SPEED, right: CRUISE_SPEED });
-    autopilotRef.current = true;
-    setRunStatus("running");
-  };
-  const stop = () => {
-    if (!engine) return;
-    engine.apply({ type: "stop" });
+    if (!engine || !runner) return;
+    const code = jsCodeRef.current.trim();
+    if (code.length === 0) {
+      // No blocks on the workspace: fall back to the Phase 1 cruise.
+      engine.apply({ type: "drive", left: CRUISE_SPEED, right: CRUISE_SPEED });
+      autopilotRef.current = true;
+      setRunStatus("cruise");
+      return;
+    }
+    if (programActiveRef.current) runner.abort();
     autopilotRef.current = false;
+    runner.arm();
+    programActiveRef.current = true;
+    setRunStatus("program");
+    runProgram(code, runner.api)
+      .then(() => setRunStatus("idle"))
+      .catch((error) => {
+        if (error instanceof ProgramStoppedError) {
+          setRunStatus("idle");
+        } else {
+          console.error("program failed:", error);
+          setRunStatus("error");
+        }
+      })
+      .finally(() => {
+        programActiveRef.current = false;
+        engine.apply({ type: "stop" });
+      });
+  };
+
+  const stop = () => {
+    if (!engine || !runner) return;
+    runner.abort();
+    autopilotRef.current = false;
+    engine.apply({ type: "stop" });
     setRunStatus("idle");
   };
+
   const reset = () => {
-    if (!engine) return;
-    engine.apply({ type: "reset" });
+    if (!engine || !runner) return;
+    runner.abort();
     autopilotRef.current = false;
+    engine.apply({ type: "reset" });
     setRunStatus("idle");
   };
 
@@ -141,7 +176,10 @@ export default function App() {
         `x ${hud.pose.x.toFixed(2)} y ${hud.pose.y.toFixed(2)}`,
         `d ${hud.sensors.distance.toFixed(2)} m`,
       );
+      if (runStatus === "program") parts.push("▶ program running");
+      if (runStatus === "cruise") parts.push("cruising");
       if (runStatus === "wall") parts.push("stopped at wall");
+      if (runStatus === "error") parts.push("program error (see console)");
       if (hud.collided) parts.push("⚠ wall contact");
     }
     return parts.join("  ·  ");
@@ -173,15 +211,16 @@ export default function App() {
         </ul>
         <div className="teleop-hint">
           <h2>Drive</h2>
-          <p>Arrow keys or WASD steer the robot any time.</p>
+          <p>Arrow keys or WASD steer the robot any time. Run executes your blocks.</p>
         </div>
       </aside>
 
       <main className="viewport">
-        {engine ? (
+        {engine && runner ? (
           <Viewport3D
             engine={engine}
             world={world}
+            runner={runner}
             autopilotRef={autopilotRef}
             onState={onState}
             onAutoStop={onAutoStop}
@@ -211,31 +250,16 @@ export default function App() {
           ))}
         </div>
         <div className="code-content">
-          {tab === "Blocks" && (
-            <div className="blocks-placeholder">
-              <span className="block block-start">WHEN START</span>
-              <span className="block-arrow">→</span>
-              <span className="block block-move">MOVE FORWARD</span>
-              <span className="block-arrow">→</span>
-              <span className="block block-if">IF DISTANCE &lt; 0.2 → TURN LEFT</span>
-              <p className="placeholder-note">Blockly lands here in Phase 2</p>
-            </div>
-          )}
-          {tab === "Python" && (
-            <div className="editor-placeholder">
-              <pre>{PYTHON_SNIPPET}</pre>
-              <p className="placeholder-note">
-                Monaco lands here in Phase 2; this exact code already runs today via{" "}
-                <code>python3 -m okrobo.demo</code>
-              </p>
-            </div>
-          )}
-          {tab === "C++" && (
-            <div className="editor-placeholder">
-              <pre>{`// Advanced track: extend the engine itself.\n// See engine/src/world.hpp`}</pre>
-              <p className="placeholder-note">C++ track opens after Phase 5</p>
-            </div>
-          )}
+          <div className={tab === "Blocks" ? "tab-panel active" : "tab-panel"}>
+            <BlocksPanel onCode={onCode} />
+          </div>
+          <div className={tab === "Python" ? "tab-panel active" : "tab-panel"}>
+            <PythonPanel code={pythonCode} />
+          </div>
+          <div className={tab === "C++" ? "tab-panel active padded" : "tab-panel padded"}>
+            <pre className="cpp-placeholder">{`// Advanced track: extend the engine itself.\n// See engine/src/world.hpp`}</pre>
+            <p className="placeholder-note">C++ track opens after Phase 5</p>
+          </div>
         </div>
       </section>
 

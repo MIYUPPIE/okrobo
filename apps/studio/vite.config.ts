@@ -13,6 +13,11 @@ export default defineConfig({
   server: {
     fs: { allow: [repoRoot] },
   },
+  build: {
+    // Monaco and Blockly are large; this is a bundled local desktop app,
+    // not a website, so bundle weight is not a paged-load concern.
+    chunkSizeWarningLimit: 6000,
+  },
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
