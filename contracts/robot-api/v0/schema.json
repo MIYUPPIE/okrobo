@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "okrobo:robot-api:v0",
+  "title": "OKROBO Robot API v0",
+  "description": "Messages between any controller (UI, Python, hardware bridge) and any robot backend (engine WASM, native sidecar, physical robot). Units: meters, radians, seconds. theta=0 faces +x, counter-clockwise positive.",
+  "definitions": {
+    "command": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "left", "right"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "drive" },
+            "left": { "type": "number", "description": "left wheel linear speed, m/s" },
+            "right": { "type": "number", "description": "right wheel linear speed, m/s" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": { "type": { "const": "stop" } }
+        },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": { "type": { "const": "reset" } }
+        }
+      ]
+    },
+    "state": {
+      "type": "object",
+      "required": ["tick", "pose", "sensors", "collided"],
+      "additionalProperties": false,
+      "properties": {
+        "tick": { "type": "integer", "minimum": 0, "description": "simulation steps since reset" },
+        "pose": {
+          "type": "object",
+          "required": ["x", "y", "theta"],
+          "additionalProperties": false,
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "theta": { "type": "number", "description": "radians, normalized to (-pi, pi]" }
+          }
+        },
+        "sensors": {
+          "type": "object",
+          "required": ["distance"],
+          "additionalProperties": false,
+          "properties": {
+            "distance": { "type": "number", "minimum": 0, "description": "meters from robot front edge to obstacle along heading" }
+          }
+        },
+        "collided": { "type": "boolean", "description": "true if the last step was limited by a wall" }
+      }
+    }
+  }
+}

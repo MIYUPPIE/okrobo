@@ -1,0 +1,9 @@
+{
+  "name": "Arena",
+  "description": "Default 2x2 m walled arena with the Car robot at the center.",
+  "arena_width": 2.0,
+  "arena_height": 2.0,
+  "robot_radius": 0.1,
+  "wheel_base": 0.12,
+  "start": { "x": 1.0, "y": 1.0, "theta": 0.0 }
+}
