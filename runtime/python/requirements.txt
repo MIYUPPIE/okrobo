@@ -1,0 +1,3 @@
+# Install repo-locally, no venv or sudo needed:
+#   python3 -m pip install --target=.deps -r requirements.txt
+websockets>=13

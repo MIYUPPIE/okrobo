@@ -9,6 +9,9 @@ cmake --build "$ROOT/engine/build" --parallel >/dev/null
 ctest --test-dir "$ROOT/engine/build" --output-on-failure
 
 echo "== runtime/python =="
+if [ ! -d "$ROOT/runtime/python/.deps" ]; then
+  (cd "$ROOT/runtime/python" && python3 -m pip install --quiet --target=.deps -r requirements.txt)
+fi
 (cd "$ROOT/runtime/python" && python3 -m pytest -q)
 
 echo "== engine (WASM + parity vs reference model) =="

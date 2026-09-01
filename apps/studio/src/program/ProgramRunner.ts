@@ -32,6 +32,8 @@ export interface RobotApi {
   wait(seconds: number): Promise<void>;
   distance(): number;
   heading(): number;
+  position(): [number, number];
+  stop(): void;
   _checkpoint(): Promise<void>;
 }
 
@@ -53,6 +55,11 @@ export class ProgramRunner {
       wait: (seconds: number) => this.move(0, 0, Math.max(0, seconds)),
       distance: () => this.engine.state().sensors.distance,
       heading: () => (this.engine.state().pose.theta * 180) / Math.PI,
+      position: () => {
+        const { x, y } = this.engine.state().pose;
+        return [x, y];
+      },
+      stop: () => this.engine.apply({ type: "stop" }),
       _checkpoint: async () => {
         if (this.aborted) throw new ProgramStoppedError();
         // Yield a macrotask so `while (true)` loops never freeze the UI.

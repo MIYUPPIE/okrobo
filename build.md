@@ -136,24 +136,28 @@ Tests: 12 new vitest cases run generated programs against the real WASM engine, 
 
 **Acceptance: verified in headless Chrome** — clicked Run on the preloaded blocks: status showed "program running", the robot crossed the arena, turned at the wall and reached y 1.70 on the far side, Stop cleared it; the Python preview contains `from okrobo import Robot` and `robot.turn_left(90)`.
 
-### Phase 3: Real local Python
+### Phase 3: Real local Python ✅
 
 Goal: `robot.forward()` in real CPython controls the sim.
 
-- [ ] Bundle python-build-standalone CPython under the app
-- [ ] Python sidecar process speaks contract v0 over WebSocket/stdio to the app
-- [ ] `okrobo.Robot` gains a `connect()` transport so the same student code runs against the sidecar-to-engine bridge instead of `_sim.py`
-- [ ] Monaco "Python" tab executes the student file through the sidecar, stdout/stderr in an output panel
-- [ ] Sandboxing pass: student code runs in a subprocess with its own cwd, killable from the Stop button
+- [x] Sidecar (`runtime/python/okrobo/sidecar.py`): WebSocket server on 127.0.0.1:8355 speaking `contracts/robot-remote/v0`; started with `./scripts/run-python-sidecar.sh`, the studio connects and reconnects automatically (`src/python/PythonBridge.ts`, status chip py ✓/✗)
+- [x] Student code runs in a killable subprocess (`okrobo/worker.py`) with a neutral cwd; robot calls travel worker → socketpair → sidecar → WebSocket → ProgramRunner → engine
+- [x] Instead of a `connect()` method, the worker injects a proxy `okrobo` module before exec, so a byte-identical `from okrobo import Robot` file runs against the local reference sim or the studio engine. Less API surface, same outcome
+- [x] Monaco is editable, seeded from the blocks until the user edits (resync button); Run on the Python tab executes the file through the sidecar; stdout/stderr stream into an output pane
+- [x] Stop terminates the subprocess (SIGTERM, then SIGKILL after 2 s) and rejects any in-flight movement; teleop preempts too
+- [ ] Bundle python-build-standalone CPython → moved to Phase 4 packaging, where the app bundle exists to put it in. Until then the sidecar uses system python3; its only dependency installs repo-locally (`pip install --target=.deps`, no venv, no sudo)
 
-**Acceptance:** type the vision doc's Python snippet in Monaco, press Run, the 3D robot obeys.
+Tests: 8 new pytest cases (worker RPC protocol, clean tracebacks, full sidecar loop against the reference sim, stop-kill) and 8 new vitest cases, including an end-to-end run where a REAL sidecar subprocess executes REAL student Python against the REAL WASM engine, all local.
+
+**Acceptance: verified in headless Chrome with the sidecar running** — Run on the Python tab executed the Monaco file (the vision snippet) as real CPython: status showed "python running", the robot crossed the arena and turned (y reached 1.70), Stop killed the subprocess and the output pane logged the exit.
 
 ### Phase 4: Desktop app
 
 Goal: it stops being a dev server and becomes OKHUB Robotics Studio.
 
 - [ ] Prerequisite: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh` (Rust for Tauri, user-space, no sudo)
-- [ ] Tauri wraps `apps/studio`; engine WASM and Python runtime bundled as resources
+- [ ] Tauri wraps `apps/studio`; engine WASM bundled as a resource
+- [ ] Bundle python-build-standalone CPython (+ `.deps` wheels) and have the shell spawn/stop the sidecar automatically (carried over from Phase 3)
 - [ ] Project save/load: SQLite index + project directories (blocks, python files, world ref)
 - [ ] File menu: New/Open/Save project; recent projects
 - [ ] Installer builds for Linux (deb/AppImage) in CI
@@ -205,8 +209,9 @@ Goal: it stops being a dev server and becomes OKHUB Robotics Studio.
 
 ```bash
 ./scripts/test-all.sh                 # everything green before you start
-cd apps/studio && npm run dev         # the studio: Run/Stop/Reset + arrow-key driving
-python3 -m okrobo.demo                # student API on the reference sim
+./scripts/run-python-sidecar.sh       # optional: real Python execution (py ✓ in the studio)
+cd apps/studio && npm run dev         # the studio: blocks, python, 3D sim, teleop
+python3 -m okrobo.demo                # student API on the reference sim (from runtime/python)
 ```
 
-Then open Phase 3, take the first unchecked box, build it with its test, check it off here, commit.
+Then open Phase 4, take the first unchecked box, build it with its test, check it off here, commit.

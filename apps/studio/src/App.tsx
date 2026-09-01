@@ -7,7 +7,8 @@ import { loadEngine } from "./engine/loader";
 import { validateWorld } from "./lib/validateWorld";
 import { runProgram } from "./program/execute";
 import { ProgramRunner, ProgramStoppedError } from "./program/ProgramRunner";
-import { PythonPanel } from "./PythonPanel";
+import { PythonBridge, SIDECAR_URL } from "./python/PythonBridge";
+import { type OutputLine, PythonPanel } from "./PythonPanel";
 import { Viewport } from "./Viewport";
 import { CRUISE_SPEED, Viewport3D } from "./Viewport3D";
 import "./App.css";
@@ -27,7 +28,7 @@ const TELEOP_SPEED = CRUISE_SPEED;
 const TELEOP_TURN = 0.06;
 
 type EngineStatus = "loading" | "ready" | "missing";
-type RunStatus = "idle" | "cruise" | "wall" | "program" | "error";
+type RunStatus = "idle" | "cruise" | "wall" | "program" | "python" | "error";
 
 export default function App() {
   const [tab, setTab] = useState<CodeTab>("Blocks");
@@ -36,10 +37,15 @@ export default function App() {
   const [runner, setRunner] = useState<ProgramRunner | null>(null);
   const [runStatus, setRunStatus] = useState<RunStatus>("idle");
   const [pythonCode, setPythonCode] = useState("");
+  const [pythonConnected, setPythonConnected] = useState(false);
+  const [pythonOutput, setPythonOutput] = useState<OutputLine[]>([]);
   const [hud, setHud] = useState<State | null>(null);
   const autopilotRef = useRef(false);
   const programActiveRef = useRef(false);
+  const pythonActiveRef = useRef(false);
   const jsCodeRef = useRef("");
+  const pythonSourceRef = useRef("");
+  const bridgeRef = useRef<PythonBridge | null>(null);
 
   const world = useMemo(() => validateWorld(arenaJson), []);
 
@@ -64,6 +70,32 @@ export default function App() {
       setRunner(null);
     };
   }, [world]);
+
+  // Python sidecar bridge: robot calls from real local Python execute here.
+  useEffect(() => {
+    if (!engine || !runner) return;
+    const appendOutput = (line: OutputLine) =>
+      setPythonOutput((previous) => [...previous.slice(-499), line]);
+    const bridge = new PythonBridge(SIDECAR_URL, runner.api, {
+      onStatus: setPythonConnected,
+      onStarted: () => {},
+      onOutput: (stream, text) => appendOutput({ stream, text }),
+      onDone: (exitCode) => {
+        pythonActiveRef.current = false;
+        engine.apply({ type: "stop" });
+        setRunStatus("idle");
+        if (exitCode !== 0) {
+          appendOutput({ stream: "stderr", text: `--- exited with code ${exitCode} ---\n` });
+        }
+      },
+    });
+    bridgeRef.current = bridge;
+    bridge.connect();
+    return () => {
+      bridgeRef.current = null;
+      bridge.dispose();
+    };
+  }, [engine, runner]);
 
   // Keyboard teleop: arrows / WASD drive the wheels directly.
   useEffect(() => {
@@ -90,6 +122,10 @@ export default function App() {
       e.preventDefault();
       held.add(key);
       if (programActiveRef.current) runner.abort();
+      if (pythonActiveRef.current) {
+        bridgeRef.current?.stop();
+        runner.abort();
+      }
       autopilotRef.current = false;
       setRunStatus("idle");
       applyWheels();
@@ -118,9 +154,33 @@ export default function App() {
     jsCodeRef.current = js;
     setPythonCode(python);
   }, []);
+  const onPythonSource = useCallback((code: string) => {
+    pythonSourceRef.current = code;
+  }, []);
 
   const run = () => {
     if (!engine || !runner) return;
+    if (tab === "Python") {
+      // Run the Python file through the local sidecar (Phase 3).
+      const bridge = bridgeRef.current;
+      if (!bridge?.connected) {
+        setPythonOutput([
+          {
+            stream: "stderr",
+            text: "python sidecar is not running · start it with ./scripts/run-python-sidecar.sh\n",
+          },
+        ]);
+        return;
+      }
+      if (programActiveRef.current) runner.abort();
+      autopilotRef.current = false;
+      runner.arm();
+      pythonActiveRef.current = true;
+      setPythonOutput([]);
+      setRunStatus("python");
+      bridge.run(pythonSourceRef.current);
+      return;
+    }
     const code = jsCodeRef.current.trim();
     if (code.length === 0) {
       // No blocks on the workspace: fall back to the Phase 1 cruise.
@@ -152,6 +212,7 @@ export default function App() {
 
   const stop = () => {
     if (!engine || !runner) return;
+    if (pythonActiveRef.current) bridgeRef.current?.stop();
     runner.abort();
     autopilotRef.current = false;
     engine.apply({ type: "stop" });
@@ -160,6 +221,7 @@ export default function App() {
 
   const reset = () => {
     if (!engine || !runner) return;
+    if (pythonActiveRef.current) bridgeRef.current?.stop();
     runner.abort();
     autopilotRef.current = false;
     engine.apply({ type: "reset" });
@@ -176,11 +238,13 @@ export default function App() {
         `x ${hud.pose.x.toFixed(2)} y ${hud.pose.y.toFixed(2)}`,
         `d ${hud.sensors.distance.toFixed(2)} m`,
       );
-      if (runStatus === "program") parts.push("▶ program running");
+      if (runStatus === "program") parts.push("▶ blocks running");
+      if (runStatus === "python") parts.push("▶ python running");
       if (runStatus === "cruise") parts.push("cruising");
       if (runStatus === "wall") parts.push("stopped at wall");
       if (runStatus === "error") parts.push("program error (see console)");
       if (hud.collided) parts.push("⚠ wall contact");
+      parts.push(pythonConnected ? "py ✓" : "py ✗");
     }
     return parts.join("  ·  ");
   })();
@@ -254,7 +318,12 @@ export default function App() {
             <BlocksPanel onCode={onCode} />
           </div>
           <div className={tab === "Python" ? "tab-panel active" : "tab-panel"}>
-            <PythonPanel code={pythonCode} />
+            <PythonPanel
+              generatedCode={pythonCode}
+              output={pythonOutput}
+              connected={pythonConnected}
+              onSource={onPythonSource}
+            />
           </div>
           <div className={tab === "C++" ? "tab-panel active padded" : "tab-panel padded"}>
             <pre className="cpp-placeholder">{`// Advanced track: extend the engine itself.\n// See engine/src/world.hpp`}</pre>

@@ -7,8 +7,8 @@
     "predev": "node scripts/sync-blockly-media.mjs",
     "dev": "vite",
     "prebuild": "node scripts/sync-blockly-media.mjs",
-    "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "preview": "vite preview"
   },
@@ -20,6 +20,7 @@
     "three": "^0.185.1"
   },
   "devDependencies": {
+    "@types/node": "^26.4.1",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@types/three": "^0.185.4",
