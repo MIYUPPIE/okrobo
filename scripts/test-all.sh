@@ -11,9 +11,14 @@ ctest --test-dir "$ROOT/engine/build" --output-on-failure
 echo "== runtime/python =="
 (cd "$ROOT/runtime/python" && python3 -m pytest -q)
 
-echo "== apps/studio (typecheck + build) =="
+echo "== engine (WASM + parity vs reference model) =="
+"$ROOT/scripts/build-engine-wasm.sh"
+node "$ROOT/engine/tests/parity/parity.mjs"
+
+echo "== apps/studio (typecheck + unit tests + build) =="
 cd "$ROOT/apps/studio"
 [ -d node_modules ] || npm install --no-audit --no-fund
+npm run test
 npm run build
 
 echo

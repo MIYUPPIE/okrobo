@@ -65,6 +65,21 @@ def test_reset():
     assert not s.collided
 
 
+def test_world_config_from_dict():
+    import json
+    from pathlib import Path
+
+    from okrobo import WorldConfig
+
+    arena_path = Path(__file__).resolve().parents[3] / "packs" / "core" / "worlds" / "arena.json"
+    config = WorldConfig.from_dict(json.loads(arena_path.read_text()))
+    assert config.arena_width == 2.0
+    assert config.wheel_base == 0.12
+    assert config.start.x == 1.0
+    state = World(config).state()
+    assert math.isclose(state.distance, 0.9, abs_tol=TOL)
+
+
 def test_arc_returns_to_start():
     world = World()
     world.drive(0.05, 0.15)  # v = 0.1, w = 0.1/0.12

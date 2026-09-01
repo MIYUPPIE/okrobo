@@ -5,6 +5,12 @@ dist/
 # C++
 engine/build/
 
+# Generated WASM engine (scripts/build-engine-wasm.sh)
+apps/studio/public/engine/
+
+# Local toolchains (Emscripten SDK)
+tools/
+
 # Python
 __pycache__/
 *.pyc

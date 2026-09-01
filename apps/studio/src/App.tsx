@@ -1,5 +1,11 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import arenaJson from "@packs/core/worlds/arena.json";
+import type { State } from "./contracts/robotApi";
+import { EngineWorld } from "./engine/EngineWorld";
+import { loadEngine } from "./engine/loader";
+import { validateWorld } from "./lib/validateWorld";
 import { Viewport } from "./Viewport";
+import { CRUISE_SPEED, Viewport3D } from "./Viewport3D";
 import "./App.css";
 
 const MENUS = ["File", "Edit", "Robot", "Simulation", "Help"];
@@ -23,8 +29,123 @@ while True:
         robot.turn_left()
 `;
 
+const TELEOP_SPEED = CRUISE_SPEED;
+const TELEOP_TURN = 0.06;
+
+type EngineStatus = "loading" | "ready" | "missing";
+type RunStatus = "idle" | "running" | "wall";
+
 export default function App() {
   const [tab, setTab] = useState<CodeTab>("Blocks");
+  const [engineStatus, setEngineStatus] = useState<EngineStatus>("loading");
+  const [engine, setEngine] = useState<EngineWorld | null>(null);
+  const [runStatus, setRunStatus] = useState<RunStatus>("idle");
+  const [hud, setHud] = useState<State | null>(null);
+  const autopilotRef = useRef(false);
+
+  const world = useMemo(() => validateWorld(arenaJson), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let created: EngineWorld | null = null;
+    loadEngine()
+      .then((module) => {
+        if (cancelled) return;
+        created = new EngineWorld(module, world);
+        setEngine(created);
+        setEngineStatus("ready");
+      })
+      .catch(() => {
+        if (!cancelled) setEngineStatus("missing");
+      });
+    return () => {
+      cancelled = true;
+      created?.destroy();
+      setEngine(null);
+    };
+  }, [world]);
+
+  // Keyboard teleop: arrows / WASD drive the wheels directly.
+  useEffect(() => {
+    if (!engine) return;
+    const held = new Set<string>();
+    const keyFor = (e: KeyboardEvent) => e.key.length === 1 ? e.key.toLowerCase() : e.key;
+
+    const applyWheels = () => {
+      let left = 0;
+      let right = 0;
+      if (held.has("ArrowUp") || held.has("w")) [left, right] = [left + TELEOP_SPEED, right + TELEOP_SPEED];
+      if (held.has("ArrowDown") || held.has("s")) [left, right] = [left - TELEOP_SPEED, right - TELEOP_SPEED];
+      if (held.has("ArrowLeft") || held.has("a")) [left, right] = [left - TELEOP_TURN, right + TELEOP_TURN];
+      if (held.has("ArrowRight") || held.has("d")) [left, right] = [left + TELEOP_TURN, right - TELEOP_TURN];
+      engine.apply(left === 0 && right === 0 ? { type: "stop" } : { type: "drive", left, right });
+    };
+
+    const relevant = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "w", "a", "s", "d"]);
+    const onKeyDown = (e: KeyboardEvent) => {
+      const key = keyFor(e);
+      if (!relevant.has(key)) return;
+      e.preventDefault();
+      held.add(key);
+      autopilotRef.current = false;
+      setRunStatus("idle");
+      applyWheels();
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      const key = keyFor(e);
+      if (!relevant.has(key)) return;
+      held.delete(key);
+      applyWheels();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [engine]);
+
+  const onState = useCallback((state: State) => setHud(state), []);
+  const onAutoStop = useCallback(() => {
+    autopilotRef.current = false;
+    setRunStatus("wall");
+  }, []);
+
+  const run = () => {
+    if (!engine) return;
+    engine.apply({ type: "drive", left: CRUISE_SPEED, right: CRUISE_SPEED });
+    autopilotRef.current = true;
+    setRunStatus("running");
+  };
+  const stop = () => {
+    if (!engine) return;
+    engine.apply({ type: "stop" });
+    autopilotRef.current = false;
+    setRunStatus("idle");
+  };
+  const reset = () => {
+    if (!engine) return;
+    engine.apply({ type: "reset" });
+    autopilotRef.current = false;
+    setRunStatus("idle");
+  };
+
+  const statusText = (() => {
+    const parts = [`offline · ${world.name}`];
+    if (engineStatus === "loading") parts.push("engine: loading…");
+    if (engineStatus === "missing") parts.push("engine: not built · run scripts/build-engine-wasm.sh");
+    if (engineStatus === "ready" && hud) {
+      parts.push(
+        `tick ${hud.tick}`,
+        `x ${hud.pose.x.toFixed(2)} y ${hud.pose.y.toFixed(2)}`,
+        `d ${hud.sensors.distance.toFixed(2)} m`,
+      );
+      if (runStatus === "wall") parts.push("stopped at wall");
+      if (hud.collided) parts.push("⚠ wall contact");
+    }
+    return parts.join("  ·  ");
+  })();
 
   return (
     <div className="studio">
@@ -50,11 +171,31 @@ export default function App() {
             </li>
           ))}
         </ul>
+        <div className="teleop-hint">
+          <h2>Drive</h2>
+          <p>Arrow keys or WASD steer the robot any time.</p>
+        </div>
       </aside>
 
       <main className="viewport">
-        <Viewport />
-        <div className="viewport-note">Live simulation arrives in Phase 1 (engine → WASM)</div>
+        {engine ? (
+          <Viewport3D
+            engine={engine}
+            world={world}
+            autopilotRef={autopilotRef}
+            onState={onState}
+            onAutoStop={onAutoStop}
+          />
+        ) : (
+          <>
+            <Viewport />
+            <div className="viewport-note">
+              {engineStatus === "loading"
+                ? "Loading engine…"
+                : "Engine not built: run ./scripts/build-engine-wasm.sh, then reload"}
+            </div>
+          </>
+        )}
       </main>
 
       <section className="code-panel">
@@ -99,16 +240,16 @@ export default function App() {
       </section>
 
       <footer className="run-bar">
-        <button className="run" disabled title="Enabled in Phase 1">
+        <button className="run" onClick={run} disabled={engineStatus !== "ready"}>
           ▶ Run
         </button>
-        <button disabled title="Enabled in Phase 1">
+        <button onClick={stop} disabled={engineStatus !== "ready"}>
           ⏹ Stop
         </button>
-        <button disabled title="Enabled in Phase 1">
+        <button onClick={reset} disabled={engineStatus !== "ready"}>
           🔄 Reset
         </button>
-        <span className="status">offline · engine: not loaded (Phase 1)</span>
+        <span className="status">{statusText}</span>
       </footer>
     </div>
   );

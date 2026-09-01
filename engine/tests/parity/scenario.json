@@ -1,0 +1,13 @@
+{
+  "dt": 0.01,
+  "phases": [
+    { "command": { "type": "drive", "left": 0.2, "right": 0.2 }, "steps": 100 },
+    { "command": { "type": "drive", "left": -0.06, "right": 0.06 }, "steps": 157 },
+    { "command": { "type": "drive", "left": 0.05, "right": 0.15 }, "steps": 500 },
+    { "command": { "type": "drive", "left": 0.5, "right": 0.5 }, "steps": 300 },
+    { "command": { "type": "stop" }, "steps": 10 },
+    { "command": { "type": "drive", "left": -0.3, "right": -0.3 }, "steps": 400 },
+    { "command": { "type": "reset" }, "steps": 5 },
+    { "command": { "type": "drive", "left": 0.1, "right": 0.3 }, "steps": 250 }
+  ]
+}

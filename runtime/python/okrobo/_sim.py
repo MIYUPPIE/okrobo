@@ -32,6 +32,18 @@ class WorldConfig:
     wheel_base: float = 0.12
     start: Pose = field(default_factory=lambda: Pose(1.0, 1.0, 0.0))
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "WorldConfig":
+        """Build from a contracts/world/v0 document (extra keys ignored)."""
+        start = data["start"]
+        return cls(
+            arena_width=float(data["arena_width"]),
+            arena_height=float(data["arena_height"]),
+            robot_radius=float(data["robot_radius"]),
+            wheel_base=float(data["wheel_base"]),
+            start=Pose(float(start["x"]), float(start["y"]), float(start["theta"])),
+        )
+
 
 @dataclass
 class State:

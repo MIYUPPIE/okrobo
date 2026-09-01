@@ -107,18 +107,20 @@ Each phase ends with a demo you can run, not a report. Don't start phase N+1 wit
 
 **Acceptance:** `./scripts/test-all.sh` passes; `python3 -m okrobo.demo` drives a robot to a wall and turns; `npm run dev` in `apps/studio` shows the studio shell.
 
-### Phase 1: Simulator in the browser
+### Phase 1: Simulator in the browser ✅
 
 Goal: the robot visibly drives in the viewport, powered by the C++ engine.
 
-- [ ] Install Emscripten, add `engine/` WASM build target exporting `create_world / step / get_state / send_command` per contract v0
-- [ ] Parity gate test: same command script through `okrobo/_sim.py` and the WASM engine produces identical states (tolerance 1e-9)
-- [ ] Three.js viewport in `apps/studio`: ground plane, arena walls, box robot, orbit camera
-- [ ] UI Run bar drives the WASM engine at a fixed timestep; Reset restores world
-- [ ] Distance sensor ray visualized
-- [ ] World definition loaded from `packs/core/worlds/arena.json` (add schema to contracts)
+- [x] Emscripten SDK in `tools/emsdk` (gitignored); `scripts/build-engine-wasm.sh` compiles `engine/` to a single-file ES module at `apps/studio/public/engine/okrobo_engine.js` (generated, gitignored). API surface: scalar exports in `engine/src/wasm_api.cpp`, contract messages assembled on the TS side
+- [x] Parity gate: `engine/tests/parity/parity.mjs` runs the shared scenario through `okrobo/_sim.py` (via `okrobo.dump_trace`) and the WASM engine; 1730 states match at 8.9e-16 max diff (tolerance 1e-9)
+- [x] Three.js viewport (`src/Viewport3D.tsx`): floor, grid, walls, cylinder robot with heading nose, orbit camera
+- [x] Run bar live: Run cruises forward and auto-stops at 0.2 m from the wall, Stop halts, Reset restores. Fixed 10 ms timestep via `src/lib/fixedStep.ts` (vitest-covered)
+- [x] Sensor ray drawn live from the robot's front edge, shortens toward walls
+- [x] World loaded from `packs/core/worlds/arena.json`, schema at `contracts/world/v0`, runtime-validated in `src/lib/validateWorld.ts` (vitest-covered) and `WorldConfig.from_dict` in Python
 
-**Acceptance:** press Run, the robot drives forward and stops near the wall; the sensor ray shortens as it approaches. Works with wifi off.
+Deviations from plan: the world always steps (wheels are just zero when idle), which made keyboard teleop (arrows/WASD) nearly free, so it's in. Engine exports are scalar getters instead of a `get_state` blob: no marshalling, and the contract shape lives in one TS spot (`EngineWorld.ts`).
+
+**Acceptance: verified in headless Chrome** — clicked Run against the built app; robot drove x 1.00 → 1.70 and reported "stopped at wall", sensor at 0.20 m. Works with wifi off (engine and world are bundled/local).
 
 ### Phase 2: Code drives the robot
 
@@ -186,7 +188,7 @@ Goal: it stops being a dev server and becomes OKHUB Robotics Studio.
 
 ## Rules for every session
 
-1. **Gate tests with every change.** Engine: ctest. Python: pytest. Studio: `tsc --noEmit` + `vite build`. All free, all fast, all in `scripts/test-all.sh`. A phase task without its test in the same commit is not done.
+1. **Gate tests with every change.** Engine: ctest + WASM parity vs the Python reference. Python: pytest. Studio: `tsc --noEmit` + vitest + `vite build`. All free, all fast, all in `scripts/test-all.sh`. A phase task without its test in the same commit is not done.
 2. **Offline check.** Before checking off any task: does it work with the network off? Asset store and updates are the only exceptions.
 3. **One directory per session** where possible. Contract changes are the exception and get called out in the commit message.
 4. **Sim math lives in `engine/` only.** `okrobo/_sim.py` is the frozen reference spec, changed only together with the engine and the parity test.
@@ -194,15 +196,15 @@ Goal: it stops being a dev server and becomes OKHUB Robotics Studio.
 
 ## Current state and prerequisites
 
-- Machine has: Node 25, npm 11, Python 3.12 (+pytest), CMake 3.28, g++ 11, git, gh. Missing: Rust (needed Phase 4), Emscripten (needed Phase 1).
-- Phase 1 first command: install Emscripten (`git clone https://github.com/emscripten-core/emsdk && ./emsdk install latest && ./emsdk activate latest`), then start on the WASM build target.
+- Machine has: Node 25, npm 11, Python 3.12 (+pytest), CMake 3.28, g++ 11, git, and the Emscripten SDK in `tools/emsdk` (gitignored; a fresh clone re-installs it, `scripts/build-engine-wasm.sh` prints the commands). Missing: Rust (needed Phase 4).
+- No git remote configured (the gh token can't create repos); work is committed locally.
 
 ## How to continue
 
 ```bash
 ./scripts/test-all.sh                 # everything green before you start
-cd apps/studio && npm run dev         # see the shell
-python3 -m okrobo.demo                # see the reference sim drive
+cd apps/studio && npm run dev         # the studio: Run/Stop/Reset + arrow-key driving
+python3 -m okrobo.demo                # student API on the reference sim
 ```
 
-Then open Phase 1, take the first unchecked box, build it with its test, check it off here, commit.
+Then open Phase 2, take the first unchecked box, build it with its test, check it off here, commit.
