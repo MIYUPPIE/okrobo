@@ -17,7 +17,25 @@ echo "== runtime/python =="
 if [ ! -d "$ROOT/runtime/python/.deps" ]; then
   (cd "$ROOT/runtime/python" && python3 -m pip install --quiet --target=.deps -r requirements.txt)
 fi
-(cd "$ROOT/runtime/python" && python3 -m pytest -q)
+# Guard against tests silently disappearing. tests/ is a package, so one
+# module-level importorskip (a missing dependency) can abort collection of
+# every file and the suite still "passes" with nothing run. Compare the number
+# of files pytest collected against the number on disk.
+(
+  cd "$ROOT/runtime/python"
+  on_disk=$(find tests -name 'test_*.py' | wc -l)
+  # `|| true`: with pipefail, grep matching nothing (the very case this guard
+  # exists to catch) would abort the subshell before the message below.
+  collected=$(python3 -m pytest --collect-only -q 2>/dev/null | grep -oE '^tests/[^:]+' | sort -u | wc -l || true)
+  if [ "$collected" -lt "$on_disk" ]; then
+    echo "FAIL: pytest collected $collected of $on_disk test files." >&2
+    echo "      A missing dependency usually causes this; check requirements.txt" >&2
+    echo "      and reinstall: python3 -m pip install --target=.deps -r requirements.txt" >&2
+    exit 1
+  fi
+  echo "collected all $on_disk test files"
+  python3 -m pytest -q
+)
 
 echo "== engine (WASM + parity vs reference model) =="
 "$ROOT/scripts/build-engine-wasm.sh"

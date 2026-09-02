@@ -11,10 +11,15 @@ Students build programs in blocks or real Python, run them against a C++ simulat
 ## Quick start
 
 ```bash
+./scripts/setup.sh             # once per clone: emsdk, node modules, python deps
 ./scripts/test-all.sh          # all gate suites
 ./scripts/check-dev-server.sh  # the dev server really loads the engine + 3D
 cd apps/studio && npm run dev  # the studio
 ```
+
+`setup.sh` never uses sudo. It installs what lives inside the repo and prints
+anything left for you (Rust and the GTK/WebKit libraries, both needed only for
+the desktop app).
 
 Real Python execution needs the sidecar running (`./scripts/run-python-sidecar.sh`);
 the studio shows `py ✓` in the status bar once it connects.

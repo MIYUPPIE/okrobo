@@ -1,3 +1,9 @@
 # Install repo-locally, no venv or sudo needed:
 #   python3 -m pip install --target=.deps -r requirements.txt
+#
+# Everything here must be listed: tests/ is a package, so a module-level
+# importorskip for a missing dependency aborts collection of the whole
+# package and the suite silently runs nothing (scripts/test-all.sh guards
+# against that now, but the fix is to keep this file complete).
 websockets>=13
+pyserial>=3.5

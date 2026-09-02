@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# One-time setup for a fresh clone.
+#
+#   ./scripts/setup.sh
+#
+# Installs everything the gate suite needs that is too large to commit: the
+# Emscripten SDK, node modules, and the repo-local Python dependencies. It is
+# safe to re-run: anything already present is left alone.
+#
+# It never uses sudo. System packages and Rust are reported for you to install,
+# because those change your machine outside this repo.
+set -uo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+missing_system=()
+note() { printf '  %s\n' "$1"; }
+
+echo "== checking tools =="
+for tool in node npm python3 cmake g++ git; do
+  if command -v "$tool" >/dev/null 2>&1; then
+    note "ok      $tool"
+  else
+    note "MISSING $tool"
+    missing_system+=("$tool")
+  fi
+done
+
+export PATH="$HOME/.cargo/bin:$PATH"
+if command -v cargo >/dev/null 2>&1; then
+  note "ok      cargo ($(cargo --version | cut -d' ' -f2))"
+else
+  note "MISSING cargo — needed only for the desktop app"
+fi
+
+echo
+echo "== python dependencies (runtime/python/.deps) =="
+if python3 -m pip install --quiet --target=runtime/python/.deps --upgrade \
+  -r runtime/python/requirements.txt; then
+  note "installed from requirements.txt"
+else
+  note "FAILED — see the error above"
+fi
+
+echo
+echo "== node modules (apps/studio) =="
+if [ -d apps/studio/node_modules ]; then
+  note "already present"
+else
+  (cd apps/studio && npm install --no-audit --no-fund >/dev/null) && note "installed" ||
+    note "FAILED — run 'npm install' in apps/studio"
+fi
+
+echo
+echo "== emscripten sdk (tools/emsdk) =="
+if command -v emcc >/dev/null 2>&1; then
+  note "emcc already on PATH"
+elif [ -f tools/emsdk/emsdk_env.sh ]; then
+  note "already present in tools/emsdk"
+else
+  note "installing (about 1 GB, a few minutes) ..."
+  if git clone --depth 1 https://github.com/emscripten-core/emsdk tools/emsdk >/dev/null 2>&1 &&
+    tools/emsdk/emsdk install latest >/dev/null 2>&1 &&
+    tools/emsdk/emsdk activate latest >/dev/null 2>&1; then
+    note "installed"
+  else
+    note "FAILED — install it by hand:"
+    note "  git clone --depth 1 https://github.com/emscripten-core/emsdk tools/emsdk"
+    note "  tools/emsdk/emsdk install latest && tools/emsdk/emsdk activate latest"
+  fi
+fi
+
+echo
+echo "== what is left for you =="
+if [ ${#missing_system[@]} -gt 0 ]; then
+  note "install these first: ${missing_system[*]}"
+fi
+if ! command -v cargo >/dev/null 2>&1; then
+  note "Rust (desktop app only, installs to your home directory, no sudo):"
+  note "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+fi
+if ! pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
+  note "Desktop app system libraries (needs sudo, yours to run):"
+  note "  sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev \\"
+  note "       libayatana-appindicator3-dev librsvg2-dev build-essential"
+fi
+if [ ! -x apps/studio/src-tauri/runtime-dist/cpython/bin/python3 ]; then
+  note "Optional, for fully offline installers: ./scripts/fetch-python-runtime.sh"
+fi
+
+echo
+echo "Now run: ./scripts/test-all.sh"

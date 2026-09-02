@@ -8,7 +8,7 @@
 // Two invariants keep it from coming back: the engine resolves through the
 // app's own loader, and no JavaScript module ever sits in public/.
 
-import { readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadEngine } from "./loader";
@@ -16,6 +16,9 @@ import { loadEngine } from "./loader";
 const PUBLIC_DIR = new URL("../../public", import.meta.url).pathname;
 
 function filesUnder(dir: string): string[] {
+  // public/ holds only generated content (Blockly's media), so on a fresh
+  // clone it does not exist yet — which trivially satisfies this guard.
+  if (!existsSync(dir)) return [];
   let found: string[] = [];
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
