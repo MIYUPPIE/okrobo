@@ -1,4 +1,4 @@
-#include "arm.hpp"
+#include "arm_world.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -9,24 +9,24 @@ namespace {
 constexpr double kEpsilon = 1e-9;
 }
 
-Arm::Arm(const ArmConfig& config) : config_(config), angles_(config.start), targets_(config.start) {}
+ArmWorld::ArmWorld(const ArmConfig& config) : config_(config), angles_(config.start), targets_(config.start) {}
 
-void Arm::set_target(int joint, double angle) {
+void ArmWorld::set_target(int joint, double angle) {
     if (joint < 0 || joint >= kArmJoints) return;
     targets_[joint] = std::clamp(angle, config_.lower[joint], config_.upper[joint]);
 }
 
-void Arm::stop() {
+void ArmWorld::stop() {
     targets_ = angles_;
 }
 
-void Arm::reset() {
+void ArmWorld::reset() {
     angles_ = config_.start;
     targets_ = config_.start;
     tick_ = 0;
 }
 
-void Arm::step(double dt) {
+void ArmWorld::step(double dt) {
     for (int j = 0; j < kArmJoints; ++j) {
         const double max_delta = config_.speed[j] * dt;
         const double delta = std::clamp(targets_[j] - angles_[j], -max_delta, max_delta);
@@ -35,7 +35,7 @@ void Arm::step(double dt) {
     ++tick_;
 }
 
-Tip Arm::forward_kinematics() const {
+Tip ArmWorld::forward_kinematics() const {
     const double a1 = angles_[1];
     const double a2 = a1 + angles_[2];
     const double a3 = a2 + angles_[3];
@@ -50,7 +50,7 @@ Tip Arm::forward_kinematics() const {
     return tip;
 }
 
-ArmState Arm::state() const {
+ArmState ArmWorld::state() const {
     ArmState s;
     s.tick = tick_;
     s.angles = angles_;

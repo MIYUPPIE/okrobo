@@ -1,6 +1,6 @@
 // Gate tests for the arm kinematics. Plain asserts, run by ctest.
 
-#include "arm.hpp"
+#include "arm_world.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -13,13 +13,13 @@ constexpr double kTol = 1e-9;
 
 bool near(double a, double b, double tol = kTol) { return std::abs(a - b) < tol; }
 
-void run(okrobo::Arm& arm, double seconds, double dt = 0.01) {
+void run(okrobo::ArmWorld& arm, double seconds, double dt = 0.01) {
     const int steps = static_cast<int>(std::round(seconds / dt));
     for (int i = 0; i < steps; ++i) arm.step(dt);
 }
 
 void test_initial_state() {
-    okrobo::Arm arm;
+    okrobo::ArmWorld arm;
     const auto s = arm.state();
     assert(s.tick == 0);
     assert(!s.moving);
@@ -34,7 +34,7 @@ void test_initial_state() {
 }
 
 void test_moves_to_target_exactly() {
-    okrobo::Arm arm;
+    okrobo::ArmWorld arm;
     arm.set_target(0, kPi / 2);  // 90deg at 90deg/s -> 1 s
     run(arm, 0.5);
     auto s = arm.state();
@@ -50,7 +50,7 @@ void test_moves_to_target_exactly() {
 }
 
 void test_targets_clamped_to_limits() {
-    okrobo::Arm arm;
+    okrobo::ArmWorld arm;
     arm.set_target(1, 10.0);  // way past the shoulder limit
     run(arm, 5.0);
     const auto s = arm.state();
@@ -59,7 +59,7 @@ void test_targets_clamped_to_limits() {
 }
 
 void test_stop_freezes_motion() {
-    okrobo::Arm arm;
+    okrobo::ArmWorld arm;
     arm.set_target(2, 1.5);
     run(arm, 0.2);
     arm.stop();
@@ -70,7 +70,7 @@ void test_stop_freezes_motion() {
 }
 
 void test_reset() {
-    okrobo::Arm arm;
+    okrobo::ArmWorld arm;
     arm.set_target(0, 1.0);
     arm.set_target(3, 0.5);
     run(arm, 3.0);
@@ -83,7 +83,7 @@ void test_reset() {
 }
 
 void test_all_joints_move_simultaneously() {
-    okrobo::Arm arm;
+    okrobo::ArmWorld arm;
     arm.set_target(0, 0.4);
     arm.set_target(1, 1.2);
     run(arm, 0.1);

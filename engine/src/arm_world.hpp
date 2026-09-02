@@ -42,9 +42,9 @@ struct ArmState {
     Tip tip;
 };
 
-class Arm {
+class ArmWorld {
 public:
-    explicit Arm(const ArmConfig& config = ArmConfig{});
+    explicit ArmWorld(const ArmConfig& config = ArmConfig{});
 
     /** Set one joint's target angle (clamped to its limits). */
     void set_target(int joint, double angle);

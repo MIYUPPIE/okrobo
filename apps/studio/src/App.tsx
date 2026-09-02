@@ -848,21 +848,11 @@ export default function App() {
             <LessonsPanel onTryStep={tryLessonStep} />
           </div>
           <div className={tab === "C++" ? "tab-panel active padded" : "tab-panel padded"}>
-            {robot === "car" ? (
-              <>
-                <pre className="cpp-preview">{cppCode}</pre>
-                <p className="placeholder-note">
-                  Real, compilable C++ against engine/api/robot.hpp — not runnable here (no
-                  browser has a C++ compiler), but yours to take and build: see
-                  engine/api/README.md.
-                </p>
-              </>
-            ) : (
-              <p className="placeholder-note">
-                The C++ track covers the Car so far; {robot === "arm" ? "the Arm" : "the Drone"}{" "}
-                doesn't have a C++ SDK yet.
-              </p>
-            )}
+            <pre className="cpp-preview">{cppCode}</pre>
+            <p className="placeholder-note">
+              Real, compilable C++ against engine/api/{robot}.hpp — not runnable here (no browser
+              has a C++ compiler), but yours to take and build: see engine/api/README.md.
+            </p>
           </div>
         </div>
       </section>

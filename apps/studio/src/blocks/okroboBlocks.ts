@@ -263,8 +263,12 @@ pythonGenerator.forBlock["okrobo_turn_left"] = (block) =>
   `robot.turn_left(${block.getFieldValue("DEGREES")})\n`;
 pythonGenerator.forBlock["okrobo_turn_right"] = (block) =>
   `robot.turn_right(${block.getFieldValue("DEGREES")})\n`;
-// The wait block is shared between robots; its Python receiver depends on
-// which program is being generated (set by generatePython).
+// okrobo_wait is shared across all three robots; each generator's receiver
+// depends on which program is being generated (set by generatePython /
+// generateCpp). Car's student-facing variable is named "robot", not "car" --
+// the one place this map isn't just the identity function.
+const RECEIVER_BY_ROBOT: Record<RobotKind, string> = { car: "robot", arm: "arm", drone: "drone" };
+
 let pythonReceiver = "robot";
 pythonGenerator.forBlock["okrobo_wait"] = (block) =>
   `${pythonReceiver}.wait(${block.getFieldValue("SECONDS")})\n`;
@@ -297,7 +301,7 @@ pythonGenerator.forBlock["okrobo_drone_turn_right"] = (block) =>
 pythonGenerator.forBlock["okrobo_drone_altitude"] = () => ["drone.altitude()", PyOrder.FUNCTION_CALL];
 pythonGenerator.forBlock["okrobo_drone_distance"] = () => ["drone.distance()", PyOrder.FUNCTION_CALL];
 
-// ---- C++ (Car only): real code against engine/api/robot.hpp -------------
+// ---- C++: real code against engine/api/{robot,arm,drone}.hpp ------------
 //
 // Blockly ships no C++ generator, but its JavaScript one already emits
 // valid C++ for every control/logic/math block the toolbox uses --
@@ -324,7 +328,12 @@ cppGenerator.forBlock["okrobo_turn_left"] = (block) =>
   `robot.turn_left(${block.getFieldValue("DEGREES")});\n`;
 cppGenerator.forBlock["okrobo_turn_right"] = (block) =>
   `robot.turn_right(${block.getFieldValue("DEGREES")});\n`;
-cppGenerator.forBlock["okrobo_wait"] = (block) => `robot.wait(${block.getFieldValue("SECONDS")});\n`;
+// okrobo_wait is shared across all three robots; its C++ receiver depends on
+// which program is being generated (set by generateCpp), the same pattern
+// pythonReceiver already uses for the Python generator.
+let cppReceiver = "robot";
+cppGenerator.forBlock["okrobo_wait"] = (block) =>
+  `${cppReceiver}.wait(${block.getFieldValue("SECONDS")});\n`;
 cppGenerator.forBlock["okrobo_distance"] = () => ["robot.distance()", JsOrder.FUNCTION_CALL];
 // Lidar and vision have no C++ port yet (engine/api/README.md says so
 // plainly); a placeholder keeps the preview compiling instead of throwing
@@ -341,17 +350,43 @@ cppGenerator.forBlock["okrobo_color_bearing"] = () => [
   "0.0 /* vision not in the C++ track yet */",
   JsOrder.FUNCTION_CALL,
 ];
+cppGenerator.forBlock["okrobo_arm_move"] = (block) =>
+  `arm.move("${block.getFieldValue("JOINT")}", ${block.getFieldValue("DEGREES")});\n`;
+cppGenerator.forBlock["okrobo_arm_tip_height"] = () => ["std::get<2>(arm.tip())", JsOrder.FUNCTION_CALL];
+cppGenerator.forBlock["okrobo_drone_takeoff"] = (block) =>
+  `drone.takeoff(${block.getFieldValue("HEIGHT")});\n`;
+cppGenerator.forBlock["okrobo_drone_land"] = () => `drone.land();\n`;
+cppGenerator.forBlock["okrobo_drone_forward"] = (block) =>
+  `drone.forward(${block.getFieldValue("METERS")});\n`;
+cppGenerator.forBlock["okrobo_drone_backward"] = (block) =>
+  `drone.backward(${block.getFieldValue("METERS")});\n`;
+cppGenerator.forBlock["okrobo_drone_up"] = (block) => `drone.up(${block.getFieldValue("METERS")});\n`;
+cppGenerator.forBlock["okrobo_drone_down"] = (block) => `drone.down(${block.getFieldValue("METERS")});\n`;
+cppGenerator.forBlock["okrobo_drone_turn_left"] = (block) =>
+  `drone.turn_left(${block.getFieldValue("DEGREES")});\n`;
+cppGenerator.forBlock["okrobo_drone_turn_right"] = (block) =>
+  `drone.turn_right(${block.getFieldValue("DEGREES")});\n`;
+cppGenerator.forBlock["okrobo_drone_altitude"] = () => ["drone.altitude()", JsOrder.FUNCTION_CALL];
+cppGenerator.forBlock["okrobo_drone_distance"] = () => ["drone.distance()", JsOrder.FUNCTION_CALL];
 
-export function generateCpp(workspace: Blockly.Workspace): string {
+const CPP_HEADER_BY_ROBOT: Record<RobotKind, string> = {
+  car: '#include "robot.hpp"\n\nint main() {\n  okrobo::Robot robot;\n\n',
+  arm: '#include "arm.hpp"\n\nint main() {\n  okrobo::Arm arm;\n\n',
+  drone: '#include "drone.hpp"\n\nint main() {\n  okrobo::Drone drone;\n\n',
+};
+
+export function generateCpp(workspace: Blockly.Workspace, robot: RobotKind = "car"): string {
+  cppReceiver = RECEIVER_BY_ROBOT[robot];
+  const body = cppGenerator.workspaceToCode(workspace);
+  cppReceiver = "robot";
   // 2 spaces, matching the borrowed JS generator's own internal indent width
   // (Blockly's default), so nested block bodies stay evenly stepped.
-  const body = cppGenerator.workspaceToCode(workspace);
   const indented = body
     .split("\n")
     .map((line) => (line ? `  ${line}` : line))
     .join("\n")
     .replace(/\n+$/, "\n");
-  return `#include "robot.hpp"\n\nint main() {\n  okrobo::Robot robot;\n\n${indented}\n  return 0;\n}\n`;
+  return `${CPP_HEADER_BY_ROBOT[robot]}${indented}\n  return 0;\n}\n`;
 }
 
 export type RobotKind = "car" | "arm" | "drone";
@@ -544,8 +579,6 @@ const PYTHON_HEADERS: Record<RobotKind, string> = {
   arm: "from okrobo import Arm\n\narm = Arm()\n\n",
   drone: "from okrobo import Drone\n\ndrone = Drone()\n\n",
 };
-
-const RECEIVER_BY_ROBOT: Record<RobotKind, string> = { car: "robot", arm: "arm", drone: "drone" };
 
 const VISION_BLOCK_TYPES = ["okrobo_see_color", "okrobo_color_bearing"];
 

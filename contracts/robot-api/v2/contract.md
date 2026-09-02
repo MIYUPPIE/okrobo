@@ -26,5 +26,5 @@ Commands: `drone_drive {forward, vertical, yaw_rate}`, `drone_stop`
 ## Reference dynamics
 
 `runtime/python/okrobo/_sim.py` (`DroneWorld`) is the executable spec;
-`engine/src/drone.cpp` implements the same math and the parity gate
+`engine/src/drone_world.cpp` implements the same math and the parity gate
 (`engine/tests/parity/`) locks them together, as with v0 and v1.

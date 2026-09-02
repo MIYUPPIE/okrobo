@@ -4,7 +4,7 @@ project(okrobo_engine CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_library(okrobo_engine src/world.cpp src/arm.cpp src/drone.cpp)
+add_library(okrobo_engine src/world.cpp src/arm_world.cpp src/drone_world.cpp)
 # api/ is the header-only student SDK (engine/api/robot.hpp): real,
 # standalone C++ built on the same World the parity gate locks to Python.
 target_include_directories(okrobo_engine PUBLIC src api)
@@ -38,3 +38,9 @@ add_test(NAME drone COMMAND test_drone)
 
 okrobo_add_test(test_robot_api tests/test_robot_api.cpp)
 add_test(NAME robot_api COMMAND test_robot_api)
+
+okrobo_add_test(test_arm_api tests/test_arm_api.cpp)
+add_test(NAME arm_api COMMAND test_arm_api)
+
+okrobo_add_test(test_drone_api tests/test_drone_api.cpp)
+add_test(NAME drone_api COMMAND test_drone_api)

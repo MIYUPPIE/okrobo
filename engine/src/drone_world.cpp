@@ -1,4 +1,4 @@
-#include "drone.hpp"
+#include "drone_world.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -20,21 +20,21 @@ double normalize_angle(double theta) {
 
 }  // namespace
 
-Drone::Drone(const DroneConfig& config) : config_(config), pose_(config.start) {}
+DroneWorld::DroneWorld(const DroneConfig& config) : config_(config), pose_(config.start) {}
 
-void Drone::drive(double forward, double vertical, double yaw_rate) {
+void DroneWorld::drive(double forward, double vertical, double yaw_rate) {
     forward_ = forward;
     vertical_ = vertical;
     yaw_rate_ = yaw_rate;
 }
 
-void Drone::stop() {
+void DroneWorld::stop() {
     forward_ = 0.0;
     vertical_ = 0.0;
     yaw_rate_ = 0.0;
 }
 
-void Drone::reset() {
+void DroneWorld::reset() {
     pose_ = config_.start;
     forward_ = 0.0;
     vertical_ = 0.0;
@@ -43,7 +43,7 @@ void Drone::reset() {
     collided_ = false;
 }
 
-void Drone::step(double dt) {
+void DroneWorld::step(double dt) {
     pose_.x += forward_ * dt * std::cos(pose_.theta);
     pose_.y += forward_ * dt * std::sin(pose_.theta);
     pose_.z += vertical_ * dt;
@@ -64,11 +64,11 @@ void Drone::step(double dt) {
     ++tick_;
 }
 
-double Drone::sensor_distance() const {
+double DroneWorld::sensor_distance() const {
     return ray(0.0);
 }
 
-double Drone::ray(double offset) const {
+double DroneWorld::ray(double offset) const {
     const double dx = std::cos(pose_.theta + offset);
     const double dy = std::sin(pose_.theta + offset);
 
@@ -81,7 +81,7 @@ double Drone::ray(double offset) const {
     return std::max(0.0, t - config_.robot_radius);
 }
 
-DroneState Drone::state() const {
+DroneState DroneWorld::state() const {
     DroneState s;
     s.tick = tick_;
     s.pose = pose_;

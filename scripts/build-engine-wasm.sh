@@ -28,8 +28,8 @@ rm -rf "$ROOT/apps/studio/public/engine"
 em++ -O2 -std=c++17 --no-entry \
   -I "$ROOT/engine/src" \
   "$ROOT/engine/src/world.cpp" \
-  "$ROOT/engine/src/arm.cpp" \
-  "$ROOT/engine/src/drone.cpp" \
+  "$ROOT/engine/src/arm_world.cpp" \
+  "$ROOT/engine/src/drone_world.cpp" \
   "$ROOT/engine/src/wasm_api.cpp" \
   -o "$OUT_DIR/okrobo_engine.js" \
   -sMODULARIZE=1 \

@@ -2,9 +2,9 @@
 // as integers; state crosses as scalars so no JSON or memory marshalling is
 // needed. The TS side (apps/studio/src/engine/) assembles contract v0 messages.
 
-#include "arm.hpp"
+#include "arm_world.hpp"
 #include "camera.hpp"
-#include "drone.hpp"
+#include "drone_world.hpp"
 #include "world.hpp"
 
 #include <emscripten/emscripten.h>
@@ -102,58 +102,58 @@ unsigned char* world_camera_buffer() { return g_camera_frame; }
 // ---- arm (contract v1) ----
 
 EMSCRIPTEN_KEEPALIVE
-okrobo::Arm* arm_create() { return new okrobo::Arm(); }
+okrobo::ArmWorld* arm_create() { return new okrobo::ArmWorld(); }
 
 EMSCRIPTEN_KEEPALIVE
-void arm_destroy(okrobo::Arm* arm) { delete arm; }
+void arm_destroy(okrobo::ArmWorld* arm) { delete arm; }
 
 EMSCRIPTEN_KEEPALIVE
-void arm_set_target(okrobo::Arm* arm, int joint, double angle) {
+void arm_set_target(okrobo::ArmWorld* arm, int joint, double angle) {
     arm->set_target(joint, angle);
 }
 
 EMSCRIPTEN_KEEPALIVE
-void arm_stop(okrobo::Arm* arm) { arm->stop(); }
+void arm_stop(okrobo::ArmWorld* arm) { arm->stop(); }
 
 EMSCRIPTEN_KEEPALIVE
-void arm_reset(okrobo::Arm* arm) { arm->reset(); }
+void arm_reset(okrobo::ArmWorld* arm) { arm->reset(); }
 
 EMSCRIPTEN_KEEPALIVE
-void arm_step(okrobo::Arm* arm, double dt) { arm->step(dt); }
+void arm_step(okrobo::ArmWorld* arm, double dt) { arm->step(dt); }
 
 EMSCRIPTEN_KEEPALIVE
-double arm_tick(const okrobo::Arm* arm) {
+double arm_tick(const okrobo::ArmWorld* arm) {
     return static_cast<double>(arm->state().tick);
 }
 
 EMSCRIPTEN_KEEPALIVE
-double arm_angle(const okrobo::Arm* arm, int joint) {
+double arm_angle(const okrobo::ArmWorld* arm, int joint) {
     const auto s = arm->state();
     return (joint >= 0 && joint < okrobo::kArmJoints) ? s.angles[joint] : 0.0;
 }
 
 EMSCRIPTEN_KEEPALIVE
-double arm_target(const okrobo::Arm* arm, int joint) {
+double arm_target(const okrobo::ArmWorld* arm, int joint) {
     const auto s = arm->state();
     return (joint >= 0 && joint < okrobo::kArmJoints) ? s.targets[joint] : 0.0;
 }
 
 EMSCRIPTEN_KEEPALIVE
-int arm_moving(const okrobo::Arm* arm) { return arm->state().moving ? 1 : 0; }
+int arm_moving(const okrobo::ArmWorld* arm) { return arm->state().moving ? 1 : 0; }
 
 EMSCRIPTEN_KEEPALIVE
-double arm_tip_x(const okrobo::Arm* arm) { return arm->state().tip.x; }
+double arm_tip_x(const okrobo::ArmWorld* arm) { return arm->state().tip.x; }
 
 EMSCRIPTEN_KEEPALIVE
-double arm_tip_y(const okrobo::Arm* arm) { return arm->state().tip.y; }
+double arm_tip_y(const okrobo::ArmWorld* arm) { return arm->state().tip.y; }
 
 EMSCRIPTEN_KEEPALIVE
-double arm_tip_z(const okrobo::Arm* arm) { return arm->state().tip.z; }
+double arm_tip_z(const okrobo::ArmWorld* arm) { return arm->state().tip.z; }
 
 // ---- drone (contract v2) ----
 
 EMSCRIPTEN_KEEPALIVE
-okrobo::Drone* drone_create(double arena_width, double arena_height, double robot_radius,
+okrobo::DroneWorld* drone_create(double arena_width, double arena_height, double robot_radius,
                             double max_altitude, double start_x, double start_y, double start_z,
                             double start_theta) {
     okrobo::DroneConfig config;
@@ -162,52 +162,52 @@ okrobo::Drone* drone_create(double arena_width, double arena_height, double robo
     config.robot_radius = robot_radius;
     config.max_altitude = max_altitude;
     config.start = okrobo::DronePose{start_x, start_y, start_z, start_theta};
-    return new okrobo::Drone(config);
+    return new okrobo::DroneWorld(config);
 }
 
 EMSCRIPTEN_KEEPALIVE
-void drone_destroy(okrobo::Drone* drone) { delete drone; }
+void drone_destroy(okrobo::DroneWorld* drone) { delete drone; }
 
 EMSCRIPTEN_KEEPALIVE
-void drone_drive(okrobo::Drone* drone, double forward, double vertical, double yaw_rate) {
+void drone_drive(okrobo::DroneWorld* drone, double forward, double vertical, double yaw_rate) {
     drone->drive(forward, vertical, yaw_rate);
 }
 
 EMSCRIPTEN_KEEPALIVE
-void drone_stop(okrobo::Drone* drone) { drone->stop(); }
+void drone_stop(okrobo::DroneWorld* drone) { drone->stop(); }
 
 EMSCRIPTEN_KEEPALIVE
-void drone_reset(okrobo::Drone* drone) { drone->reset(); }
+void drone_reset(okrobo::DroneWorld* drone) { drone->reset(); }
 
 EMSCRIPTEN_KEEPALIVE
-void drone_step(okrobo::Drone* drone, double dt) { drone->step(dt); }
+void drone_step(okrobo::DroneWorld* drone, double dt) { drone->step(dt); }
 
 EMSCRIPTEN_KEEPALIVE
-double drone_tick(const okrobo::Drone* drone) {
+double drone_tick(const okrobo::DroneWorld* drone) {
     return static_cast<double>(drone->state().tick);
 }
 
 EMSCRIPTEN_KEEPALIVE
-double drone_x(const okrobo::Drone* drone) { return drone->state().pose.x; }
+double drone_x(const okrobo::DroneWorld* drone) { return drone->state().pose.x; }
 
 EMSCRIPTEN_KEEPALIVE
-double drone_y(const okrobo::Drone* drone) { return drone->state().pose.y; }
+double drone_y(const okrobo::DroneWorld* drone) { return drone->state().pose.y; }
 
 EMSCRIPTEN_KEEPALIVE
-double drone_z(const okrobo::Drone* drone) { return drone->state().pose.z; }
+double drone_z(const okrobo::DroneWorld* drone) { return drone->state().pose.z; }
 
 EMSCRIPTEN_KEEPALIVE
-double drone_theta(const okrobo::Drone* drone) { return drone->state().pose.theta; }
+double drone_theta(const okrobo::DroneWorld* drone) { return drone->state().pose.theta; }
 
 EMSCRIPTEN_KEEPALIVE
-double drone_distance(const okrobo::Drone* drone) { return drone->state().distance; }
+double drone_distance(const okrobo::DroneWorld* drone) { return drone->state().distance; }
 
 EMSCRIPTEN_KEEPALIVE
-int drone_collided(const okrobo::Drone* drone) {
+int drone_collided(const okrobo::DroneWorld* drone) {
     return drone->state().collided ? 1 : 0;
 }
 
 EMSCRIPTEN_KEEPALIVE
-double drone_ray(const okrobo::Drone* drone, double offset) { return drone->ray(offset); }
+double drone_ray(const okrobo::DroneWorld* drone, double offset) { return drone->ray(offset); }
 
 }  // extern "C"

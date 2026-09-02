@@ -245,7 +245,7 @@ class ArmState:
 
 
 class ArmWorld:
-    """Reference model for the 4-DOF arm; mirrors engine/src/arm.cpp exactly."""
+    """Reference model for the 4-DOF arm; mirrors engine/src/arm_world.cpp exactly."""
 
     def __init__(self, config: ArmConfig | None = None) -> None:
         self.config = config or ArmConfig()
@@ -341,7 +341,7 @@ class DroneState:
 
 
 class DroneWorld:
-    """Reference model for the drone; mirrors engine/src/drone.cpp exactly."""
+    """Reference model for the drone; mirrors engine/src/drone_world.cpp exactly."""
 
     def __init__(self, config: DroneConfig | None = None) -> None:
         self.config = config or DroneConfig()

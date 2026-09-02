@@ -35,9 +35,9 @@ struct DroneState {
     bool collided = false;
 };
 
-class Drone {
+class DroneWorld {
 public:
-    explicit Drone(const DroneConfig& config = DroneConfig{});
+    explicit DroneWorld(const DroneConfig& config = DroneConfig{});
 
     void drive(double forward, double vertical, double yaw_rate);  // m/s, m/s, rad/s
     void stop();

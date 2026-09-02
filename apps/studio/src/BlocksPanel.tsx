@@ -37,9 +37,7 @@ const darkTheme = Blockly.Theme.defineTheme("okrobo-dark", {
 export interface BlocksPanelProps {
   /** Which robot's blocks and starter program to use. Remount (key) to switch. */
   robot: RobotKind;
-  /** Called with regenerated (javascript, python, cpp) after every real edit.
-   * cpp is "" for the Arm and Drone, which have no C++ SDK yet
-   * (engine/api/README.md). */
+  /** Called with regenerated (javascript, python, cpp) after every real edit. */
   onCode: (js: string, python: string, cpp: string) => void;
   /**
    * Seeds a freshly-mounted instance (a robot switch from a lesson's "Try
@@ -104,7 +102,7 @@ export function BlocksPanel({ robot, onCode, initialWorkspace, onWorkspaceConsum
       onCodeRef.current(
         generateJavaScript(workspace),
         generatePython(workspace, robot),
-        robot === "car" ? generateCpp(workspace) : "",
+        generateCpp(workspace, robot),
       );
     };
     regenerate();

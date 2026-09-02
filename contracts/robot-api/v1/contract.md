@@ -35,5 +35,5 @@ dynamics arrive, MuJoCo replaces it behind these same messages
 ## Reference dynamics
 
 `runtime/python/okrobo/_sim.py` (`ArmWorld`) is the executable spec;
-`engine/src/arm.cpp` implements the same math and the parity gate
+`engine/src/arm_world.cpp` implements the same math and the parity gate
 (`engine/tests/parity/`) locks them together, as with v0.

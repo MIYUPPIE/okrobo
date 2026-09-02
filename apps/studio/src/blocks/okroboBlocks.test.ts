@@ -144,6 +144,50 @@ describe("block code generation", () => {
     expect(py).not.toContain("robot.");
   });
 
+  it("generates the arm wave in C++ against engine/api/arm.hpp", () => {
+    const cpp = generateCpp(load(ARM_STARTER_WORKSPACE), "arm");
+    expect(cpp).toContain('#include "arm.hpp"');
+    expect(cpp).toContain("okrobo::Arm arm;");
+    expect(cpp).toContain('arm.move("shoulder", 85);');
+    expect(cpp).toContain('arm.move("base", 45);');
+    expect(cpp).toContain("for (int count = 0; count < 3; count++) {");
+    expect(cpp).not.toContain("robot.");
+    expect(cpp).not.toContain("var ");
+  });
+
+  it(
+    "the generated arm C++ actually compiles and runs, matching the sim",
+    () => {
+      const cpp = generateCpp(load(ARM_STARTER_WORKSPACE), "arm");
+      const dir = mkdtempSync(join(tmpdir(), "okrobo-cpp-"));
+      const source = join(dir, "program.cpp");
+      const binary = join(dir, "program");
+      writeFileSync(
+        source,
+        cpp
+          .replace('#include "arm.hpp"', '#include <cstdio>\n#include "arm.hpp"')
+          .replace(
+            "return 0;",
+            'auto [x, y, z] = arm.tip(); std::printf("%.2f %.2f %.2f\\n", x, y, z); return 0;',
+          ),
+      );
+      execFileSync("g++", [
+        "-std=c++17",
+        "-I",
+        join(ENGINE_DIR, "src"),
+        "-I",
+        join(ENGINE_DIR, "api"),
+        source,
+        join(ENGINE_DIR, "src", "arm_world.cpp"),
+        "-o",
+        binary,
+      ]);
+      const output = execFileSync(binary, { encoding: "utf8", timeout: 5000 }).trim();
+      expect(output).toBe("0.32 0.32 0.22");
+    },
+    20000,
+  );
+
   it("generates the drone square flight in JavaScript against the runner API", () => {
     const js = generateJavaScript(load(DRONE_STARTER_WORKSPACE));
     expect(js).toContain("await robot.droneTakeoff(0.4);");
@@ -165,6 +209,55 @@ describe("block code generation", () => {
     expect(py).not.toContain("robot.");
     expect(py).not.toContain("arm.");
   });
+
+  it("generates the drone square flight in C++ against engine/api/drone.hpp", () => {
+    const cpp = generateCpp(load(DRONE_STARTER_WORKSPACE), "drone");
+    expect(cpp).toContain('#include "drone.hpp"');
+    expect(cpp).toContain("okrobo::Drone drone;");
+    expect(cpp).toContain("drone.takeoff(0.4);");
+    expect(cpp).toContain("for (int count = 0; count < 4; count++) {");
+    expect(cpp).toContain("drone.forward(0.3);");
+    expect(cpp).toContain("drone.turn_right(90);");
+    expect(cpp).toContain("drone.land();");
+    expect(cpp).not.toContain("robot.");
+    expect(cpp).not.toContain("arm.");
+    expect(cpp).not.toContain("var ");
+  });
+
+  it(
+    "the generated drone C++ actually compiles and runs, landing back at the start",
+    () => {
+      const cpp = generateCpp(load(DRONE_STARTER_WORKSPACE), "drone");
+      const dir = mkdtempSync(join(tmpdir(), "okrobo-cpp-"));
+      const source = join(dir, "program.cpp");
+      const binary = join(dir, "program");
+      writeFileSync(
+        source,
+        cpp
+          .replace('#include "drone.hpp"', '#include <cstdio>\n#include "drone.hpp"')
+          .replace(
+            "return 0;",
+            'auto [x, y, z] = drone.position(); std::printf("%.2f %.2f %.2f\\n", x, y, z); return 0;',
+          ),
+      );
+      execFileSync("g++", [
+        "-std=c++17",
+        "-I",
+        join(ENGINE_DIR, "src"),
+        "-I",
+        join(ENGINE_DIR, "api"),
+        source,
+        join(ENGINE_DIR, "src", "drone_world.cpp"),
+        "-o",
+        binary,
+      ]);
+      const output = execFileSync(binary, { encoding: "utf8", timeout: 5000 }).trim();
+      // A square flight returns to its start point (1.0, 1.0), landed (z=0):
+      // matches the browser E2E check's live result for the same program.
+      expect(output).toBe("1.00 1.00 0.00");
+    },
+    20000,
+  );
 
   it("drone distance and altitude blocks target the drone API, not the car's", () => {
     const sensors = {
@@ -194,6 +287,7 @@ describe("block code generation", () => {
       },
     };
     expect(generatePython(load(waitOnly), "drone")).toContain("drone.wait(3)");
+    expect(generateCpp(load(waitOnly), "drone")).toContain("drone.wait(3);");
   });
 
   const sensorWorkspaceState = {
@@ -246,5 +340,9 @@ describe("block code generation", () => {
     expect(generatePython(load(waitOnly), "arm")).toContain("arm.wait(2)");
     workspace.dispose();
     expect(generatePython(load(waitOnly), "car")).toContain("robot.wait(2)");
+    workspace.dispose();
+    expect(generateCpp(load(waitOnly), "arm")).toContain("arm.wait(2);");
+    workspace.dispose();
+    expect(generateCpp(load(waitOnly), "car")).toContain("robot.wait(2);");
   });
 });

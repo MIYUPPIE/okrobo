@@ -1,7 +1,7 @@
 // Gate tests for drone kinematics. Plain asserts, run by ctest.
 // Mirrors runtime/python/tests/test_drone.py.
 
-#include "drone.hpp"
+#include "drone_world.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -14,13 +14,13 @@ constexpr double kTol = 1e-9;
 
 bool near(double a, double b, double tol = kTol) { return std::abs(a - b) < tol; }
 
-void run(okrobo::Drone& drone, double seconds, double dt = 0.01) {
+void run(okrobo::DroneWorld& drone, double seconds, double dt = 0.01) {
     const int steps = static_cast<int>(std::round(seconds / dt));
     for (int i = 0; i < steps; ++i) drone.step(dt);
 }
 
 void test_initial_state() {
-    okrobo::Drone drone;
+    okrobo::DroneWorld drone;
     const auto s = drone.state();
     assert(s.tick == 0);
     assert(!s.collided);
@@ -31,7 +31,7 @@ void test_initial_state() {
 }
 
 void test_vertical_drive_changes_only_altitude() {
-    okrobo::Drone drone;
+    okrobo::DroneWorld drone;
     drone.drive(0.0, 0.2, 0.0);
     run(drone, 1.0);
     const auto s = drone.state();
@@ -41,7 +41,7 @@ void test_vertical_drive_changes_only_altitude() {
 }
 
 void test_forward_drive_moves_along_heading() {
-    okrobo::Drone drone;
+    okrobo::DroneWorld drone;
     drone.drive(0.2, 0.0, 0.0);
     run(drone, 1.0);
     const auto s = drone.state();
@@ -50,7 +50,7 @@ void test_forward_drive_moves_along_heading() {
 }
 
 void test_yaw_rate_turns_in_place() {
-    okrobo::Drone drone;
+    okrobo::DroneWorld drone;
     drone.drive(0.0, 0.0, kPi / 2);
     run(drone, 1.0);
     assert(near(drone.state().pose.theta, kPi / 2, 1e-6));
@@ -58,7 +58,7 @@ void test_yaw_rate_turns_in_place() {
 }
 
 void test_clamps_to_arena_walls_and_reports_collision() {
-    okrobo::Drone drone;
+    okrobo::DroneWorld drone;
     drone.drive(5.0, 0.0, 0.0);
     run(drone, 2.0);
     const auto s = drone.state();
@@ -67,7 +67,7 @@ void test_clamps_to_arena_walls_and_reports_collision() {
 }
 
 void test_clamps_altitude_floor_and_ceiling() {
-    okrobo::Drone drone;
+    okrobo::DroneWorld drone;
     drone.drive(0.0, -5.0, 0.0);
     run(drone, 1.0);
     assert(near(drone.state().pose.z, 0.0));
@@ -81,7 +81,7 @@ void test_clamps_altitude_floor_and_ceiling() {
 }
 
 void test_stop_zeroes_all_rates() {
-    okrobo::Drone drone;
+    okrobo::DroneWorld drone;
     drone.drive(0.2, 0.1, 0.5);
     drone.stop();
     run(drone, 0.5);
@@ -93,7 +93,7 @@ void test_stop_zeroes_all_rates() {
 }
 
 void test_reset_restores_start() {
-    okrobo::Drone drone;
+    okrobo::DroneWorld drone;
     drone.drive(0.2, 0.1, 0.3);
     run(drone, 1.0);
     drone.reset();
@@ -106,7 +106,7 @@ void test_reset_restores_start() {
 }
 
 void test_distance_sensor_is_wall_only() {
-    okrobo::Drone drone;
+    okrobo::DroneWorld drone;
     assert(near(drone.ray(0.0), 0.9));
 }
 

@@ -286,7 +286,7 @@ try {
   );
   await page.evalClickText(".menu-item", "/^Edit$/"); // close it before moving on
 
-  // -- C++ tab: real code against engine/api/robot.hpp, Car only --------------
+  // -- C++ tab: real code against engine/api/{robot,arm,drone}.hpp ------------
   await page.evalClickText(".code-tab", "/^C\\+\\+$/");
   const cppReady = await waitForCondition(
     "document.querySelector('.cpp-preview')?.textContent?.includes('#include \"robot.hpp\"')",
@@ -309,17 +309,18 @@ try {
     await waitForCondition("/joints/.test(document.querySelector('.run-bar .status')?.textContent ?? '')", 5000),
   );
 
-  // C++ tab is Car-only (no Arm SDK yet); confirm it says so honestly
-  // instead of showing stale or wrong content when the robot switches.
+  // The C++ tab follows the robot switch: real Arm code now, not stale Car
+  // content left over from before the switch.
   await page.evalClickText(".code-tab", "/^C\\+\\+$/");
-  await sleep(300);
-  const armCppNote = await page.evaluate(
-    "document.querySelector('.tab-panel.active .placeholder-note')?.textContent ?? ''",
+  const armCppReady = await waitForCondition(
+    "document.querySelector('.cpp-preview')?.textContent?.includes('#include \"arm.hpp\"')",
+    5000,
   );
+  const armCppText = await page.evaluate("document.querySelector('.cpp-preview')?.textContent ?? ''");
+  check("C++ tab switches to real code against arm.hpp for the Arm", armCppReady, armCppText.slice(0, 40));
   check(
-    "C++ tab honestly says it doesn't cover the Arm yet, rather than showing stale content",
-    /Arm.*doesn't have a C\+\+ SDK/.test(armCppNote),
-    armCppNote,
+    "Arm C++ mirrors the wave's shoulder move, not the car's forward/turn_left",
+    /arm\.move\("shoulder", 85\);/.test(armCppText) && !/robot\.(forward|turn_left)/.test(armCppText),
   );
 
   await page.clickText(".code-tab", "/^Python$/"); // re-select Python for the arm
@@ -363,6 +364,16 @@ try {
     (await pythonEditorText()).slice(0, 60),
   );
   check("Python tab shows the square flight's takeoff call", /drone\.takeoff\(0\.4\)/.test(await pythonEditorText()));
+
+  await page.evalClickText(".code-tab", "/^C\\+\\+$/");
+  const droneCppReady = await waitForCondition(
+    "document.querySelector('.cpp-preview')?.textContent?.includes('#include \"drone.hpp\"')",
+    5000,
+  );
+  const droneCppText = await page.evaluate("document.querySelector('.cpp-preview')?.textContent ?? ''");
+  check("C++ tab switches to real code against drone.hpp for the Drone", droneCppReady, droneCppText.slice(0, 40));
+  check("Drone C++ shows the square flight's takeoff call", /drone\.takeoff\(0\.4\);/.test(droneCppText));
+  await page.clickText(".code-tab", "/^Python$/"); // back to Python for the run check below
 
   // Unlike the car's while(true) wall avoider, the drone's square flight
   // terminates on its own — and headless Chrome can run well faster than 1x
