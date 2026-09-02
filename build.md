@@ -199,7 +199,7 @@ Tests: 31 pack tests (manifest/index validation incl. path-escape rejection, URD
 
 **Acceptance: verified in headless Chrome** — the Lessons tab listed both core lessons; opening "Wave the arm" showed 4 steps with 3 runnable blocks; "Try this" switched the robot from Car to Arm, moved to the Python tab, and loaded `from okrobo import Arm` code ready to Run. The store pipeline was verified against a live school server: index published with digests, archive downloaded, digest matched.
 
-Not done here: pack signing (the manifest carries a content digest, not a publisher signature) — it needs a key-distribution decision for schools, so it is deliberately deferred rather than half-built.
+Not done here: pack signing (the manifest carries a content digest, not a publisher signature) — it needs a key-distribution decision for schools, so it is deliberately deferred rather than half-built. **Closed in Phase 7** (Ed25519 signing, key-distribution decision documented in `docs/decisions/pack-signing.md`) — see below.
 
 ### Phase 7: Hardware ✅
 
