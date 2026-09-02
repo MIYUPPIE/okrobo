@@ -19,14 +19,40 @@
 //
 // Distances are meters, angles are degrees -- the same student-facing
 // convention as Robot/Arm/Drone in every other language this project has.
+//
+// camera() wraps engine/src/camera.hpp's deterministic raycast renderer
+// (the same one the browser and the sidecar use); find_color() for it lives
+// in vision.hpp, mirroring how camera.py and vision.py are separate modules
+// in Python too.
 
+#include <array>
 #include <cmath>
+#include <cstddef>
+#include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
+#include "camera.hpp"
 #include "world.hpp"
 
 namespace okrobo {
+
+/** One RGB camera frame, row-major from the top. Mirrors okrobo.camera.Frame. */
+struct Frame {
+    int width = 0;
+    int height = 0;
+    std::vector<unsigned char> pixels;  // width * height * 3 bytes
+
+    /** (r, g, b) at column x, row y. */
+    std::array<unsigned char, 3> pixel(int x, int y) const {
+        if (x < 0 || x >= width || y < 0 || y >= height) {
+            throw std::out_of_range("pixel out of range");
+        }
+        const auto index = (static_cast<std::size_t>(y) * width + x) * 3;
+        return {pixels[index], pixels[index + 1], pixels[index + 2]};
+    }
+};
 
 class Robot {
 public:
@@ -79,6 +105,24 @@ public:
     }
 
     void stop() { world_.stop(); }
+
+    /** A picture from the robot's point of view. */
+    Frame camera(int width = 64, int height = 48) const {
+        if (width <= 0 || height <= 0) {
+            throw std::invalid_argument("camera size must be positive");
+        }
+        if (width > kCameraMaxWidth || height > kCameraMaxHeight) {
+            throw std::invalid_argument(
+                "camera size max is " + std::to_string(kCameraMaxWidth) + "x" +
+                std::to_string(kCameraMaxHeight));
+        }
+        Frame frame;
+        frame.width = width;
+        frame.height = height;
+        frame.pixels.resize(static_cast<std::size_t>(width) * height * 3);
+        render_camera(world_, width, height, frame.pixels.data());
+        return frame;
+    }
 
     /** The underlying World, for callers that need engine-level access
         (rendering, the camera, direct state) beyond this friendly API. */

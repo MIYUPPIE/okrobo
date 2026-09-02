@@ -61,7 +61,7 @@ describe("block code generation", () => {
     expect(cpp).not.toContain("var ");
   });
 
-  it("C++ preview marks vision/lidar blocks as unavailable instead of crashing", () => {
+  it("C++ preview generates real lidar/vision code against engine/api/vision.hpp", () => {
     const cpp = generateCpp(
       load({
         blocks: {
@@ -69,13 +69,93 @@ describe("block code generation", () => {
           blocks: [
             { type: "okrobo_lidar_min", x: 0, y: 0 },
             { type: "okrobo_see_color", x: 0, y: 40, fields: { COLOR: "red" } },
+            { type: "okrobo_color_bearing", x: 0, y: 80, fields: { COLOR: "blue" } },
           ],
         },
       }),
     );
-    expect(cpp).toContain("/* lidar not in the C++ track yet */");
-    expect(cpp).toContain("/* vision not in the C++ track yet */");
+    expect(cpp).toContain("#include <algorithm>");
+    expect(cpp).toContain('#include "vision.hpp"');
+    expect(cpp).toContain("*std::min_element(robot.lidar().begin(), robot.lidar().end())");
+    expect(cpp).toContain('okrobo::find_color(robot.camera(), "red").has_value()');
+    expect(cpp).toContain('okrobo::find_color(robot.camera(), "blue").value_or(okrobo::Detection{}).bearing');
   });
+
+  it("C++ preview omits <algorithm>/vision.hpp when the workspace doesn't use lidar or vision", () => {
+    const cpp = generateCpp(load(STARTER_WORKSPACE));
+    expect(cpp).not.toContain("<algorithm>");
+    expect(cpp).not.toContain("vision.hpp");
+  });
+
+  it(
+    "the generated vision C++ actually compiles, runs, and finds a real obstacle",
+    () => {
+      // "if sees red, back up" -- a lone see_color/color_bearing block can't
+      // be a top-level statement (they're value blocks with no
+      // previousStatement), so nest them the same way the wall avoider
+      // nests okrobo_distance inside logic_compare inside controls_if.
+      const cpp = generateCpp(
+        load({
+          blocks: {
+            languageVersion: 0,
+            blocks: [
+              {
+                type: "controls_if",
+                x: 0,
+                y: 0,
+                inputs: {
+                  IF0: { block: { type: "okrobo_see_color", fields: { COLOR: "red" } } },
+                  DO0: { block: { type: "okrobo_backward", fields: { METERS: 0.1 } } },
+                },
+              },
+            ],
+          },
+        }),
+      );
+      expect(cpp).toContain('if (okrobo::find_color(robot.camera(), "red").has_value()) {');
+
+      const dir = mkdtempSync(join(tmpdir(), "okrobo-cpp-"));
+      const source = join(dir, "program.cpp");
+      const binary = join(dir, "program");
+      writeFileSync(
+        source,
+        cpp
+          .replace('#include "robot.hpp"', '#include <cstdio>\n#include "robot.hpp"')
+          .replace(
+            "okrobo::Robot robot;",
+            "okrobo::Robot robot;\n" +
+              "  okrobo::Obstacle box;\n" +
+              "  box.x = 1.6; box.y = 1.0; box.width = 0.2; box.height = 0.2;\n" +
+              "  box.r = 220; box.g = 40; box.b = 40;\n" +
+              "  robot.engine().add_obstacle(box);\n" +
+              "  auto target = okrobo::find_color(robot.camera(), \"red\");\n" +
+              '  std::printf("bearing=%.2f area=%d\\n", target->bearing, target->area);',
+          )
+          .replace(
+            "return 0;",
+            'auto [x, y] = robot.position(); std::printf("x=%.2f\\n", x); return 0;',
+          ),
+      );
+      execFileSync("g++", [
+        "-std=c++17",
+        "-I",
+        join(ENGINE_DIR, "src"),
+        "-I",
+        join(ENGINE_DIR, "api"),
+        source,
+        join(ENGINE_DIR, "src", "world.cpp"),
+        "-o",
+        binary,
+      ]);
+      const output = execFileSync(binary, { encoding: "utf8", timeout: 5000 }).trim().split("\n");
+      // Matches test_vision_api.cpp's world_with_box() numbers exactly: a
+      // box at (1.6, 1.0) from a robot at (1.0, 1.0) is dead ahead.
+      expect(output[0]).toBe("bearing=0.00 area=1152");
+      // The block program saw it and backed up 0.1 m, as its `if` said to.
+      expect(output[1]).toBe("x=0.90");
+    },
+    20000,
+  );
 
   it(
     "the generated C++ actually compiles and runs correctly, matching the sim",

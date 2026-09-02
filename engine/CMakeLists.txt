@@ -44,3 +44,6 @@ add_test(NAME arm_api COMMAND test_arm_api)
 
 okrobo_add_test(test_drone_api tests/test_drone_api.cpp)
 add_test(NAME drone_api COMMAND test_drone_api)
+
+okrobo_add_test(test_vision_api tests/test_vision_api.cpp)
+add_test(NAME vision_api COMMAND test_vision_api)

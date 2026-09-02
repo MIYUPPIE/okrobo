@@ -335,20 +335,20 @@ let cppReceiver = "robot";
 cppGenerator.forBlock["okrobo_wait"] = (block) =>
   `${cppReceiver}.wait(${block.getFieldValue("SECONDS")});\n`;
 cppGenerator.forBlock["okrobo_distance"] = () => ["robot.distance()", JsOrder.FUNCTION_CALL];
-// Lidar and vision have no C++ port yet (engine/api/README.md says so
-// plainly); a placeholder keeps the preview compiling instead of throwing
-// Blockly's generic "does not know how to generate" error mid-program.
+// lidar() has been on Robot since robot.hpp shipped; find_color() is new
+// (engine/api/vision.hpp). generateCpp adds the extra #includes these two
+// need (<algorithm>, "vision.hpp") only when the workspace actually uses them.
 cppGenerator.forBlock["okrobo_lidar_min"] = () => [
-  "0.0 /* lidar not in the C++ track yet */",
+  "*std::min_element(robot.lidar().begin(), robot.lidar().end())",
   JsOrder.FUNCTION_CALL,
 ];
-cppGenerator.forBlock["okrobo_see_color"] = () => [
-  "false /* vision not in the C++ track yet */",
+cppGenerator.forBlock["okrobo_see_color"] = (block) => [
+  `okrobo::find_color(robot.camera(), ${JSON.stringify(block.getFieldValue("COLOR"))}).has_value()`,
   JsOrder.FUNCTION_CALL,
 ];
-cppGenerator.forBlock["okrobo_color_bearing"] = () => [
-  "0.0 /* vision not in the C++ track yet */",
-  JsOrder.FUNCTION_CALL,
+cppGenerator.forBlock["okrobo_color_bearing"] = (block) => [
+  `okrobo::find_color(robot.camera(), ${JSON.stringify(block.getFieldValue("COLOR"))}).value_or(okrobo::Detection{}).bearing`,
+  JsOrder.MEMBER,
 ];
 cppGenerator.forBlock["okrobo_arm_move"] = (block) =>
   `arm.move("${block.getFieldValue("JOINT")}", ${block.getFieldValue("DEGREES")});\n`;
@@ -369,11 +369,17 @@ cppGenerator.forBlock["okrobo_drone_turn_right"] = (block) =>
 cppGenerator.forBlock["okrobo_drone_altitude"] = () => ["drone.altitude()", JsOrder.FUNCTION_CALL];
 cppGenerator.forBlock["okrobo_drone_distance"] = () => ["drone.distance()", JsOrder.FUNCTION_CALL];
 
-const CPP_HEADER_BY_ROBOT: Record<RobotKind, string> = {
-  car: '#include "robot.hpp"\n\nint main() {\n  okrobo::Robot robot;\n\n',
-  arm: '#include "arm.hpp"\n\nint main() {\n  okrobo::Arm arm;\n\n',
-  drone: '#include "drone.hpp"\n\nint main() {\n  okrobo::Drone drone;\n\n',
+const CPP_INCLUDE_BY_ROBOT: Record<RobotKind, string> = {
+  car: '#include "robot.hpp"\n',
+  arm: '#include "arm.hpp"\n',
+  drone: '#include "drone.hpp"\n',
 };
+const CPP_MAIN_BY_ROBOT: Record<RobotKind, string> = {
+  car: "int main() {\n  okrobo::Robot robot;\n\n",
+  arm: "int main() {\n  okrobo::Arm arm;\n\n",
+  drone: "int main() {\n  okrobo::Drone drone;\n\n",
+};
+const LIDAR_BLOCK_TYPES = ["okrobo_lidar_min"];
 
 export function generateCpp(workspace: Blockly.Workspace, robot: RobotKind = "car"): string {
   cppReceiver = RECEIVER_BY_ROBOT[robot];
@@ -386,7 +392,17 @@ export function generateCpp(workspace: Blockly.Workspace, robot: RobotKind = "ca
     .map((line) => (line ? `  ${line}` : line))
     .join("\n")
     .replace(/\n+$/, "\n");
-  return `${CPP_HEADER_BY_ROBOT[robot]}${indented}\n  return 0;\n}\n`;
+
+  const usesBlock = (types: string[]) =>
+    types.some((type) => workspace.getBlocksByType(type, false).length > 0);
+  // <algorithm> and vision.hpp are only pulled in when the workspace
+  // actually uses lidar/vision (Car only), so a plain move/turn program's
+  // preview doesn't grow unused includes.
+  let includes = CPP_INCLUDE_BY_ROBOT[robot];
+  if (robot === "car" && usesBlock(LIDAR_BLOCK_TYPES)) includes += "#include <algorithm>\n";
+  if (robot === "car" && usesBlock(VISION_BLOCK_TYPES)) includes += '#include "vision.hpp"\n';
+
+  return `${includes}\n${CPP_MAIN_BY_ROBOT[robot]}${indented}\n  return 0;\n}\n`;
 }
 
 export type RobotKind = "car" | "arm" | "drone";

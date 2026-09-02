@@ -50,25 +50,40 @@ the arm's config describe.
 ## What's covered
 
 - **`robot.hpp` → `okrobo::Robot`**: `forward`, `backward`, `turn_left`,
-  `turn_right`, `wait`, `distance`, `lidar`, `heading`, `position`, `stop` —
-  the car's full movement/sensor API.
+  `turn_right`, `wait`, `distance`, `lidar`, `heading`, `position`, `stop`,
+  `camera` — the car's full movement/sensor/camera API.
 - **`arm.hpp` → `okrobo::Arm`**: `move` (by joint name or index), `move_all`,
   `angles`, `tip`, `wait`, `stop`.
 - **`drone.hpp` → `okrobo::Drone`**: `takeoff`, `land`, `forward`,
   `backward`, `up`, `down`, `turn_left`, `turn_right`, `wait`, `altitude`,
   `distance`, `heading`, `position`, `stop`.
+- **`vision.hpp` → `okrobo::find_color`**: a direct port of
+  `okrobo.vision.find_color` — no dependencies, works with no packs
+  installed, same as the Python version. Takes the `Frame` `Robot::camera()`
+  returns; other classes don't have a camera yet.
 
-Camera and computer vision aren't ported to C++ yet on any of the three;
-each class's `.engine()` accessor exposes the underlying low-level World for
-anyone who wants to reach the engine's own camera render function
-(`engine/src/camera.hpp`) directly.
+```cpp
+#include "robot.hpp"
+#include "vision.hpp"
+
+int main() {
+    okrobo::Robot robot;
+    auto target = okrobo::find_color(robot.camera(), "red");
+    if (target) { /* target->bearing, target->coverage, target->area */ }
+}
+```
+
+Each class's `.engine()` accessor exposes the underlying low-level World for
+anyone who wants to reach engine internals (rendering, direct state) beyond
+this friendly API. Arm and Drone don't have a camera in any language yet —
+this isn't a C++-specific gap.
 
 ## Tested
 
-`engine/tests/test_robot_api.cpp`, `test_arm_api.cpp`, and
-`test_drone_api.cpp` (run by `ctest`, wired into `scripts/test-all.sh`) each
-mirror their Python test file's scenarios and expected values exactly — the
-same inputs are asserted against the same hand-computed numbers in both
+`engine/tests/test_robot_api.cpp`, `test_arm_api.cpp`, `test_drone_api.cpp`,
+and `test_vision_api.cpp` (run by `ctest`, wired into `scripts/test-all.sh`)
+each mirror their Python test file's scenarios and expected values exactly —
+the same inputs are asserted against the same hand-computed numbers in both
 languages, independently, which is the cross-language proof that these
 headers' behavior actually matches the student-facing classes everywhere
 else.
