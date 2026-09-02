@@ -108,6 +108,15 @@ body {
   background: var(--panel);
 }
 
+.menu-dropdown button:disabled {
+  color: var(--text-dim);
+  cursor: default;
+}
+
+.menu-dropdown button:disabled:hover {
+  background: none;
+}
+
 .menu-dropdown .shortcut {
   color: var(--text-dim);
   font-size: 11px;
@@ -200,6 +209,22 @@ body {
   margin: 0;
   font-size: 13px;
   color: var(--text-dim);
+}
+
+.shortcut-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shortcut-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 13px;
 }
 
 .project-list {

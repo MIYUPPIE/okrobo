@@ -54,6 +54,22 @@ const PYTHON_EDITOR_TEXT_EXPR =
   "(document.querySelector('.python-editor')?.innerText ?? '').replace(/\\u00a0/g, ' ')";
 const pythonEditorText = () => page.evaluate(PYTHON_EDITOR_TEXT_EXPR);
 
+// Menu-bar helpers: the top nav's Edit/Robot/Simulation/Help used to be
+// disabled placeholders titled "Later phases". Each is now wired to real
+// app state, checked below alongside the flow it naturally belongs to
+// (Edit's Blocks/Python items where those tabs are already visited, Robot
+// and Simulation as alternate entry points to actions the sidebar/run-bar
+// already exercise). A dropdown only closes on mouseleave or on clicking one
+// of its own items (see App.tsx's closeMenu), so every open-menu step here
+// re-clicks the header button fresh rather than assuming a previous dropdown
+// already closed itself.
+const menuItemTexts = () =>
+  page.evaluate("[...document.querySelectorAll('.menu-dropdown button')].map(b => b.textContent.trim())");
+const isMenuItemDisabled = (label) =>
+  page.evaluate(
+    `[...document.querySelectorAll('.menu-item')].find(b => b.textContent.trim() === ${JSON.stringify(label)})?.disabled`,
+  );
+
 try {
   // -- boot: engine ready, 3D rendering, starting on Car ----------------------
   await page.navigate(TARGET);
@@ -92,8 +108,92 @@ try {
     JSON.stringify(cameraStats),
   );
 
-  // -- running the preloaded wall-avoider blocks program -----------------------
-  await page.click(".run-bar .run");
+  // -- Robot menu: an alternate entry point to the same robot switch the ----
+  // sidebar already exercises further down; proves the menu's own wiring
+  // rather than re-testing switchRobot itself.
+  await page.evalClickText(".menu-item", "/^Robot$/");
+  const robotMenuItems = await waitForCondition(
+    "document.querySelectorAll('.menu-dropdown button').length > 0",
+  ).then(() => menuItemTexts());
+  check(
+    "Robot menu lists Car (checked), Arm, and Drone",
+    JSON.stringify(robotMenuItems) === JSON.stringify(["🚗 Car✓", "🦾 Arm", "🛸 Drone"]),
+    robotMenuItems.join(", "),
+  );
+  await page.evalClickText(".menu-dropdown button", "/Arm/");
+  const menuSwitchedToArm = await waitForCondition(
+    "document.querySelector('.robot.selectable.active')?.textContent?.includes('Arm')",
+    5000,
+  );
+  check("Robot menu > Arm switches the active robot", menuSwitchedToArm);
+
+  await page.evalClickText(".menu-item", "/^Robot$/");
+  await page.evalClickText(".menu-dropdown button", "/Car/");
+  const menuSwitchedBackToCar = await waitForCondition(
+    "document.querySelector('.robot.selectable.active')?.textContent?.includes('Car')",
+    5000,
+  );
+  check("Robot menu > Car switches back", menuSwitchedBackToCar);
+
+  // -- Edit menu on the Blocks tab: real Undo/Redo/Clean Up Blocks, wired to
+  // the live Blockly workspace via BlocksPanelHandle -----------------------
+  await page.evalClickText(".menu-item", "/^Edit$/");
+  const editItemsOnBlocks = await waitForCondition(
+    "document.querySelectorAll('.menu-dropdown button').length > 0",
+  ).then(() => menuItemTexts());
+  check(
+    "Edit menu on the Blocks tab offers Undo, Redo, and Clean Up Blocks",
+    JSON.stringify(editItemsOnBlocks) === JSON.stringify(["Undo Ctrl+Z", "Redo Ctrl+Y", "Clean Up Blocks"]),
+    editItemsOnBlocks.join(", "),
+  );
+  // Nothing has been edited yet, so Undo/Redo are no-ops and Clean Up only
+  // repositions blocks — none of the three should add, remove, or otherwise
+  // break the workspace. The block count staying exactly put, plus the wall
+  // avoider still running correctly right below, is the proof.
+  const blockCountBeforeEditMenu = await page.evaluate(
+    "document.querySelectorAll('.blocks-editor [data-id]').length",
+  );
+  await page.evalClickText(".menu-dropdown button", "/^Undo/");
+  await page.evalClickText(".menu-item", "/^Edit$/");
+  await page.evalClickText(".menu-dropdown button", "/^Redo/");
+  await page.evalClickText(".menu-item", "/^Edit$/");
+  await page.evalClickText(".menu-dropdown button", "/Clean Up Blocks/");
+  const blockCountAfterEditMenu = await page.evaluate(
+    "document.querySelectorAll('.blocks-editor [data-id]').length",
+  );
+  check(
+    "Edit menu Undo/Redo/Clean Up Blocks run without disturbing the workspace",
+    blockCountAfterEditMenu === blockCountBeforeEditMenu,
+    `${blockCountBeforeEditMenu} -> ${blockCountAfterEditMenu}`,
+  );
+
+  // -- Help menu: About dialog shows real version + shortcut info -------------
+  await page.evalClickText(".menu-item", "/^Help$/");
+  await page.evalClickText(".menu-dropdown button", "/About/");
+  const aboutReady = await waitForCondition("!!document.querySelector('.dialog h3')", 3000);
+  const aboutText = await page.evaluate("document.querySelector('.dialog')?.textContent ?? ''");
+  check(
+    "Help > About shows the app name, a version, and the keyboard shortcuts",
+    aboutReady && /OKHUB Robotics Studio/.test(aboutText) && /v\d+\.\d+\.\d+/.test(aboutText) && /Ctrl\+Z/.test(aboutText),
+    aboutText.slice(0, 80),
+  );
+  await page.evalClickText(".dialog-actions button", "/close/i");
+  const aboutClosed = await waitForCondition("!document.querySelector('.dialog h3')", 3000);
+  check("About dialog closes", aboutClosed);
+
+  // -- running the preloaded wall-avoider blocks program, Run/Reset via the
+  // Simulation menu (an alternate entry point to the same run/stop/reset the
+  // run-bar footer already exposes) --------------------------------------
+  await page.evalClickText(".menu-item", "/^Simulation$/");
+  const simulationItems = await waitForCondition(
+    "document.querySelectorAll('.menu-dropdown button').length > 0",
+  ).then(() => menuItemTexts());
+  check(
+    "Simulation menu lists Run, Stop, and Reset",
+    JSON.stringify(simulationItems) === JSON.stringify(["▶ Run", "⏹ Stop", "🔄 Reset"]),
+    simulationItems.join(", "),
+  );
+  await page.evalClickText(".menu-dropdown button", "/Run/");
   const sawRunning = await waitForCondition(
     "/blocks running/.test(document.querySelector('.run-bar .status')?.textContent ?? '')",
     5000,
@@ -111,19 +211,20 @@ try {
   );
   check("the robot drives and turns at a wall (y moves off 1.00)", droveAndTurned, await status());
 
-  await page.click(".run-bar .run + button"); // Stop
+  await page.click(".run-bar .run + button"); // Stop (run-bar footer entry point)
   const stopped = await waitForCondition(
     "!/blocks running/.test(document.querySelector('.run-bar .status')?.textContent ?? '')",
     3000,
   );
   check("Stop halts the program", stopped);
 
-  await page.click(".run-bar .run + button + button"); // Reset
+  await page.evalClickText(".menu-item", "/^Simulation$/");
+  await page.evalClickText(".menu-dropdown button", "/Reset/"); // Reset (Simulation menu entry point)
   const reset = await waitForCondition(
     "/x 1\\.00 y 1\\.00/.test(document.querySelector('.run-bar .status')?.textContent ?? '')",
     3000,
   );
-  check("Reset restores the starting pose", reset, await status());
+  check("Simulation menu > Reset restores the starting pose", reset, await status());
 
   // -- World tab: editing an object actually rebuilds the live sim ------------
   // Coordinate-based click()/clickText() compute a bounding rect and dispatch
@@ -133,6 +234,10 @@ try {
   await page.evalClickText(".code-tab", "/^World$/");
   const worldTabReady = await waitForCondition("!!document.querySelector('.world-panel')");
   check("World tab renders the editor for the Car robot", worldTabReady);
+
+  // The World tab is a form, not an editing surface with undo/redo — the
+  // Edit menu button itself is disabled here (see lib/editMenu.ts).
+  check("Edit menu is disabled on the World tab", await isMenuItemDisabled("Edit"));
 
   const startsWithShippedObjects = await waitForCondition(
     "document.querySelector('.world-count')?.textContent?.trim() === '2 / 16'",
@@ -167,6 +272,19 @@ try {
   const pythonText = (await pythonEditorText()) ?? "";
   check("Python tab shows okrobo Robot code generated from the blocks", pythonReady, pythonText.slice(0, 60));
   check("Python tab shows the wall-avoider's turn_left call", /turn_left\(90\)/.test(pythonText));
+
+  // Monaco (this Python editor) has its own undo/redo but no "clean up" — the
+  // Edit menu offers just those two here, unlike the Blocks tab's three.
+  await page.evalClickText(".menu-item", "/^Edit$/");
+  const editItemsOnPython = await waitForCondition(
+    "document.querySelectorAll('.menu-dropdown button').length > 0",
+  ).then(() => menuItemTexts());
+  check(
+    "Edit menu on the Python tab offers Undo and Redo, not Clean Up Blocks",
+    JSON.stringify(editItemsOnPython) === JSON.stringify(["Undo Ctrl+Z", "Redo Ctrl+Y"]),
+    editItemsOnPython.join(", "),
+  );
+  await page.evalClickText(".menu-item", "/^Edit$/"); // close it before moving on
 
   // -- C++ tab: real code against engine/api/robot.hpp, Car only --------------
   await page.evalClickText(".code-tab", "/^C\\+\\+$/");

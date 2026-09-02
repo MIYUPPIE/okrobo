@@ -93,3 +93,33 @@ export function OpenDialog({
     </div>
   );
 }
+
+const SHORTCUTS: Array<[string, string]> = [
+  ["Undo / Redo", "Ctrl+Z / Ctrl+Y"],
+  ["Save project (desktop app)", "Ctrl+S"],
+  ["Drive the car", "Arrows / WASD"],
+];
+
+export function AboutDialog({ version, onClose }: { version: string; onClose: () => void }) {
+  return (
+    <div className="dialog-backdrop" onClick={onClose}>
+      <div className="dialog" onClick={(e) => e.stopPropagation()}>
+        <h3>OKHUB Robotics Studio</h3>
+        <p className="dialog-empty">v{version} · an offline robotics IDE for schools</p>
+        <ul className="shortcut-list">
+          {SHORTCUTS.map(([label, keys]) => (
+            <li key={label}>
+              <span>{label}</span>
+              <span className="shortcut">{keys}</span>
+            </li>
+          ))}
+        </ul>
+        <div className="dialog-actions">
+          <button className="primary" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

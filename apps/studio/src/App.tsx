@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import arenaJson from "@packs/core/worlds/arena.json";
+import pkg from "../package.json";
+import { AboutDialog, NameDialog, OpenDialog } from "./dialogs";
 import { AssetStore } from "./AssetStore";
-import { NameDialog, OpenDialog } from "./dialogs";
 import { CameraView } from "./CameraView";
 import type { RobotKind } from "./blocks/okroboBlocks";
 import { BlocksPanel, type BlocksPanelHandle } from "./BlocksPanel";
@@ -11,6 +12,7 @@ import { EngineDrone } from "./engine/EngineDrone";
 import { EngineWorld } from "./engine/EngineWorld";
 import { loadEngine } from "./engine/loader";
 import { LessonsPanel } from "./LessonsPanel";
+import { editActionsForTab } from "./lib/editMenu";
 import { formatStudioStatus } from "./lib/statusText";
 import { isTeleopKey, normalizeKey, teleopWheels } from "./lib/teleop";
 import { validateWorld, type WorldDef } from "./lib/validateWorld";
@@ -38,8 +40,8 @@ import { CRUISE_SPEED, type HudInfo, Viewport3D } from "./Viewport3D";
 import { WorldPanel } from "./WorldPanel";
 import "./App.css";
 
-const OTHER_MENUS = ["Edit", "Robot", "Simulation", "Help"];
 const WORLD_ID = "arena";
+type MenuId = "file" | "edit" | "robot" | "simulation" | "help";
 
 const ROBOTS: Array<{ id: RobotKind; icon: string; name: string }> = [
   { id: "car", icon: "🚗", name: "Car" },
@@ -56,7 +58,7 @@ const TELEOP_TURN = 0.06;
 
 type EngineStatus = "loading" | "ready" | "missing";
 type RunStatus = "idle" | "cruise" | "wall" | "program" | "python" | "error";
-type Dialog = "none" | "save-as" | "open" | "store";
+type Dialog = "none" | "save-as" | "open" | "store" | "about";
 
 export default function App() {
   const [tab, setTab] = useState<CodeTab>("Blocks");
@@ -83,7 +85,7 @@ export default function App() {
 
   const [currentProject, setCurrentProject] = useState<ProjectMeta | null>(null);
   const [projectList, setProjectList] = useState<ProjectMeta[]>([]);
-  const [fileMenuOpen, setFileMenuOpen] = useState(false);
+  const [openMenu, setOpenMenu] = useState<MenuId | null>(null);
   const [dialog, setDialog] = useState<Dialog>("none");
   const [notice, setNotice] = useState("");
   const blocksRef = useRef<BlocksPanelHandle>(null);
@@ -408,7 +410,7 @@ export default function App() {
   };
 
   const actionNew = () => {
-    setFileMenuOpen(false);
+    closeMenu();
     blocksRef.current?.load(null);
     pythonRef.current?.load("", false);
     setCurrentProject(null);
@@ -419,7 +421,7 @@ export default function App() {
   };
 
   const actionSave = async () => {
-    setFileMenuOpen(false);
+    closeMenu();
     if (!currentProject) {
       setDialog("save-as");
       return;
@@ -443,7 +445,7 @@ export default function App() {
   };
 
   const openProjectById = async (id: string) => {
-    setFileMenuOpen(false);
+    closeMenu();
     setDialog("none");
     try {
       const [meta, payload] = await loadProject(id);
@@ -477,6 +479,33 @@ export default function App() {
     } catch (error) {
       showNotice(`delete failed: ${String(error)}`);
     }
+  };
+
+  const closeMenu = () => setOpenMenu(null);
+  const toggleMenu = (id: MenuId) => {
+    const next = openMenu === id ? null : id;
+    setOpenMenu(next);
+    if (next === "file") void refreshProjects();
+  };
+
+  // Which Edit actions apply depends on which tab is showing: Blockly's
+  // workspace (Blocks) has undo/redo/clean-up, Monaco (Python) has its own
+  // undo/redo, and the rest (World/Lessons/C++) have nothing to edit — see
+  // lib/editMenu.ts, tested in isolation.
+  const editActions = editActionsForTab(tab);
+  const doUndo = () => {
+    closeMenu();
+    if (tab === "Blocks") blocksRef.current?.undo();
+    else if (tab === "Python") pythonRef.current?.undo();
+  };
+  const doRedo = () => {
+    closeMenu();
+    if (tab === "Blocks") blocksRef.current?.redo();
+    else if (tab === "Python") pythonRef.current?.redo();
+  };
+  const doCleanUpBlocks = () => {
+    closeMenu();
+    blocksRef.current?.cleanUp();
   };
 
   // Ctrl+S saves in the desktop app.
@@ -513,20 +542,16 @@ export default function App() {
               className="menu-item"
               disabled={!inDesktop}
               title={inDesktop ? undefined : "Available in the desktop app"}
-              onClick={() => {
-                const next = !fileMenuOpen;
-                setFileMenuOpen(next);
-                if (next) void refreshProjects();
-              }}
+              onClick={() => toggleMenu("file")}
             >
               File
             </button>
-            {fileMenuOpen && (
-              <div className="menu-dropdown" onMouseLeave={() => setFileMenuOpen(false)}>
+            {openMenu === "file" && (
+              <div className="menu-dropdown" onMouseLeave={closeMenu}>
                 <button onClick={actionNew}>New Project</button>
                 <button
                   onClick={() => {
-                    setFileMenuOpen(false);
+                    closeMenu();
                     void refreshProjects();
                     setDialog("open");
                   }}
@@ -539,7 +564,7 @@ export default function App() {
                 <div className="menu-sep" />
                 <button
                   onClick={() => {
-                    setFileMenuOpen(false);
+                    closeMenu();
                     setDialog("store");
                   }}
                 >
@@ -554,11 +579,113 @@ export default function App() {
               </div>
             )}
           </div>
-          {OTHER_MENUS.map((m) => (
-            <button key={m} className="menu-item" disabled title="Later phases">
-              {m}
+
+          <div className="menu-wrap">
+            <button
+              className="menu-item"
+              disabled={editActions.length === 0}
+              title={editActions.length === 0 ? "Nothing to edit on this tab" : undefined}
+              onClick={() => toggleMenu("edit")}
+            >
+              Edit
             </button>
-          ))}
+            {openMenu === "edit" && (
+              <div className="menu-dropdown" onMouseLeave={closeMenu}>
+                {editActions.includes("undo") && (
+                  <button onClick={doUndo}>
+                    Undo <span className="shortcut">Ctrl+Z</span>
+                  </button>
+                )}
+                {editActions.includes("redo") && (
+                  <button onClick={doRedo}>
+                    Redo <span className="shortcut">Ctrl+Y</span>
+                  </button>
+                )}
+                {editActions.includes("cleanUp") && (
+                  <button onClick={doCleanUpBlocks}>Clean Up Blocks</button>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="menu-wrap">
+            <button className="menu-item" onClick={() => toggleMenu("robot")}>
+              Robot
+            </button>
+            {openMenu === "robot" && (
+              <div className="menu-dropdown" onMouseLeave={closeMenu}>
+                {ROBOTS.map((r) => (
+                  <button
+                    key={r.id}
+                    onClick={() => {
+                      closeMenu();
+                      switchRobot(r.id);
+                    }}
+                  >
+                    <span>
+                      {r.icon} {r.name}
+                    </span>
+                    {robot === r.id && <span className="shortcut">✓</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="menu-wrap">
+            <button className="menu-item" onClick={() => toggleMenu("simulation")}>
+              Simulation
+            </button>
+            {openMenu === "simulation" && (
+              <div className="menu-dropdown" onMouseLeave={closeMenu}>
+                <button
+                  disabled={engineStatus !== "ready"}
+                  onClick={() => {
+                    closeMenu();
+                    run();
+                  }}
+                >
+                  ▶ Run
+                </button>
+                <button
+                  disabled={engineStatus !== "ready"}
+                  onClick={() => {
+                    closeMenu();
+                    stop();
+                  }}
+                >
+                  ⏹ Stop
+                </button>
+                <button
+                  disabled={engineStatus !== "ready"}
+                  onClick={() => {
+                    closeMenu();
+                    reset();
+                  }}
+                >
+                  🔄 Reset
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="menu-wrap">
+            <button className="menu-item" onClick={() => toggleMenu("help")}>
+              Help
+            </button>
+            {openMenu === "help" && (
+              <div className="menu-dropdown" onMouseLeave={closeMenu}>
+                <button
+                  onClick={() => {
+                    closeMenu();
+                    setDialog("about");
+                  }}
+                >
+                  About OKHUB Robotics Studio
+                </button>
+              </div>
+            )}
+          </div>
         </nav>
         {inDesktop && (
           <span className="project-chip">{currentProject ? currentProject.name : "untitled"}</span>
@@ -769,6 +896,7 @@ export default function App() {
           onCancel={() => setDialog("none")}
         />
       )}
+      {dialog === "about" && <AboutDialog version={pkg.version} onClose={() => setDialog("none")} />}
     </div>
   );
 }

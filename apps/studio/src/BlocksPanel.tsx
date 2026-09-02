@@ -14,6 +14,12 @@ export interface BlocksPanelHandle {
   save(): object;
   /** Replace the workspace content; pass null for the starter program. */
   load(state: object | null): void;
+  /** Undo the last workspace edit (no-op if there is nothing to undo). */
+  undo(): void;
+  /** Redo the last undone edit (no-op if there is nothing to redo). */
+  redo(): void;
+  /** Arrange top-level blocks into a tidy vertical column. */
+  cleanUp(): void;
 }
 
 const darkTheme = Blockly.Theme.defineTheme("okrobo-dark", {
@@ -70,6 +76,9 @@ export function BlocksPanel({ robot, onCode, initialWorkspace, onWorkspaceConsum
         if (!workspace) return;
         Blockly.serialization.workspaces.load(state ?? starterWorkspace(robot), workspace);
       },
+      undo: () => workspaceRef.current?.undo(false),
+      redo: () => workspaceRef.current?.undo(true),
+      cleanUp: () => workspaceRef.current?.cleanUp(),
     }),
     [robot],
   );

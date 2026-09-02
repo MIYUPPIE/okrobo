@@ -2,7 +2,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { NameDialog, OpenDialog } from "./dialogs";
+import { AboutDialog, NameDialog, OpenDialog } from "./dialogs";
 import type { ProjectMeta } from "./projects/api";
 
 afterEach(() => cleanup());
@@ -144,5 +144,35 @@ describe("OpenDialog", () => {
 
     await user.click(container.querySelector(".dialog-backdrop")!);
     expect(onCancel).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("AboutDialog", () => {
+  it("shows the given version and the keyboard shortcuts", () => {
+    render(<AboutDialog version="0.1.0" onClose={() => {}} />);
+    expect(screen.getByText(/v0\.1\.0/)).toBeTruthy();
+    expect(screen.getByText("Ctrl+Z / Ctrl+Y")).toBeTruthy();
+    expect(screen.getByText("Ctrl+S")).toBeTruthy();
+  });
+
+  it("closes via Close and via the backdrop", async () => {
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    const { container } = render(<AboutDialog version="0.1.0" onClose={onClose} />);
+
+    await user.click(screen.getByRole("button", { name: /close/i }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    await user.click(container.querySelector(".dialog-backdrop")!);
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it("clicking inside the dialog does not trigger the backdrop close", async () => {
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    render(<AboutDialog version="0.1.0" onClose={onClose} />);
+
+    await user.click(screen.getByText("OKHUB Robotics Studio"));
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

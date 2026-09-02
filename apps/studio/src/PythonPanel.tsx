@@ -20,6 +20,10 @@ export interface PythonPanelHandle {
   get(): { code: string; edited: boolean };
   /** Replace the buffer (project load / new project). */
   load(code: string, edited: boolean): void;
+  /** Undo the last editor edit (no-op if there is nothing to undo). */
+  undo(): void;
+  /** Redo the last undone editor edit (no-op if there is nothing to redo). */
+  redo(): void;
 }
 
 export interface PythonPanelProps {
@@ -90,6 +94,8 @@ export function PythonPanel({
         userEditedRef.current = edited;
         setUserEdited(edited);
       },
+      undo: () => editorRef.current?.trigger("app", "undo", null),
+      redo: () => editorRef.current?.trigger("app", "redo", null),
     }),
     [],
   );
