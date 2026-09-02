@@ -26,13 +26,23 @@ everything the Python side sends through this parser
 ## Flashing
 
 Wire the pins at the top of `okrobo_car.ino` to your motor driver and
-ultrasonic sensor, then:
+ultrasonic sensor. Install [arduino-cli](https://arduino.github.io/arduino-cli/latest/installation/)
+and its ESP32 core once (`arduino-cli core install esp32:esp32`), then either:
 
-```bash
-# Arduino IDE: open okrobo_car/okrobo_car.ino and upload, or
-arduino-cli compile --fqbn esp32:esp32:esp32 firmware/okrobo_car
-arduino-cli upload  --fqbn esp32:esp32:esp32 -p /dev/ttyUSB0 firmware/okrobo_car
-```
+- **From the studio (recommended):** open the Hardware section in the
+  sidebar and click the ⚡ button next to a port (or "Flash new firmware" if
+  already connected). The sidecar runs `arduino-cli compile` then `upload`
+  against this same `okrobo_car.ino` and streams progress into the Python
+  output panel — no terminal needed. arduino-cli is checked lazily: if it
+  isn't on PATH, the panel says so with the install link above instead of
+  hanging or crashing.
+- **By hand**, same result:
+
+  ```bash
+  # Arduino IDE: open okrobo_car/okrobo_car.ino and upload, or
+  arduino-cli compile --fqbn esp32:esp32:esp32 firmware/okrobo_car
+  arduino-cli upload  --fqbn esp32:esp32:esp32 -p /dev/ttyUSB0 firmware/okrobo_car
+  ```
 
 Then in the studio: start the Python sidecar, open the Hardware section in the
 sidebar, and pick the port. The robot answers `H` with its identity, and Run

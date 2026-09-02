@@ -35,6 +35,13 @@ def serial_ports() -> list:
 
 WORKER_PATH = str(Path(__file__).resolve().parent / "worker.py")
 DEFAULT_PORT = 8355
+# Set by the desktop shell (apps/studio/src-tauri/src/sidecar.rs) to the
+# bundled or dev-tree location of firmware/okrobo_car; this fallback covers
+# running the sidecar directly from a repo checkout (tests, `python3 -m
+# okrobo.sidecar`) without going through Tauri at all.
+FIRMWARE_DIR = os.environ.get("OKROBO_FIRMWARE_DIR") or str(
+    Path(__file__).resolve().parents[3] / "firmware" / "okrobo_car"
+)
 
 
 class Session:
@@ -52,6 +59,7 @@ class Session:
         # the studio's simulator (contracts/robot-serial/v0).
         self.hardware = None
         self.hardware_port: str | None = None
+        self.flashing = False
 
     async def send(self, message: dict) -> None:
         try:
@@ -75,6 +83,8 @@ class Session:
             await self.connect_hardware(str(message.get("port", "")))
         elif op == "disconnect_hardware":
             await self.disconnect_hardware()
+        elif op == "flash_firmware":
+            await self.flash_firmware(str(message.get("port", "")))
 
     # -- hardware -------------------------------------------------------------
 
@@ -107,6 +117,39 @@ class Session:
             await asyncio.to_thread(robot.close)
         if notify:
             await self.send({"op": "hardware", "connected": False})
+
+    async def flash_firmware(self, port: str) -> None:
+        """Compile and upload firmware/okrobo_car to `port` (contracts/robot-serial/v0).
+
+        A live hardware link holds the port open, so any current connection is
+        dropped first; the studio falls back to the simulator meanwhile, same
+        as a manual disconnect.
+        """
+        from . import flasher
+
+        if self.flashing:
+            return
+        self.flashing = True
+        try:
+            await self.disconnect_hardware(notify=False)
+            if not flasher.is_available():
+                await self.send({"op": "flash", "stage": "error", "error": flasher.INSTALL_HINT})
+                return
+            await self.send({"op": "flash", "stage": "compile"})
+            try:
+                await asyncio.to_thread(flasher.compile_sketch, FIRMWARE_DIR)
+            except flasher.FlashError as error:
+                await self.send({"op": "flash", "stage": "error", "error": str(error)})
+                return
+            await self.send({"op": "flash", "stage": "upload"})
+            try:
+                await asyncio.to_thread(flasher.upload_sketch, FIRMWARE_DIR, port)
+            except flasher.FlashError as error:
+                await self.send({"op": "flash", "stage": "error", "error": str(error)})
+                return
+            await self.send({"op": "flash", "stage": "done"})
+        finally:
+            self.flashing = False
 
     async def call_hardware(self, method: str, args: dict):
         """Run one robot call against the physical robot (contract v1 names)."""

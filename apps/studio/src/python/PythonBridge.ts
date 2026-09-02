@@ -20,6 +20,13 @@ export interface HardwareStatus {
   error?: string;
 }
 
+export type FlashStage = "compile" | "upload" | "done" | "error";
+
+export interface FlashStatus {
+  stage: FlashStage;
+  error?: string;
+}
+
 export interface BridgeEvents {
   onStatus(connected: boolean): void;
   onStarted(): void;
@@ -29,6 +36,8 @@ export interface BridgeEvents {
   onPorts?(ports: SerialPort[]): void;
   /** Physical robot connection state. */
   onHardware?(status: HardwareStatus): void;
+  /** Progress of an arduino-cli compile+upload started by flashFirmware(). */
+  onFlash?(status: FlashStatus): void;
 }
 
 function num(value: unknown, fallback: number): number {
@@ -162,6 +171,11 @@ export class PythonBridge {
     this.send({ op: "disconnect_hardware" });
   }
 
+  /** Compile firmware/okrobo_car with arduino-cli and upload it to `port`. */
+  flashFirmware(port: string): void {
+    this.send({ op: "flash_firmware", port });
+  }
+
   dispose(): void {
     this.disposed = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);
@@ -212,6 +226,18 @@ export class PythonBridge {
           error: typeof message.error === "string" ? message.error : undefined,
         });
         break;
+      case "flash": {
+        const stage = message.stage;
+        const validStage: FlashStage =
+          stage === "compile" || stage === "upload" || stage === "done" || stage === "error"
+            ? stage
+            : "error";
+        this.events.onFlash?.({
+          stage: validStage,
+          error: typeof message.error === "string" ? message.error : undefined,
+        });
+        break;
+      }
       case "request": {
         const id = message.id;
         try {

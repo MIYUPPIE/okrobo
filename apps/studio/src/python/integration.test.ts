@@ -45,6 +45,7 @@ interface Capture {
   connected: { value: boolean };
   ports: { value: unknown[] | null };
   hardware: { value: { connected: boolean; error?: string } | null };
+  flash: { value: { stage: string; error?: string } | null };
 }
 
 function makeCapture(): Capture {
@@ -53,12 +54,14 @@ function makeCapture(): Capture {
   const connected = { value: false };
   const ports = { value: null as unknown[] | null };
   const hardware = { value: null as { connected: boolean; error?: string } | null };
+  const flash = { value: null as { stage: string; error?: string } | null };
   return {
     output,
     done,
     connected,
     ports,
     hardware,
+    flash,
     events: {
       onStatus: (isConnected) => (connected.value = isConnected),
       onStarted: () => {},
@@ -69,6 +72,7 @@ function makeCapture(): Capture {
       },
       onPorts: (list) => (ports.value = list),
       onHardware: (status) => (hardware.value = status),
+      onFlash: (status) => (flash.value = status),
     },
   };
 }
@@ -213,6 +217,29 @@ describe("python sidecar end to end (real sidecar, real engine)", () => {
     arm.destroy();
     engine.destroy();
   }, 40000);
+
+  it("flashFirmware reports arduino-cli missing on a machine without it (v0 serial)", async () => {
+    // This dev/CI machine has no arduino-cli installed, so the real sidecar
+    // takes the "not available" branch of okrobo.flasher — proving the wire
+    // format (flash_firmware -> "flash" events) round-trips through a real
+    // sidecar process without needing arduino-cli itself. The compile/upload
+    // sequencing is covered deterministically, with a monkeypatched
+    // arduino-cli, in runtime/python/tests/test_sidecar_flash.py.
+    const { engine, arm, runner } = await makeRunner();
+    const capture = makeCapture();
+    const bridge = new PythonBridge(url, runner.api, capture.events);
+    bridge.connect();
+    await waitFor(() => capture.connected.value);
+
+    bridge.flashFirmware("/dev/okrobo-does-not-exist");
+    await waitFor(() => capture.flash.value !== null, undefined, 25000);
+    expect(capture.flash.value?.stage).toBe("error");
+    expect(capture.flash.value?.error).toMatch(/arduino-cli/i);
+
+    bridge.dispose();
+    arm.destroy();
+    engine.destroy();
+  }, 30000);
 
   it("stop kills an infinite student program", async () => {
     const { engine, runner } = await makeRunner();

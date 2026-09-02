@@ -32,7 +32,8 @@
     "resources": {
       "../../../runtime/python/okrobo": "runtime-python/okrobo",
       "../../../runtime/python/.deps": "runtime-python/.deps",
-      "runtime-dist": "runtime-dist"
+      "runtime-dist": "runtime-dist",
+      "../../../firmware/okrobo_car": "firmware/okrobo_car"
     },
     "icon": [
       "icons/32x32.png",

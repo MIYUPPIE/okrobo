@@ -29,6 +29,7 @@ import {
   saveProject,
 } from "./projects/api";
 import {
+  type FlashStatus,
   type HardwareStatus,
   PythonBridge,
   type SerialPort,
@@ -56,6 +57,16 @@ type CodeTab = (typeof CODE_TABS)[number];
 const TELEOP_SPEED = CRUISE_SPEED;
 const TELEOP_TURN = 0.06;
 
+function FlashStatusNote({ flash }: { flash: FlashStatus | null }) {
+  if (!flash) return null;
+  if (flash.stage === "compile") return <p className="hardware-note">Compiling firmware...</p>;
+  if (flash.stage === "upload") return <p className="hardware-note">Uploading...</p>;
+  if (flash.stage === "done") {
+    return <p className="hardware-note connected">✓ Flashed. Reconnect to use it.</p>;
+  }
+  return <p className="hardware-note error">Flash failed: {flash.error}</p>;
+}
+
 type EngineStatus = "loading" | "ready" | "missing";
 type RunStatus = "idle" | "cruise" | "wall" | "program" | "python" | "error";
 type Dialog = "none" | "save-as" | "open" | "store" | "about";
@@ -75,6 +86,8 @@ export default function App() {
   const [pythonOutput, setPythonOutput] = useState<OutputLine[]>([]);
   const [ports, setPorts] = useState<SerialPort[]>([]);
   const [hardware, setHardware] = useState<HardwareStatus>({ connected: false });
+  const [flash, setFlash] = useState<FlashStatus | null>(null);
+  const flashing = flash?.stage === "compile" || flash?.stage === "upload";
   const [hud, setHud] = useState<HudInfo | null>(null);
   const autopilotRef = useRef(false);
   const programActiveRef = useRef(false);
@@ -159,6 +172,7 @@ export default function App() {
         else {
           setPorts([]);
           setHardware({ connected: false });
+          setFlash(null);
         }
       },
       onPorts: setPorts,
@@ -170,6 +184,21 @@ export default function App() {
             { stream: "stderr", text: `hardware: ${status.error}\n` },
           ]);
         }
+      },
+      onFlash: (status) => {
+        setFlash(status);
+        const label =
+          status.stage === "compile"
+            ? "compiling firmware/okrobo_car..."
+            : status.stage === "upload"
+              ? "uploading..."
+              : status.stage === "done"
+                ? "flashed."
+                : `error: ${status.error ?? "unknown error"}`;
+        setPythonOutput((previous) => [
+          ...previous.slice(-499),
+          { stream: status.stage === "error" ? "stderr" : "stdout", text: `flash: ${label}\n` },
+        ]);
       },
       onStarted: () => {},
       onOutput: (stream, text) => appendOutput({ stream, text }),
@@ -738,6 +767,15 @@ export default function App() {
                 Disconnect
               </button>
               <p className="hardware-note">Run now drives the real robot.</p>
+              <button
+                className="link-button"
+                disabled={flashing}
+                title="Compile firmware/okrobo_car with arduino-cli and upload it"
+                onClick={() => hardware.port && bridgeRef.current?.flashFirmware(hardware.port)}
+              >
+                ⚡ Flash new firmware
+              </button>
+              <FlashStatusNote flash={flash} />
             </>
           ) : (
             <>
@@ -746,13 +784,21 @@ export default function App() {
               ) : (
                 <ul className="port-list">
                   {ports.map((port) => (
-                    <li key={port.device}>
+                    <li key={port.device} className="port-row">
                       <button
                         className="hardware-button"
                         title={port.description || port.hwid}
                         onClick={() => bridgeRef.current?.connectHardware(port.device)}
                       >
                         {port.device.replace("/dev/", "")}
+                      </button>
+                      <button
+                        className="flash-button"
+                        disabled={flashing}
+                        title="Compile firmware/okrobo_car with arduino-cli and upload it"
+                        onClick={() => bridgeRef.current?.flashFirmware(port.device)}
+                      >
+                        ⚡
                       </button>
                     </li>
                   ))}
@@ -764,6 +810,7 @@ export default function App() {
               >
                 ↻ Refresh ports
               </button>
+              <FlashStatusNote flash={flash} />
             </>
           )}
         </div>

@@ -495,6 +495,10 @@ body {
   color: var(--green);
 }
 
+.hardware-note.error {
+  color: #e06c75;
+}
+
 .port-list {
   list-style: none;
   margin: 0;
@@ -503,6 +507,11 @@ body {
   flex-direction: column;
   gap: 4px;
   width: 100%;
+}
+
+.port-row {
+  display: flex;
+  gap: 4px;
 }
 
 .hardware-button {
@@ -520,6 +529,28 @@ body {
 
 .hardware-button:hover {
   border-color: var(--accent);
+}
+
+.flash-button {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.flash-button:hover {
+  border-color: var(--accent);
+}
+
+.flash-button:disabled,
+.link-button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .viewport-svg {

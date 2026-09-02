@@ -15,6 +15,9 @@ pub struct SidecarState(pub Mutex<Option<Child>>);
 pub struct Resolution {
     pub python: PathBuf,
     pub runtime_dir: PathBuf,
+    /// firmware/okrobo_car, wherever this install keeps it — read by
+    /// okrobo.sidecar's flash_firmware op (arduino-cli compile + upload).
+    pub firmware_dir: PathBuf,
 }
 
 pub fn resolve(resource_dir: Option<PathBuf>) -> Option<Resolution> {
@@ -30,6 +33,7 @@ pub fn resolve(resource_dir: Option<PathBuf>) -> Option<Resolution> {
             return Some(Resolution {
                 python,
                 runtime_dir: runtime,
+                firmware_dir: resources.join("firmware/okrobo_car"),
             });
         }
     }
@@ -39,16 +43,19 @@ pub fn resolve(resource_dir: Option<PathBuf>) -> Option<Resolution> {
         return Some(Resolution {
             python: PathBuf::from("python3"),
             runtime_dir: dev_runtime,
+            firmware_dir: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../firmware/okrobo_car"),
         });
     }
     None
 }
 
-pub fn spawn(resolution: &Resolution) -> std::io::Result<Child> {
+fn build_command(resolution: &Resolution) -> Command {
     let mut command = Command::new(&resolution.python);
     command
         .args(["-m", "okrobo.sidecar"])
         .current_dir(&resolution.runtime_dir)
+        .env("OKROBO_FIRMWARE_DIR", &resolution.firmware_dir)
         // Inherited python env must not leak into the sidecar: the AppImage
         // runtime exports PYTHONHOME for the GTK stack, and user shells may
         // carry PYTHONPATH (e.g. ROS). Both break the bundled interpreter.
@@ -67,7 +74,11 @@ pub fn spawn(resolution: &Resolution) -> std::io::Result<Child> {
             });
         }
     }
-    command.spawn()
+    command
+}
+
+pub fn spawn(resolution: &Resolution) -> std::io::Result<Child> {
+    build_command(resolution).spawn()
 }
 
 pub fn stop(state: &SidecarState) {
@@ -88,6 +99,10 @@ mod tests {
         let resolution = resolve(None).expect("dev runtime should resolve in the repo");
         assert!(resolution.runtime_dir.join("okrobo/sidecar.py").exists());
         assert_eq!(resolution.python, PathBuf::from("python3"));
+        assert!(
+            resolution.firmware_dir.join("okrobo_car.ino").exists(),
+            "dev firmware_dir should point at the real firmware/okrobo_car sketch"
+        );
     }
 
     #[test]
@@ -104,6 +119,7 @@ mod tests {
             resources.join("runtime-dist/cpython/bin/python3")
         );
         assert_eq!(resolution.runtime_dir, resources.join("runtime-python"));
+        assert_eq!(resolution.firmware_dir, resources.join("firmware/okrobo_car"));
     }
 
     #[test]
@@ -114,5 +130,16 @@ mod tests {
         std::fs::write(resources.join("runtime-python/okrobo/sidecar.py"), "").unwrap();
         let resolution = resolve(Some(resources)).unwrap();
         assert_eq!(resolution.python, PathBuf::from("python3"));
+    }
+
+    #[test]
+    fn spawn_passes_firmware_dir_as_an_env_var() {
+        // Inspect the real Command spawn() builds, not a duplicate of it.
+        let resolution = resolve(None).expect("dev runtime should resolve in the repo");
+        let command = build_command(&resolution);
+        let found = command.get_envs().any(|(key, value)| {
+            key == "OKROBO_FIRMWARE_DIR" && value == Some(resolution.firmware_dir.as_os_str())
+        });
+        assert!(found, "OKROBO_FIRMWARE_DIR should be set to firmware_dir");
     }
 }
