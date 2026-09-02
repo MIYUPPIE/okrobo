@@ -10,6 +10,8 @@ import { EngineArm } from "./engine/EngineArm";
 import { EngineWorld } from "./engine/EngineWorld";
 import { loadEngine } from "./engine/loader";
 import { LessonsPanel } from "./LessonsPanel";
+import { formatStudioStatus } from "./lib/statusText";
+import { isTeleopKey, normalizeKey, teleopWheels } from "./lib/teleop";
 import { validateWorld } from "./lib/validateWorld";
 import { runProgram } from "./program/execute";
 import { ProgramRunner, ProgramStoppedError } from "./program/ProgramRunner";
@@ -159,27 +161,21 @@ export default function App() {
   }, [engine, runner]);
 
   // Keyboard teleop: arrows / WASD drive the car's wheels directly.
+  // Mapping logic lives in lib/teleop.ts, tested in isolation.
   useEffect(() => {
     if (!engine || !runner || robot !== "car") return;
     const held = new Set<string>();
-    const keyFor = (e: KeyboardEvent) => (e.key.length === 1 ? e.key.toLowerCase() : e.key);
 
     const applyWheels = () => {
-      let left = 0;
-      let right = 0;
-      if (held.has("ArrowUp") || held.has("w")) [left, right] = [left + TELEOP_SPEED, right + TELEOP_SPEED];
-      if (held.has("ArrowDown") || held.has("s")) [left, right] = [left - TELEOP_SPEED, right - TELEOP_SPEED];
-      if (held.has("ArrowLeft") || held.has("a")) [left, right] = [left - TELEOP_TURN, right + TELEOP_TURN];
-      if (held.has("ArrowRight") || held.has("d")) [left, right] = [left + TELEOP_TURN, right - TELEOP_TURN];
+      const { left, right } = teleopWheels(held, TELEOP_SPEED, TELEOP_TURN);
       engine.apply(left === 0 && right === 0 ? { type: "stop" } : { type: "drive", left, right });
     };
 
-    const relevant = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "w", "a", "s", "d"]);
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.isContentEditable || /^(input|textarea)$/i.test(target.tagName))) return;
-      const key = keyFor(e);
-      if (!relevant.has(key)) return;
+      const key = normalizeKey(e.key);
+      if (!isTeleopKey(key)) return;
       e.preventDefault();
       held.add(key);
       if (programActiveRef.current) runner.abort();
@@ -192,8 +188,8 @@ export default function App() {
       applyWheels();
     };
     const onKeyUp = (e: KeyboardEvent) => {
-      const key = keyFor(e);
-      if (!relevant.has(key)) return;
+      const key = normalizeKey(e.key);
+      if (!isTeleopKey(key)) return;
       held.delete(key);
       applyWheels();
     };
@@ -445,40 +441,16 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   });
 
-  const statusText = (() => {
-    const parts = [`offline · ${robot === "arm" ? "Arm" : world.name}`];
-    if (engineStatus === "loading") parts.push("engine: loading…");
-    if (engineStatus === "missing") parts.push("engine: not built · run scripts/build-engine-wasm.sh");
-    if (engineStatus === "ready" && hud) {
-      if (hud.kind === "car") {
-        parts.push(
-          `tick ${hud.state.tick}`,
-          `x ${hud.state.pose.x.toFixed(2)} y ${hud.state.pose.y.toFixed(2)}`,
-          `d ${hud.state.sensors.distance.toFixed(2)} m`,
-        );
-      } else {
-        const degrees = hud.state.joints.angles
-          .map((a) => `${Math.round((a * 180) / Math.PI)}°`)
-          .join(" ");
-        parts.push(
-          `tick ${hud.state.tick}`,
-          `joints ${degrees}`,
-          `tip z ${hud.state.tip.z.toFixed(2)} m`,
-        );
-        if (hud.state.moving) parts.push("moving");
-      }
-      if (runStatus === "program") parts.push("▶ blocks running");
-      if (runStatus === "python") parts.push("▶ python running");
-      if (runStatus === "cruise") parts.push("cruising");
-      if (runStatus === "wall") parts.push("stopped at wall");
-      if (runStatus === "error") parts.push("program error (see console)");
-      if (hud.kind === "car" && hud.state.collided) parts.push("⚠ wall contact");
-      parts.push(pythonConnected ? "py ✓" : "py ✗");
-      if (hardware.connected) parts.push(`🔌 ${hardware.identity ?? "robot"}`);
-    }
-    if (notice) parts.push(notice);
-    return parts.join("  ·  ");
-  })();
+  // Formatting lives in lib/statusText.ts, tested in isolation.
+  const statusText = formatStudioStatus({
+    robotLabel: robot === "arm" ? "Arm" : world.name,
+    engineStatus,
+    hud,
+    runStatus,
+    pythonConnected,
+    hardware,
+    notice,
+  });
 
   return (
     <div className="studio">
