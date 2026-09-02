@@ -3,6 +3,7 @@ import "blockly/blocks";
 import * as en from "blockly/msg/en";
 import { javascriptGenerator, Order as JsOrder } from "blockly/javascript";
 import { Order as PyOrder, pythonGenerator } from "blockly/python";
+import { COLORS } from "../lib/vision";
 
 // OKROBO's Blockly vocabulary. Each block generates two languages:
 // JavaScript for execution now (async calls into ProgramRunner.api) and
@@ -10,6 +11,10 @@ import { Order as PyOrder, pythonGenerator } from "blockly/python";
 // exactly so the same program runs unchanged in Phase 3's real Python.
 
 Blockly.setLocale(en as unknown as { [key: string]: string });
+
+// One source of truth for the colours a vision block can ask for — the same
+// names okrobo.vision.COLORS and lib/vision.ts's COLORS recognize.
+const COLOR_DROPDOWN_OPTIONS: Array<[string, string]> = Object.keys(COLORS).map((name) => [name, name]);
 
 if (!Blockly.Blocks["okrobo_forward"]) {
   Blockly.defineBlocksWithJsonArray([
@@ -66,6 +71,29 @@ if (!Blockly.Blocks["okrobo_forward"]) {
       tooltip: "Meters from the robot's front edge to the wall it is facing",
     },
     {
+      type: "okrobo_lidar_min",
+      message0: "closest object anywhere (m)",
+      output: "Number",
+      colour: 25,
+      tooltip: "Shortest distance to anything in the 9-ray, 180° lidar scan ahead",
+    },
+    {
+      type: "okrobo_see_color",
+      message0: "sees %1 object?",
+      args0: [{ type: "field_dropdown", name: "COLOR", options: COLOR_DROPDOWN_OPTIONS }],
+      output: "Boolean",
+      colour: 300,
+      tooltip: "Whether the camera currently sees that colour",
+    },
+    {
+      type: "okrobo_color_bearing",
+      message0: "bearing to %1 object (°)",
+      args0: [{ type: "field_dropdown", name: "COLOR", options: COLOR_DROPDOWN_OPTIONS }],
+      output: "Number",
+      colour: 300,
+      tooltip: "Degrees from straight ahead to that colour; negative is left, positive is right. 0 if not seen",
+    },
+    {
       type: "okrobo_arm_move",
       message0: "move %1 to %2 °",
       args0: [
@@ -107,6 +135,15 @@ javascriptGenerator.forBlock["okrobo_turn_right"] = (block) =>
 javascriptGenerator.forBlock["okrobo_wait"] = (block) =>
   `await robot.wait(${block.getFieldValue("SECONDS")});\n`;
 javascriptGenerator.forBlock["okrobo_distance"] = () => ["robot.distance()", JsOrder.FUNCTION_CALL];
+javascriptGenerator.forBlock["okrobo_lidar_min"] = () => ["Math.min(...robot.lidar())", JsOrder.FUNCTION_CALL];
+javascriptGenerator.forBlock["okrobo_see_color"] = (block) => [
+  `robot.findColor(${JSON.stringify(block.getFieldValue("COLOR"))}) !== null`,
+  JsOrder.EQUALITY,
+];
+javascriptGenerator.forBlock["okrobo_color_bearing"] = (block) => [
+  `(robot.findColor(${JSON.stringify(block.getFieldValue("COLOR"))})?.bearing ?? 0)`,
+  JsOrder.FUNCTION_CALL,
+];
 javascriptGenerator.forBlock["okrobo_arm_move"] = (block) =>
   `await robot.armMove("${block.getFieldValue("JOINT")}", ${block.getFieldValue("DEGREES")});\n`;
 javascriptGenerator.forBlock["okrobo_arm_tip_height"] = () => [
@@ -128,6 +165,15 @@ let pythonReceiver = "robot";
 pythonGenerator.forBlock["okrobo_wait"] = (block) =>
   `${pythonReceiver}.wait(${block.getFieldValue("SECONDS")})\n`;
 pythonGenerator.forBlock["okrobo_distance"] = () => ["robot.distance()", PyOrder.FUNCTION_CALL];
+pythonGenerator.forBlock["okrobo_lidar_min"] = () => ["min(robot.lidar())", PyOrder.FUNCTION_CALL];
+pythonGenerator.forBlock["okrobo_see_color"] = (block) => [
+  `find_color(robot.camera(), "${block.getFieldValue("COLOR")}") is not None`,
+  PyOrder.RELATIONAL,
+];
+pythonGenerator.forBlock["okrobo_color_bearing"] = (block) => [
+  `(d.bearing if (d := find_color(robot.camera(), "${block.getFieldValue("COLOR")}")) else 0)`,
+  PyOrder.CONDITIONAL,
+];
 pythonGenerator.forBlock["okrobo_arm_move"] = (block) =>
   `arm.move("${block.getFieldValue("JOINT")}", ${block.getFieldValue("DEGREES")})\n`;
 pythonGenerator.forBlock["okrobo_arm_tip_height"] = () => ["arm.tip()[2]", PyOrder.MEMBER];
@@ -156,6 +202,9 @@ export const TOOLBOX = {
     { kind: "block", type: "okrobo_turn_right" },
     { kind: "block", type: "okrobo_wait" },
     { kind: "block", type: "okrobo_distance" },
+    { kind: "block", type: "okrobo_lidar_min" },
+    { kind: "block", type: "okrobo_see_color" },
+    { kind: "block", type: "okrobo_color_bearing" },
     ...COMMON_TOOLBOX_TAIL,
   ],
 };
@@ -264,9 +313,22 @@ const PYTHON_HEADERS: Record<RobotKind, string> = {
   arm: "from okrobo import Arm\n\narm = Arm()\n\n",
 };
 
+const VISION_BLOCK_TYPES = ["okrobo_see_color", "okrobo_color_bearing"];
+
 export function generatePython(workspace: Blockly.Workspace, robot: RobotKind = "car"): string {
   pythonReceiver = robot === "arm" ? "arm" : "robot";
   const body = pythonGenerator.workspaceToCode(workspace);
   pythonReceiver = "robot";
+  // Only import find_color when a vision block is actually on the workspace,
+  // so a plain move/turn program's preview doesn't grow an unused import.
+  const usesVision = VISION_BLOCK_TYPES.some(
+    (type) => workspace.getBlocksByType(type, false).length > 0,
+  );
+  if (robot === "car" && usesVision) {
+    return PYTHON_HEADERS.car.replace(
+      "from okrobo import Robot\n",
+      "from okrobo import Robot\nfrom okrobo.vision import find_color\n",
+    ) + body;
+  }
   return PYTHON_HEADERS[robot] + body;
 }

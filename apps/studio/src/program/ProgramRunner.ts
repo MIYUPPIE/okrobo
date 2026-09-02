@@ -1,6 +1,7 @@
 import { ARM_JOINT_NAMES } from "../contracts/robotApi";
 import type { EngineArm } from "../engine/EngineArm";
 import type { EngineWorld } from "../engine/EngineWorld";
+import { type Detection, findColor } from "../lib/vision";
 
 // Executes robot movements against the engine with the same semantics as the
 // Python Robot API (runtime/python/okrobo/robot.py): blocking duration-based
@@ -36,6 +37,10 @@ export interface RobotApi {
   lidar(rays?: number, fovDegrees?: number): number[];
   /** RGB frame from the robot's camera (contract v2). */
   camera(width?: number, height?: number): { width: number; height: number; pixels: number[] };
+  /** Largest patch of a named colour in the camera view, or null. Mirrors
+   * okrobo.vision.find_color(robot.camera(), color) exactly (locked to it by
+   * scripts/lib/vision-parity-check.mjs), since blocks execute as JS. */
+  findColor(color: string): Detection | null;
   heading(): number;
   position(): [number, number];
   stop(): void;
@@ -92,6 +97,10 @@ export class ProgramRunner {
         if (!frame) throw new Error(`camera size ${width}x${height} is out of range`);
         // Plain numbers so the frame survives JSON on the way to Python.
         return { width: frame.width, height: frame.height, pixels: Array.from(frame.pixels) };
+      },
+      findColor: (color) => {
+        const frame = this.engine.camera(64, 48);
+        return frame ? findColor(frame, color) : null;
       },
       heading: () => (this.engine.state().pose.theta * 180) / Math.PI,
       position: () => {

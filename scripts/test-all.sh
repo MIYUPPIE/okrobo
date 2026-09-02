@@ -41,6 +41,9 @@ echo "== engine (WASM + parity vs reference model) =="
 "$ROOT/scripts/build-engine-wasm.sh"
 node "$ROOT/engine/tests/parity/parity.mjs"
 
+echo "== vision (Blocks/JS find_color parity vs Python reference) =="
+node "$ROOT/scripts/lib/vision-parity-check.mjs"
+
 echo "== packs (index + signing + school server) =="
 node "$ROOT/scripts/build-pack-index.mjs" >/dev/null
 node "$ROOT/scripts/lib/signing-check.mjs"

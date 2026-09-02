@@ -58,6 +58,38 @@ describe("ProgramRunner movements (real WASM engine)", () => {
     engine.destroy();
   });
 
+  it("findColor sees the shipped arena's red box straight ahead", async () => {
+    const { engine, runner } = await makeRunner();
+    const detection = runner.api.findColor("red");
+    expect(detection).not.toBeNull();
+    expect(detection?.color).toBe("red");
+    expect(Math.abs(detection!.bearing)).toBeLessThan(3); // dead ahead
+    engine.destroy();
+  });
+
+  it("findColor returns null for a colour behind the robot (outside the camera FOV)", async () => {
+    const { engine, runner } = await makeRunner();
+    // The shipped arena's blue box is behind the car's start heading.
+    expect(runner.api.findColor("blue")).toBeNull();
+    engine.destroy();
+  });
+
+  it("findColor returns null for a colour not present in the arena at all", async () => {
+    const { engine, runner } = await makeRunner();
+    expect(runner.api.findColor("green")).toBeNull();
+    engine.destroy();
+  });
+
+  it("lidar min matches the closest of the full scan against the real engine", async () => {
+    const { engine, runner } = await makeRunner();
+    const scan = runner.api.lidar();
+    expect(Math.min(...scan)).toBeCloseTo(Math.min(...runner.api.lidar(9, 180)), 9);
+    // Straight ahead is the red box at 0.5 m; nothing in the 180-degree fan
+    // ahead can be closer than that in the shipped arena.
+    expect(Math.min(...scan)).toBeLessThanOrEqual(runner.api.distance());
+    engine.destroy();
+  });
+
   it("rejects new movements after abort until re-armed", async () => {
     const { engine, runner } = await makeRunner();
     runner.abort();

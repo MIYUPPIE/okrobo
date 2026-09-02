@@ -56,6 +56,46 @@ describe("block code generation", () => {
     expect(py).not.toContain("robot.");
   });
 
+  const sensorWorkspaceState = {
+    blocks: {
+      languageVersion: 0,
+      blocks: [
+        { type: "okrobo_lidar_min", x: 0, y: 0 },
+        { type: "okrobo_see_color", x: 0, y: 40, fields: { COLOR: "red" } },
+        { type: "okrobo_color_bearing", x: 0, y: 80, fields: { COLOR: "blue" } },
+      ],
+    },
+  };
+
+  it("generates lidar and vision blocks in JavaScript against the runner API", () => {
+    const js = generateJavaScript(load(sensorWorkspaceState));
+    expect(js).toContain("Math.min(...robot.lidar())");
+    expect(js).toContain('robot.findColor("red") !== null');
+    expect(js).toContain('(robot.findColor("blue")?.bearing ?? 0)');
+  });
+
+  it("generates lidar and vision blocks in Python against the okrobo vision API", () => {
+    const py = generatePython(load(sensorWorkspaceState));
+    expect(py).toContain("min(robot.lidar())");
+    expect(py).toContain('find_color(robot.camera(), "red") is not None');
+    expect(py).toContain('(d.bearing if (d := find_color(robot.camera(), "blue")) else 0)');
+  });
+
+  it("only imports find_color when a vision block is actually used", () => {
+    expect(generatePython(loadStarter())).not.toContain("find_color");
+
+    const py = generatePython(
+      load({
+        blocks: {
+          languageVersion: 0,
+          blocks: [{ type: "okrobo_see_color", x: 0, y: 0, fields: { COLOR: "red" } }],
+        },
+      }),
+    );
+    expect(py).toContain("from okrobo.vision import find_color");
+    expect(py).toContain("from okrobo import Robot");
+  });
+
   it("wait targets the right receiver per robot", () => {
     const waitOnly = {
       blocks: {
