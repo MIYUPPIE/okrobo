@@ -10,7 +10,7 @@ export type EngineStatus = "loading" | "ready" | "missing";
 export type RunStatus = "idle" | "cruise" | "wall" | "program" | "python" | "error";
 
 export interface StatusInput {
-  /** "Arm" for the arm, or the world's display name for the car. */
+  /** "Arm"/"Drone" for those robots, or the world's display name for the car. */
   robotLabel: string;
   engineStatus: EngineStatus;
   hud: HudInfo | null;
@@ -36,7 +36,7 @@ export function formatStudioStatus(input: StatusInput): string {
         `x ${hud.state.pose.x.toFixed(2)} y ${hud.state.pose.y.toFixed(2)}`,
         `d ${hud.state.sensors.distance.toFixed(2)} m`,
       );
-    } else {
+    } else if (hud.kind === "arm") {
       const degrees = hud.state.joints.angles
         .map((a) => `${Math.round((a * 180) / Math.PI)}°`)
         .join(" ");
@@ -46,6 +46,14 @@ export function formatStudioStatus(input: StatusInput): string {
         `tip z ${hud.state.tip.z.toFixed(2)} m`,
       );
       if (hud.state.moving) parts.push("moving");
+    } else {
+      parts.push(
+        `tick ${hud.state.tick}`,
+        `x ${hud.state.pose.x.toFixed(2)} y ${hud.state.pose.y.toFixed(2)}`,
+        `alt ${hud.state.pose.z.toFixed(2)} m`,
+        `d ${hud.state.sensors.distance.toFixed(2)} m`,
+      );
+      if (hud.state.collided) parts.push("⚠ wall/altitude limit");
     }
 
     if (input.runStatus === "program") parts.push("▶ blocks running");

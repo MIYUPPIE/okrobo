@@ -2,12 +2,13 @@
 
     python3 -m okrobo.dump_trace --world arena.json --scenario scenario.json
     python3 -m okrobo.dump_trace --robot arm --scenario arm-scenario.json
+    python3 -m okrobo.dump_trace --robot drone --scenario drone-scenario.json
 
 Scenario format: {"dt": 0.01, "phases": [{"command": <contract command>,
-"steps": <int>}, ...]} (v0 commands for the car, v1 arm commands for the arm).
-Emits the state message after applying each phase's command and after every
-step. Used by the engine parity gate (engine/tests/parity/) to lock the WASM
-engine to this reference.
+"steps": <int>}, ...]} (v0 commands for the car, v1 arm commands for the arm,
+v2 drone_* commands for the drone). Emits the state message after applying
+each phase's command and after every step. Used by the engine parity gate
+(engine/tests/parity/) to lock the WASM engine to this reference.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from ._sim import ArmWorld, World, WorldConfig
+from ._sim import ArmWorld, DroneWorld, World, WorldConfig
 
 
 def apply_car_command(world: World, command: dict) -> None:
@@ -40,9 +41,20 @@ def apply_arm_command(world: ArmWorld, command: dict) -> None:
         raise ValueError(f"unknown command type: {command['type']!r}")
 
 
+def apply_drone_command(world: DroneWorld, command: dict) -> None:
+    if command["type"] == "drone_drive":
+        world.drive(command["forward"], command["vertical"], command["yaw_rate"])
+    elif command["type"] == "drone_stop":
+        world.stop()
+    elif command["type"] == "drone_reset":
+        world.reset()
+    else:
+        raise ValueError(f"unknown command type: {command['type']!r}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--robot", choices=["car", "arm"], default="car")
+    parser.add_argument("--robot", choices=["car", "arm", "drone"], default="car")
     parser.add_argument("--world", help="contracts/world/v0 JSON file (car only)")
     parser.add_argument("--scenario", required=True, help="scenario JSON file")
     args = parser.parse_args()
@@ -56,9 +68,12 @@ def main() -> None:
         with open(args.world) as f:
             world = World(WorldConfig.from_dict(json.load(f)))
         apply = apply_car_command
-    else:
+    elif args.robot == "arm":
         world = ArmWorld()
         apply = apply_arm_command
+    else:
+        world = DroneWorld()
+        apply = apply_drone_command
 
     dt = scenario["dt"]
     for phase in scenario["phases"]:

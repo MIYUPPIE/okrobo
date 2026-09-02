@@ -186,6 +186,80 @@ console.log(
   `parity: arm ${armStates.length} states match the reference (max diff ${armMaxDiff.toExponential(2)}, tol ${TOLERANCE})`,
 );
 
+// ---- drone (contract v2) ----
+
+const droneScenarioPath = join(ROOT, "engine", "tests", "parity", "drone-scenario.json");
+const droneReference = execFileSync(
+  "python3",
+  ["-m", "okrobo.dump_trace", "--robot", "drone", "--scenario", droneScenarioPath],
+  { cwd: join(ROOT, "runtime", "python"), encoding: "utf8" },
+)
+  .trim()
+  .split("\n");
+
+const droneScenario = JSON.parse(readFileSync(droneScenarioPath, "utf8"));
+// Matches DroneConfig's defaults in _sim.py / drone.hpp: 2x2 arena, start (1,1,0,0).
+const drone = engine._drone_create(2.0, 2.0, 0.1, 1.0, 1.0, 1.0, 0.0, 0.0);
+const droneState = () => ({
+  tick: engine._drone_tick(drone),
+  pose: {
+    x: engine._drone_x(drone),
+    y: engine._drone_y(drone),
+    z: engine._drone_z(drone),
+    theta: engine._drone_theta(drone),
+  },
+  sensors: { distance: engine._drone_distance(drone) },
+  collided: engine._drone_collided(drone) === 1,
+});
+
+const droneStates = [];
+for (const phase of droneScenario.phases) {
+  const c = phase.command;
+  if (c.type === "drone_drive") engine._drone_drive(drone, c.forward, c.vertical, c.yaw_rate);
+  else if (c.type === "drone_stop") engine._drone_stop(drone);
+  else if (c.type === "drone_reset") engine._drone_reset(drone);
+  else throw new Error(`unknown drone command: ${c.type}`);
+  droneStates.push(droneState());
+  for (let i = 0; i < phase.steps; i++) {
+    engine._drone_step(drone, droneScenario.dt);
+    droneStates.push(droneState());
+  }
+}
+engine._drone_destroy(drone);
+
+if (droneReference.length !== droneStates.length) {
+  console.error(`drone parity: length mismatch ref=${droneReference.length} wasm=${droneStates.length}`);
+  process.exit(1);
+}
+
+let droneMaxDiff = 0;
+for (let i = 0; i < droneReference.length; i++) {
+  const ref = JSON.parse(droneReference[i]);
+  const got = droneStates[i];
+  const diffs = [
+    ["tick", Math.abs(ref.tick - got.tick)],
+    ["pose.x", Math.abs(ref.pose.x - got.pose.x)],
+    ["pose.y", Math.abs(ref.pose.y - got.pose.y)],
+    ["pose.z", Math.abs(ref.pose.z - got.pose.z)],
+    ["pose.theta", Math.abs(ref.pose.theta - got.pose.theta)],
+    ["sensors.distance", Math.abs(ref.sensors.distance - got.sensors.distance)],
+    ["collided", ref.collided === got.collided ? 0 : 1],
+  ];
+  for (const [field, diff] of diffs) {
+    droneMaxDiff = Math.max(droneMaxDiff, diff);
+    if (diff > TOLERANCE) {
+      console.error(`drone parity: mismatch at state ${i}, field ${field}, diff ${diff}`);
+      console.error(`  ref:  ${JSON.stringify(ref)}`);
+      console.error(`  wasm: ${JSON.stringify(got)}`);
+      process.exit(1);
+    }
+  }
+}
+
+console.log(
+  `parity: drone ${droneStates.length} states match the reference (max diff ${droneMaxDiff.toExponential(2)}, tol ${TOLERANCE})`,
+);
+
 // ---- camera (contract v2): frames must match byte for byte ----
 
 const CAMERA_WIDTH = 64;

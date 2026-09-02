@@ -11,6 +11,8 @@ export interface LessonsPanelProps {
   onTryStep: (code: string, robot: RobotKind) => void;
 }
 
+const ROBOT_LABEL: Record<RobotKind, string> = { car: "🚗 Car", arm: "🦾 Arm", drone: "🛸 Drone" };
+
 export function LessonsPanel({ onTryStep }: LessonsPanelProps) {
   const lessons = useMemo(() => bundledLessons(), []);
   const [openFile, setOpenFile] = useState<string | null>(null);
@@ -31,8 +33,7 @@ export function LessonsPanel({ onTryStep }: LessonsPanelProps) {
           <button key={lesson.file} className="lesson-card" onClick={() => setOpenFile(lesson.file)}>
             <span className="lesson-title">{lesson.title}</span>
             <span className="lesson-meta">
-              {lesson.robot === "arm" ? "🦾 Arm" : "🚗 Car"} · {lesson.steps.length} steps ·{" "}
-              {lesson.pack}
+              {ROBOT_LABEL[lesson.robot]} · {lesson.steps.length} steps · {lesson.pack}
             </span>
           </button>
         ))}
@@ -47,7 +48,7 @@ export function LessonsPanel({ onTryStep }: LessonsPanelProps) {
           ← All lessons
         </button>
         <span className="lesson-title">{open.title}</span>
-        <span className="lesson-meta">{open.robot === "arm" ? "🦾 Arm" : "🚗 Car"}</span>
+        <span className="lesson-meta">{ROBOT_LABEL[open.robot]}</span>
       </div>
       <div className="lesson-body">
         {open.steps.map((step, index) => (

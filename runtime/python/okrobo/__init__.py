@@ -4,6 +4,10 @@ from ._sim import (
     ArmConfig,
     ArmState,
     ArmWorld,
+    DroneConfig,
+    DronePose,
+    DroneState,
+    DroneWorld,
     Obstacle,
     Pose,
     RayHit,
@@ -13,11 +17,13 @@ from ._sim import (
 )
 from .arm import Arm
 from .camera import Frame
+from .drone import Drone
 from .robot import Robot
 
 __all__ = [
     "Robot",
     "Arm",
+    "Drone",
     "World",
     "WorldConfig",
     "Pose",
@@ -28,5 +34,9 @@ __all__ = [
     "ArmWorld",
     "ArmConfig",
     "ArmState",
+    "DroneWorld",
+    "DroneConfig",
+    "DronePose",
+    "DroneState",
 ]
-__version__ = "0.3.0"
+__version__ = "0.4.0"

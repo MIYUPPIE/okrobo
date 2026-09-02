@@ -39,9 +39,11 @@ describe("lesson parsing", () => {
     expect(lesson.steps[2].markdown).toBe("Well done.");
   });
 
-  it("defaults the robot to car and accepts arm lessons", () => {
+  it("defaults the robot to car and accepts arm and drone lessons", () => {
     const arm = parseLesson("---\ntitle: Wave\nrobot: arm\n---\n\nMove the shoulder.\n");
     expect(arm.robot).toBe("arm");
+    const drone = parseLesson("---\ntitle: Fly\nrobot: drone\n---\n\nTake off.\n");
+    expect(drone.robot).toBe("drone");
     const noRobot = parseLesson("---\ntitle: Basics\n---\n\nHello.\n");
     expect(noRobot.robot).toBe("car");
   });

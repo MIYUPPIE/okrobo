@@ -31,6 +31,16 @@ const ARM_HUD: StatusInput["hud"] = {
   },
 };
 
+const DRONE_HUD: StatusInput["hud"] = {
+  kind: "drone",
+  state: {
+    tick: 88,
+    pose: { x: 1.3, y: 0.8, z: 0.4, theta: -Math.PI / 2 },
+    sensors: { distance: 0.6 },
+    collided: false,
+  },
+};
+
 describe("formatStudioStatus", () => {
   it("always leads with 'offline · <robot>'", () => {
     expect(formatStudioStatus(BASE)).toBe("offline · Arena");
@@ -74,6 +84,25 @@ describe("formatStudioStatus", () => {
       hud: { ...ARM_HUD, state: { ...ARM_HUD!.state, moving: true } },
     });
     expect(moving).toContain("moving");
+  });
+
+  it("formats drone telemetry: tick, position, altitude, and distance", () => {
+    const text = formatStudioStatus({ ...BASE, robotLabel: "Drone", hud: DRONE_HUD });
+    expect(text).toContain("tick 88");
+    expect(text).toContain("x 1.30 y 0.80");
+    expect(text).toContain("alt 0.40 m");
+    expect(text).toContain("d 0.60 m");
+  });
+
+  it("flags a drone wall/altitude limit only when collided", () => {
+    const clear = formatStudioStatus({ ...BASE, hud: DRONE_HUD });
+    expect(clear).not.toContain("wall/altitude limit");
+
+    const collided = formatStudioStatus({
+      ...BASE,
+      hud: { ...DRONE_HUD, state: { ...DRONE_HUD!.state, collided: true } },
+    });
+    expect(collided).toContain("⚠ wall/altitude limit");
   });
 
   it("flags wall contact only for the car, and only when collided", () => {

@@ -401,15 +401,6 @@ body {
   border-color: var(--accent);
 }
 
-.badge {
-  margin-left: auto;
-  font-size: 10px;
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1px 6px;
-}
-
 .viewport {
   grid-area: viewport;
   position: relative;

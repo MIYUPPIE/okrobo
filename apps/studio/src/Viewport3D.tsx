@@ -2,17 +2,19 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { RobotKind } from "./blocks/okroboBlocks";
-import { type ArmState, DEFAULT_ARM, type State } from "./contracts/robotApi";
+import { type ArmState, DEFAULT_ARM, type DroneState, type State } from "./contracts/robotApi";
 import type { EngineArm } from "./engine/EngineArm";
+import type { EngineDrone } from "./engine/EngineDrone";
 import type { EngineWorld } from "./engine/EngineWorld";
 import { planSteps } from "./lib/fixedStep";
 import type { WorldDef } from "./lib/validateWorld";
 import type { ProgramRunner } from "./program/ProgramRunner";
 
 // 3D view stepping the WASM engine at a fixed timestep; renders the active
-// robot (car in its arena, or the 4-DOF arm). World frame: x/y on the ground,
-// theta CCW. Scene frame: y up, so world (x, y) -> scene (x, elevation, -y)
-// and yaw -> rotation.y.
+// robot (car in its arena, the 4-DOF arm, or the drone). World frame: x/y on
+// the ground (z is altitude for the drone), theta CCW. Scene frame: y up, so
+// world (x, y) -> scene (x, elevation, -y) and yaw -> rotation.y; the drone's
+// elevation is its altitude (z) rather than a fixed ground height.
 
 const DT = 0.01;
 const MAX_STEPS_PER_FRAME = 100;
@@ -21,12 +23,16 @@ const STOP_DISTANCE = 0.2;
 const LIDAR_RAYS = 9;
 const LIDAR_FOV = Math.PI; // 180 degrees
 
-export type HudInfo = { kind: "car"; state: State } | { kind: "arm"; state: ArmState };
+export type HudInfo =
+  | { kind: "car"; state: State }
+  | { kind: "arm"; state: ArmState }
+  | { kind: "drone"; state: DroneState };
 
 export interface Viewport3DProps {
   robot: RobotKind;
   engine: EngineWorld;
   arm: EngineArm;
+  drone: EngineDrone;
   world: WorldDef;
   /** steps the engine and completes program movements */
   runner: ProgramRunner;
@@ -40,6 +46,7 @@ export function Viewport3D({
   robot,
   engine,
   arm,
+  drone,
   world,
   runner,
   autopilotRef,
@@ -96,10 +103,9 @@ export function Viewport3D({
     grid.position.set(center.x, 0.001, center.z);
     scene.add(grid);
 
-    // ---- car scene pieces ----
-    let carGroup: THREE.Group | null = null;
-    let lidarGeometries: THREE.BufferGeometry[] = [];
-    if (robot === "car") {
+    // ---- arena walls and obstacles: shared by the car and the drone, which
+    // flies inside the same arena footprint ----
+    if (robot === "car" || robot === "drone") {
       const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x3a3f4c });
       const t = 0.04;
       const wallHeight = 0.12;
@@ -115,7 +121,9 @@ export function Viewport3D({
         scene.add(wall);
       }
 
-      // Coloured boxes: what the camera sees and vision lessons look for.
+      // Coloured boxes: what the car's camera sees and vision lessons look
+      // for. The drone flies above them (its own sensor ignores them; see
+      // DroneWorld.ray), but they're still worth seeing from up there.
       for (const obstacle of world.obstacles) {
         const box = new THREE.Mesh(
           new THREE.BoxGeometry(obstacle.width, 0.2, obstacle.height),
@@ -130,7 +138,12 @@ export function Viewport3D({
         box.position.set(obstacle.x, 0.1, -obstacle.y);
         scene.add(box);
       }
+    }
 
+    // ---- car scene pieces ----
+    let carGroup: THREE.Group | null = null;
+    let lidarGeometries: THREE.BufferGeometry[] = [];
+    if (robot === "car") {
       carGroup = new THREE.Group();
       const body = new THREE.Mesh(
         new THREE.CylinderGeometry(radius, radius, 0.06, 32),
@@ -224,6 +237,55 @@ export function Viewport3D({
       wristGroup.add(tip);
     }
 
+    // ---- drone scene pieces: a simple X-frame quadrotor ----
+    let droneGroup: THREE.Group | null = null;
+    let altitudeLine: THREE.BufferGeometry | null = null;
+    if (robot === "drone") {
+      droneGroup = new THREE.Group();
+      const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0x4ea1ff });
+      const armMaterial = new THREE.MeshStandardMaterial({ color: 0x3a3f4c });
+      const rotorMaterial = new THREE.MeshStandardMaterial({ color: 0x0d2b4d });
+
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.03, 0.08), bodyMaterial);
+      droneGroup.add(body);
+
+      const rotorOffset = 0.11;
+      for (const angle of [Math.PI / 4, (3 * Math.PI) / 4, (5 * Math.PI) / 4, (7 * Math.PI) / 4]) {
+        const armBox = new THREE.Mesh(new THREE.BoxGeometry(rotorOffset, 0.008, 0.008), armMaterial);
+        armBox.position.set((rotorOffset / 2) * Math.cos(angle), 0, (rotorOffset / 2) * Math.sin(angle));
+        armBox.rotation.y = -angle;
+        droneGroup.add(armBox);
+
+        const rotor = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.035, 0.035, 0.006, 16),
+          rotorMaterial,
+        );
+        rotor.position.set(rotorOffset * Math.cos(angle), 0.01, rotorOffset * Math.sin(angle));
+        droneGroup.add(rotor);
+      }
+
+      // Heading marker: a small nose cone along local +x (theta=0).
+      const nose = new THREE.Mesh(
+        new THREE.ConeGeometry(0.015, 0.03, 8),
+        new THREE.MeshStandardMaterial({ color: 0x37c871 }),
+      );
+      nose.rotation.z = -Math.PI / 2;
+      nose.position.set(0.05, 0.02, 0);
+      droneGroup.add(nose);
+
+      scene.add(droneGroup);
+
+      // A plumb line straight down to the ground, so altitude reads clearly
+      // in a perspective view where height alone can be ambiguous.
+      const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+      const line = new THREE.Line(
+        geometry,
+        new THREE.LineBasicMaterial({ color: 0x4ea1ff, transparent: true, opacity: 0.4 }),
+      );
+      scene.add(line);
+      altitudeLine = geometry;
+    }
+
     const resize = () => {
       const { clientWidth, clientHeight } = container;
       renderer.setSize(clientWidth, clientHeight);
@@ -285,6 +347,17 @@ export function Viewport3D({
         if (frame++ % 10 === 0) onState({ kind: "arm", state });
       }
 
+      if (robot === "drone" && droneGroup && altitudeLine) {
+        const state = drone.state();
+        droneGroup.position.set(state.pose.x, state.pose.z, -state.pose.y);
+        droneGroup.rotation.y = state.pose.theta;
+        altitudeLine.setFromPoints([
+          new THREE.Vector3(state.pose.x, state.pose.z, -state.pose.y),
+          new THREE.Vector3(state.pose.x, 0, -state.pose.y),
+        ]);
+        if (frame++ % 10 === 0) onState({ kind: "drone", state });
+      }
+
       controls.update();
       renderer.render(scene, camera);
     };
@@ -297,7 +370,7 @@ export function Viewport3D({
       renderer.dispose();
       container.removeChild(renderer.domElement);
     };
-  }, [robot, engine, arm, world, runner, autopilotRef, onState, onAutoStop]);
+  }, [robot, engine, arm, drone, world, runner, autopilotRef, onState, onAutoStop]);
 
   return <div ref={containerRef} className="viewport-3d" />;
 }

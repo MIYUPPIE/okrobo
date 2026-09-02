@@ -1,0 +1,14 @@
+{
+  "dt": 0.01,
+  "phases": [
+    { "command": { "type": "drone_drive", "forward": 0.0, "vertical": 0.2, "yaw_rate": 0.0 }, "steps": 40 },
+    { "command": { "type": "drone_drive", "forward": 0.3, "vertical": 0.0, "yaw_rate": 0.0 }, "steps": 60 },
+    { "command": { "type": "drone_drive", "forward": 0.0, "vertical": 0.0, "yaw_rate": 1.2 }, "steps": 80 },
+    { "command": { "type": "drone_stop" }, "steps": 20 },
+    { "command": { "type": "drone_drive", "forward": 5.0, "vertical": 0.0, "yaw_rate": 0.0 }, "steps": 200 },
+    { "command": { "type": "drone_drive", "forward": 0.0, "vertical": 5.0, "yaw_rate": 0.0 }, "steps": 100 },
+    { "command": { "type": "drone_drive", "forward": 0.0, "vertical": -5.0, "yaw_rate": -0.7 }, "steps": 150 },
+    { "command": { "type": "drone_reset" }, "steps": 10 },
+    { "command": { "type": "drone_drive", "forward": -0.2, "vertical": 0.1, "yaw_rate": 0.5 }, "steps": 90 }
+  ]
+}

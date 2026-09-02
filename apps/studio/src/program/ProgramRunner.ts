@@ -1,5 +1,6 @@
 import { ARM_JOINT_NAMES } from "../contracts/robotApi";
 import type { EngineArm } from "../engine/EngineArm";
+import type { EngineDrone } from "../engine/EngineDrone";
 import type { EngineWorld } from "../engine/EngineWorld";
 import { type Detection, findColor } from "../lib/vision";
 
@@ -11,6 +12,8 @@ import { type Detection, findColor } from "../lib/vision";
 
 export const PROGRAM_SPEED = 0.2; // m/s, matches Robot.SPEED
 export const PROGRAM_TURN_SPEED = 0.1; // wheel m/s during turns, matches Robot.TURN_SPEED
+export const PROGRAM_DRONE_VERTICAL_SPEED = 0.1; // m/s, matches Drone.VERTICAL_SPEED
+export const PROGRAM_DRONE_TURN_SPEED = 1.0; // rad/s, matches Drone.TURN_SPEED
 
 export class ProgramStoppedError extends Error {
   constructor() {
@@ -25,6 +28,8 @@ interface Movement {
   resolve: () => void;
   reject: (error: Error) => void;
 }
+
+type DroneMovement = Movement;
 
 /** The surface handed to generated student code as `robot`. */
 export interface RobotApi {
@@ -48,6 +53,25 @@ export interface RobotApi {
   armMoveAll(degrees: number[]): Promise<void>;
   armAngles(): number[];
   armTip(): [number, number, number];
+  /** Rise to `height` meters (from wherever it is). */
+  droneTakeoff(height?: number): Promise<void>;
+  /** Descend straight down to the ground. */
+  droneLand(): Promise<void>;
+  droneForward(meters?: number): Promise<void>;
+  droneBackward(meters?: number): Promise<void>;
+  /** Rise. Stops early at the altitude ceiling. */
+  droneUp(meters?: number): Promise<void>;
+  /** Descend. Stops early at the ground. */
+  droneDown(meters?: number): Promise<void>;
+  droneTurnLeft(degrees?: number): Promise<void>;
+  droneTurnRight(degrees?: number): Promise<void>;
+  /** Meters above the ground. */
+  droneAltitude(): number;
+  /** Meters to the wall the drone is facing (walls only; it flies above obstacles). */
+  droneDistance(): number;
+  droneHeading(): number;
+  dronePosition(): [number, number, number];
+  droneStop(): void;
   _checkpoint(): Promise<void>;
 }
 
@@ -69,6 +93,7 @@ interface ArmWait {
 export class ProgramRunner {
   readonly api: RobotApi;
   private movement: Movement | null = null;
+  private droneMovement: DroneMovement | null = null;
   private armWait: ArmWait | null = null;
   private aborted = false;
 
@@ -76,6 +101,7 @@ export class ProgramRunner {
     private readonly engine: EngineWorld,
     private readonly wheelBase: number,
     private readonly engineArm: EngineArm | null = null,
+    private readonly engineDrone: EngineDrone | null = null,
     private readonly dt = 0.01,
   ) {
     this.api = {
@@ -131,6 +157,38 @@ export class ProgramRunner {
         const { x, y, z } = this.requireArm().state().tip;
         return [x, y, z];
       },
+      droneTakeoff: (height = 0.4) => {
+        const delta = height - this.requireDrone().state().pose.z;
+        if (delta <= 0) return Promise.resolve();
+        return this.droneMove(0, PROGRAM_DRONE_VERTICAL_SPEED, 0, delta / PROGRAM_DRONE_VERTICAL_SPEED);
+      },
+      droneLand: () => {
+        const z = this.requireDrone().state().pose.z;
+        if (z <= 0) return Promise.resolve();
+        return this.droneMove(0, -PROGRAM_DRONE_VERTICAL_SPEED, 0, z / PROGRAM_DRONE_VERTICAL_SPEED);
+      },
+      droneForward: (meters = 0.1) =>
+        this.droneMove(PROGRAM_SPEED, 0, 0, Math.abs(meters) / PROGRAM_SPEED),
+      droneBackward: (meters = 0.1) =>
+        this.droneMove(-PROGRAM_SPEED, 0, 0, Math.abs(meters) / PROGRAM_SPEED),
+      droneUp: (meters = 0.1) =>
+        meters <= 0
+          ? Promise.resolve()
+          : this.droneMove(0, PROGRAM_DRONE_VERTICAL_SPEED, 0, meters / PROGRAM_DRONE_VERTICAL_SPEED),
+      droneDown: (meters = 0.1) =>
+        meters <= 0
+          ? Promise.resolve()
+          : this.droneMove(0, -PROGRAM_DRONE_VERTICAL_SPEED, 0, meters / PROGRAM_DRONE_VERTICAL_SPEED),
+      droneTurnLeft: (degrees = 90) => this.droneTurn(degrees),
+      droneTurnRight: (degrees = 90) => this.droneTurn(-degrees),
+      droneAltitude: () => this.requireDrone().state().pose.z,
+      droneDistance: () => this.requireDrone().state().sensors.distance,
+      droneHeading: () => (this.requireDrone().state().pose.theta * 180) / Math.PI,
+      dronePosition: () => {
+        const { x, y, z } = this.requireDrone().state().pose;
+        return [x, y, z];
+      },
+      droneStop: () => this.requireDrone().apply({ type: "drone_stop" }),
       _checkpoint: async () => {
         if (this.aborted) throw new ProgramStoppedError();
         // Yield a macrotask so `while (true)` loops never freeze the UI.
@@ -140,11 +198,12 @@ export class ProgramRunner {
     };
   }
 
-  /** Step both worlds. Called from the render loop with this frame's budget. */
+  /** Step every world. Called from the render loop with this frame's budget. */
   tick(steps: number): void {
     for (let i = 0; i < steps; i++) {
       this.engine.step(this.dt);
       this.engineArm?.step(this.dt);
+      this.engineDrone?.step(this.dt);
       const m = this.movement;
       if (m) {
         m.stepsLeft -= 1;
@@ -153,6 +212,16 @@ export class ProgramRunner {
           if (!collided && m.remainder > 1e-12) this.engine.step(m.remainder);
           this.finishMovement();
           m.resolve();
+        }
+      }
+      const dm = this.droneMovement;
+      if (dm && this.engineDrone) {
+        dm.stepsLeft -= 1;
+        const collided = this.engineDrone.state().collided;
+        if (dm.stepsLeft <= 0 || collided) {
+          if (!collided && dm.remainder > 1e-12) this.engineDrone.step(dm.remainder);
+          this.finishDroneMovement();
+          dm.resolve();
         }
       }
       const wait = this.armWait;
@@ -164,7 +233,7 @@ export class ProgramRunner {
   }
 
   get busy(): boolean {
-    return this.movement !== null || this.armWait !== null;
+    return this.movement !== null || this.droneMovement !== null || this.armWait !== null;
   }
 
   /** Allow a new program to run after a previous abort. */
@@ -172,12 +241,15 @@ export class ProgramRunner {
     this.aborted = false;
   }
 
-  /** Interrupt the program: active movements reject, wheels and joints stop. */
+  /** Interrupt the program: active movements reject, wheels/rotors and joints stop. */
   abort(): void {
     this.aborted = true;
     const m = this.movement;
     this.finishMovement();
     m?.reject(new ProgramStoppedError());
+    const dm = this.droneMovement;
+    this.finishDroneMovement();
+    dm?.reject(new ProgramStoppedError());
     const wait = this.armWait;
     this.armWait = null;
     this.engineArm?.apply({ type: "stop" });
@@ -187,6 +259,11 @@ export class ProgramRunner {
   private requireArm(): EngineArm {
     if (!this.engineArm) throw new Error("no arm in this world");
     return this.engineArm;
+  }
+
+  private requireDrone(): EngineDrone {
+    if (!this.engineDrone) throw new Error("no drone in this world");
+    return this.engineDrone;
   }
 
   private armCommand(applyTargets: () => void): Promise<void> {
@@ -202,6 +279,13 @@ export class ProgramRunner {
   private finishMovement(): void {
     this.movement = null;
     this.engine.apply({ type: "stop" });
+  }
+
+  private finishDroneMovement(): void {
+    this.droneMovement = null;
+    // Optional, not requireDrone(): called unconditionally from abort() even
+    // when this runner has no drone at all, mirroring engineArm?.apply above.
+    this.engineDrone?.apply({ type: "drone_stop" });
   }
 
   private turn(degrees: number): Promise<void> {
@@ -226,6 +310,31 @@ export class ProgramRunner {
     }
     return new Promise((resolve, reject) => {
       this.movement = { stepsLeft: fullSteps, remainder, resolve, reject };
+    });
+  }
+
+  private droneTurn(degrees: number): Promise<void> {
+    if (degrees === 0) return Promise.resolve();
+    const duration = Math.abs((degrees * Math.PI) / 180) / PROGRAM_DRONE_TURN_SPEED;
+    const yawRate = degrees > 0 ? PROGRAM_DRONE_TURN_SPEED : -PROGRAM_DRONE_TURN_SPEED;
+    return this.droneMove(0, 0, yawRate, duration);
+  }
+
+  private droneMove(forward: number, vertical: number, yawRate: number, duration: number): Promise<void> {
+    if (this.aborted) return Promise.reject(new ProgramStoppedError());
+    if (this.droneMovement) return Promise.reject(new Error("drone is already moving"));
+    const drone = this.requireDrone();
+    const fullSteps = Math.floor(duration / this.dt);
+    const remainder = duration - fullSteps * this.dt;
+    drone.apply({ type: "drone_drive", forward, vertical, yaw_rate: yawRate });
+    if (fullSteps === 0) {
+      // Movement shorter than one step: run it synchronously and finish.
+      if (remainder > 1e-12) drone.step(remainder);
+      drone.apply({ type: "drone_stop" });
+      return Promise.resolve();
+    }
+    return new Promise((resolve, reject) => {
+      this.droneMovement = { stepsLeft: fullSteps, remainder, resolve, reject };
     });
   }
 }

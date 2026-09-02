@@ -34,6 +34,14 @@ const ARM_LESSON: LoadedLesson = {
   steps: [{ markdown: "Move a joint.", code: "arm.move('shoulder', 85)" }],
 };
 
+const DRONE_LESSON: LoadedLesson = {
+  title: "Fly a square",
+  robot: "drone",
+  file: "03-fly.md",
+  pack: "core",
+  steps: [{ markdown: "Take off.", code: "drone.takeoff()" }],
+};
+
 describe("LessonsPanel", () => {
   it("shows an empty state when no lessons are installed", () => {
     bundledLessons.mockReturnValue([]);
@@ -42,13 +50,15 @@ describe("LessonsPanel", () => {
   });
 
   it("lists every lesson with its robot and step count", () => {
-    bundledLessons.mockReturnValue([CAR_LESSON, ARM_LESSON]);
+    bundledLessons.mockReturnValue([CAR_LESSON, ARM_LESSON, DRONE_LESSON]);
     render(<LessonsPanel onTryStep={() => {}} />);
 
     expect(screen.getByText("Drive to the wall")).toBeTruthy();
     expect(screen.getByText("Wave the arm")).toBeTruthy();
+    expect(screen.getByText("Fly a square")).toBeTruthy();
     expect(screen.getByText(/🚗 Car · 2 steps/)).toBeTruthy();
     expect(screen.getByText(/🦾 Arm · 1 steps/)).toBeTruthy();
+    expect(screen.getByText(/🛸 Drone · 1 steps/)).toBeTruthy();
   });
 
   it("opens a lesson to show its steps, and returns to the list", async () => {
@@ -87,6 +97,18 @@ describe("LessonsPanel", () => {
     await user.click(screen.getByText("Wave the arm"));
     await user.click(screen.getByRole("button", { name: /try this/i }));
     expect(onTryStep).toHaveBeenCalledWith("arm.move('shoulder', 85)", "arm");
+  });
+
+  it('"Try this" reports the drone for a drone lesson, and shows the drone badge in the reader', async () => {
+    bundledLessons.mockReturnValue([CAR_LESSON, ARM_LESSON, DRONE_LESSON]);
+    const onTryStep = vi.fn();
+    const user = userEvent.setup();
+    render(<LessonsPanel onTryStep={onTryStep} />);
+
+    await user.click(screen.getByText("Fly a square"));
+    expect(screen.getByText("🛸 Drone")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /try this/i }));
+    expect(onTryStep).toHaveBeenCalledWith("drone.takeoff()", "drone");
   });
 
   it("does not show a Try button for a step with no code", async () => {

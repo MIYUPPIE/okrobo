@@ -4,6 +4,7 @@
 
 import arenaJson from "@packs/core/worlds/arena.json";
 import { EngineArm } from "../engine/EngineArm";
+import { EngineDrone } from "../engine/EngineDrone";
 import { EngineWorld } from "../engine/EngineWorld";
 import { type EngineModule, loadEngine } from "../engine/loader";
 import { validateWorld } from "../lib/validateWorld";
@@ -27,12 +28,14 @@ export function loadTestEngineModule(): Promise<EngineModule> {
 export async function makeRunner(): Promise<{
   engine: EngineWorld;
   arm: EngineArm;
+  drone: EngineDrone;
   runner: ProgramRunner;
 }> {
   const module = await loadTestEngineModule();
   const engine = new EngineWorld(module, ARENA);
   const arm = new EngineArm(module);
-  return { engine, arm, runner: new ProgramRunner(engine, ARENA.wheel_base, arm) };
+  const drone = new EngineDrone(module, ARENA);
+  return { engine, arm, drone, runner: new ProgramRunner(engine, ARENA.wheel_base, arm, drone) };
 }
 
 /** Drive runner ticks until `done.value`, yielding so program promises settle. */

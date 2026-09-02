@@ -74,6 +74,38 @@ describe("executeRemoteRequest (real WASM engine)", () => {
     engine.destroy();
   });
 
+  it("maps drone methods (v2)", async () => {
+    const { engine, drone, runner } = await makeRunner();
+    const takeoff = executeRemoteRequest(runner.api, "drone_takeoff", { height: 0.5 });
+    runner.tick(600);
+    await takeoff;
+    await expect(executeRemoteRequest(runner.api, "drone_altitude", {})).resolves.toBeCloseTo(0.5, 6);
+
+    const forward = executeRemoteRequest(runner.api, "drone_forward", { meters: 0.2 });
+    runner.tick(200);
+    await forward;
+    const position = (await executeRemoteRequest(runner.api, "drone_position", {})) as number[];
+    expect(position[0]).toBeCloseTo(1.2, 6);
+
+    const turn = executeRemoteRequest(runner.api, "drone_turn_right", { degrees: 90 });
+    runner.tick(400);
+    await turn;
+    await expect(executeRemoteRequest(runner.api, "drone_heading", {})).resolves.toBeCloseTo(-90, 6);
+
+    drone.destroy();
+    engine.destroy();
+  });
+
+  it("applies defaults for drone args, matching the local Drone API", async () => {
+    const { engine, drone, runner } = await makeRunner();
+    const request = executeRemoteRequest(runner.api, "drone_takeoff", {});
+    runner.tick(450);
+    await request;
+    expect(drone.state().pose.z).toBeCloseTo(0.4, 6); // default hover height
+    drone.destroy();
+    engine.destroy();
+  });
+
   it("rejects unknown methods", async () => {
     const { engine, runner } = await makeRunner();
     await expect(executeRemoteRequest(runner.api, "fly", {})).rejects.toThrow("unknown method");

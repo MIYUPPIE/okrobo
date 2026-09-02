@@ -1,4 +1,4 @@
-// TypeScript mirror of contracts/robot-api/v1 (v0 car + arm + lidar).
+// TypeScript mirror of contracts/robot-api/v2 (v1 car + arm + lidar, plus the drone).
 // Change only together with the contract (version bump) and the other sides.
 
 export type Command =
@@ -50,4 +50,32 @@ export const DEFAULT_WORLD = {
   robotRadius: 0.1,
   wheelBase: 0.12,
   start: { x: 1.0, y: 1.0, theta: 0.0 } satisfies Pose,
+} as const;
+
+export type DroneCommand =
+  | { type: "drone_drive"; forward: number; vertical: number; yaw_rate: number }
+  | { type: "drone_stop" }
+  | { type: "drone_reset" };
+
+export interface DronePose {
+  x: number;
+  y: number;
+  /** altitude, meters, >= 0 */
+  z: number;
+  /** radians, (-pi, pi], 0 faces +x, CCW positive */
+  theta: number;
+}
+
+export interface DroneState {
+  tick: number;
+  pose: DronePose;
+  /** meters to the nearest arena wall along the heading; walls only, the drone flies above obstacles */
+  sensors: { distance: number };
+  collided: boolean;
+}
+
+/** Mirrors engine DroneConfig; shares the car's arena footprint. */
+export const DEFAULT_DRONE = {
+  maxAltitude: 1.0,
+  start: { x: 1.0, y: 1.0, z: 0.0, theta: 0.0 } satisfies DronePose,
 } as const;

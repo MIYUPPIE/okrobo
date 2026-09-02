@@ -7,6 +7,7 @@ import { CameraView } from "./CameraView";
 import type { RobotKind } from "./blocks/okroboBlocks";
 import { BlocksPanel, type BlocksPanelHandle } from "./BlocksPanel";
 import { EngineArm } from "./engine/EngineArm";
+import { EngineDrone } from "./engine/EngineDrone";
 import { EngineWorld } from "./engine/EngineWorld";
 import { loadEngine } from "./engine/loader";
 import { LessonsPanel } from "./LessonsPanel";
@@ -40,10 +41,10 @@ import "./App.css";
 const OTHER_MENUS = ["Edit", "Robot", "Simulation", "Help"];
 const WORLD_ID = "arena";
 
-const ROBOTS: Array<{ id: RobotKind | null; icon: string; name: string; phase?: string }> = [
+const ROBOTS: Array<{ id: RobotKind; icon: string; name: string }> = [
   { id: "car", icon: "🚗", name: "Car" },
   { id: "arm", icon: "🦾", name: "Arm" },
-  { id: null, icon: "🛸", name: "Drone", phase: "Phase 6+" },
+  { id: "drone", icon: "🛸", name: "Drone" },
 ];
 
 
@@ -63,6 +64,7 @@ export default function App() {
   const [engineStatus, setEngineStatus] = useState<EngineStatus>("loading");
   const [engine, setEngine] = useState<EngineWorld | null>(null);
   const [arm, setArm] = useState<EngineArm | null>(null);
+  const [drone, setDrone] = useState<EngineDrone | null>(null);
   const [runner, setRunner] = useState<ProgramRunner | null>(null);
   const [runStatus, setRunStatus] = useState<RunStatus>("idle");
   const [pythonCode, setPythonCode] = useState("");
@@ -114,14 +116,17 @@ export default function App() {
     let cancelled = false;
     let created: EngineWorld | null = null;
     let createdArm: EngineArm | null = null;
+    let createdDrone: EngineDrone | null = null;
     loadEngine()
       .then((module) => {
         if (cancelled) return;
         created = new EngineWorld(module, world);
         createdArm = new EngineArm(module);
+        createdDrone = new EngineDrone(module, world);
         setEngine(created);
         setArm(createdArm);
-        setRunner(new ProgramRunner(created, world.wheel_base, createdArm));
+        setDrone(createdDrone);
+        setRunner(new ProgramRunner(created, world.wheel_base, createdArm, createdDrone));
         setEngineStatus("ready");
       })
       .catch(() => {
@@ -131,8 +136,10 @@ export default function App() {
       cancelled = true;
       created?.destroy();
       createdArm?.destroy();
+      createdDrone?.destroy();
       setEngine(null);
       setArm(null);
+      setDrone(null);
       setRunner(null);
     };
   }, [world]);
@@ -286,6 +293,7 @@ export default function App() {
         programActiveRef.current = false;
         engine.apply({ type: "stop" });
         arm?.apply({ type: "stop" });
+        drone?.apply({ type: "drone_stop" });
       });
   };
 
@@ -298,6 +306,7 @@ export default function App() {
     haltEverything();
     engine.apply({ type: "reset" });
     arm?.apply({ type: "reset" });
+    drone?.apply({ type: "drone_reset" });
   };
 
   // Desktop window title follows the open project.
@@ -362,6 +371,7 @@ export default function App() {
     autopilotRef.current = false;
     engine.apply({ type: "stop" });
     arm?.apply({ type: "stop" });
+    drone?.apply({ type: "drone_stop" });
     setRunStatus("idle");
   };
 
@@ -436,7 +446,8 @@ export default function App() {
     try {
       const [meta, payload] = await loadProject(id);
       applyProjectWorld(payload);
-      const target: RobotKind = payload.robot === "arm" ? "arm" : "car";
+      const target: RobotKind =
+        payload.robot === "arm" ? "arm" : payload.robot === "drone" ? "drone" : "car";
       if (target !== robot) {
         setPendingContent({
           robot: target,
@@ -481,7 +492,7 @@ export default function App() {
 
   // Formatting lives in lib/statusText.ts, tested in isolation.
   const statusText = formatStudioStatus({
-    robotLabel: robot === "arm" ? "Arm" : world.name,
+    robotLabel: robot === "arm" ? "Arm" : robot === "drone" ? "Drone" : world.name,
     engineStatus,
     hud,
     runStatus,
@@ -555,25 +566,17 @@ export default function App() {
       <aside className="sidebar">
         <h2>Robots</h2>
         <ul>
-          {ROBOTS.map((r) =>
-            r.id ? (
-              <li key={r.name}>
-                <button
-                  className={robot === r.id ? "robot selectable active" : "robot selectable"}
-                  onClick={() => switchRobot(r.id as RobotKind)}
-                >
-                  <span className="robot-icon">{r.icon}</span>
-                  <span>{r.name}</span>
-                </button>
-              </li>
-            ) : (
-              <li key={r.name} className="robot">
+          {ROBOTS.map((r) => (
+            <li key={r.name}>
+              <button
+                className={robot === r.id ? "robot selectable active" : "robot selectable"}
+                onClick={() => switchRobot(r.id)}
+              >
                 <span className="robot-icon">{r.icon}</span>
                 <span>{r.name}</span>
-                <span className="badge">{r.phase}</span>
-              </li>
-            ),
-          )}
+              </button>
+            </li>
+          ))}
         </ul>
         <div className="teleop-hint">
           <h2>Drive</h2>
@@ -638,12 +641,13 @@ export default function App() {
       </aside>
 
       <main className="viewport">
-        {engine && arm && runner ? (
+        {engine && arm && drone && runner ? (
           <Viewport3D
             key={robot}
             robot={robot}
             engine={engine}
             arm={arm}
+            drone={drone}
             world={world}
             runner={runner}
             autopilotRef={autopilotRef}
@@ -702,11 +706,12 @@ export default function App() {
             />
           </div>
           <div className={tab === "World" ? "tab-panel active padded" : "tab-panel padded"}>
-            {robot === "car" ? (
+            {robot === "car" || robot === "drone" ? (
               <WorldPanel key={worldEpoch} world={world} defaultWorld={defaultWorld} onApply={applyWorld} />
             ) : (
               <p className="placeholder-note">
-                World editing applies to the Car's arena; the Arm has no floor objects yet.
+                World editing applies to the shared arena the Car and Drone fly in; the Arm has no floor
+                objects.
               </p>
             )}
           </div>

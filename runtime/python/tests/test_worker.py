@@ -156,6 +156,43 @@ def test_camera_frames_cross_the_rpc_boundary():
     assert "pixel: (10, 20, 30)" in stdout
 
 
+def test_drone_calls_become_rpc_requests():
+    code = (
+        "from okrobo import Drone\n"
+        "drone = Drone()\n"
+        "drone.takeoff()\n"
+        "drone.forward(0.3)\n"
+        "drone.turn_right(45)\n"
+        "drone.land()\n"
+    )
+    requests, _, stderr, exit_code = run_worker(code, lambda r: {"ok": True, "result": None})
+    assert exit_code == 0, stderr
+    assert [r["method"] for r in requests] == [
+        "drone_takeoff",
+        "drone_forward",
+        "drone_turn_right",
+        "drone_land",
+    ]
+    assert requests[0]["args"] == {"height": 0.4}
+    assert requests[1]["args"] == {"meters": 0.3}
+    assert requests[2]["args"] == {"degrees": 45}
+    assert requests[3]["args"] == {}
+
+
+def test_drone_readbacks():
+    code = (
+        "from okrobo import Drone\n"
+        "drone = Drone()\n"
+        "print(drone.altitude(), drone.heading(), drone.position())\n"
+    )
+    answers = {"drone_altitude": 0.4, "drone_heading": -90.0, "drone_position": [1.3, 0.7, 0.4]}
+    _, stdout, stderr, exit_code = run_worker(
+        code, lambda r: {"ok": True, "result": answers[r["method"]]}
+    )
+    assert exit_code == 0, stderr
+    assert "0.4 -90.0 (1.3, 0.7, 0.4)" in stdout
+
+
 def test_position_tuple():
     code = "from okrobo import Robot\nx, y = Robot().position()\nprint(x + y)\n"
     _, stdout, stderr, exit_code = run_worker(code, lambda r: {"ok": True, "result": [1.0, 0.5]})

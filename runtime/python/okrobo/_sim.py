@@ -291,3 +291,124 @@ class ArmWorld:
             moving=moving,
             tip=self._forward_kinematics(),
         )
+
+
+# ---- drone (contract v2) ----
+#
+# Point-mass kinematics, same spirit as the car (Phase 1-4: no physics
+# engine) and the arm (Phase 5: no solver). Four degrees of freedom: forward
+# speed and yaw rate in the horizontal plane (exactly the car's v/omega, just
+# without a wheel_base to derive them from two wheels) plus a vertical speed.
+# The drone shares the car's arena footprint (arena_width/height,
+# robot_radius) and clamps to it the same way; altitude clamps to
+# [0, max_altitude]. It flies above the ground-level obstacles, so unlike the
+# car it has no obstacle-aware sensor — only the arena walls are a hazard,
+# which is what its distance sensor and collision clamp are for.
+
+
+@dataclass
+class DronePose:
+    x: float = 0.0
+    y: float = 0.0
+    z: float = 0.0
+    theta: float = 0.0
+
+
+@dataclass
+class DroneConfig:
+    arena_width: float = 2.0
+    arena_height: float = 2.0
+    robot_radius: float = 0.1
+    max_altitude: float = 1.0
+    start: DronePose = field(default_factory=lambda: DronePose(1.0, 1.0, 0.0, 0.0))
+
+
+@dataclass
+class DroneState:
+    tick: int
+    pose: DronePose
+    distance: float
+    collided: bool
+
+    def to_message(self) -> dict:
+        """Contract v2 drone state message."""
+        return {
+            "tick": self.tick,
+            "pose": {"x": self.pose.x, "y": self.pose.y, "z": self.pose.z, "theta": self.pose.theta},
+            "sensors": {"distance": self.distance},
+            "collided": self.collided,
+        }
+
+
+class DroneWorld:
+    """Reference model for the drone; mirrors engine/src/drone.cpp exactly."""
+
+    def __init__(self, config: DroneConfig | None = None) -> None:
+        self.config = config or DroneConfig()
+        s = self.config.start
+        self._pose = DronePose(s.x, s.y, s.z, s.theta)
+        self._forward = 0.0
+        self._vertical = 0.0
+        self._yaw_rate = 0.0
+        self._tick = 0
+        self._collided = False
+
+    def drive(self, forward: float, vertical: float, yaw_rate: float) -> None:
+        self._forward = forward
+        self._vertical = vertical
+        self._yaw_rate = yaw_rate
+
+    def stop(self) -> None:
+        self._forward = self._vertical = self._yaw_rate = 0.0
+
+    def reset(self) -> None:
+        s = self.config.start
+        self._pose = DronePose(s.x, s.y, s.z, s.theta)
+        self._forward = self._vertical = self._yaw_rate = 0.0
+        self._tick = 0
+        self._collided = False
+
+    def step(self, dt: float) -> None:
+        p = self._pose
+        p.x += self._forward * dt * math.cos(p.theta)
+        p.y += self._forward * dt * math.sin(p.theta)
+        p.z += self._vertical * dt
+        p.theta = _normalize_angle(p.theta + self._yaw_rate * dt)
+
+        min_xy = self.config.robot_radius
+        max_x = self.config.arena_width - self.config.robot_radius
+        max_y = self.config.arena_height - self.config.robot_radius
+        clamped_x = min(max(p.x, min_xy), max_x)
+        clamped_y = min(max(p.y, min_xy), max_y)
+        clamped_z = min(max(p.z, 0.0), self.config.max_altitude)
+        self._collided = clamped_x != p.x or clamped_y != p.y or clamped_z != p.z
+        p.x, p.y, p.z = clamped_x, clamped_y, clamped_z
+
+        self._tick += 1
+
+    def _sensor_distance(self) -> float:
+        return self.ray(0.0)
+
+    def ray(self, offset: float) -> float:
+        """Horizontal distance from the drone to the nearest arena wall along
+        heading+offset. Walls only: the drone flies above the boxes."""
+        dx = math.cos(self._pose.theta + offset)
+        dy = math.sin(self._pose.theta + offset)
+        t = math.inf
+        if dx > _OMEGA_EPSILON:
+            t = min(t, (self.config.arena_width - self._pose.x) / dx)
+        if dx < -_OMEGA_EPSILON:
+            t = min(t, -self._pose.x / dx)
+        if dy > _OMEGA_EPSILON:
+            t = min(t, (self.config.arena_height - self._pose.y) / dy)
+        if dy < -_OMEGA_EPSILON:
+            t = min(t, -self._pose.y / dy)
+        return max(0.0, t - self.config.robot_radius)
+
+    def state(self) -> DroneState:
+        return DroneState(
+            tick=self._tick,
+            pose=DronePose(self._pose.x, self._pose.y, self._pose.z, self._pose.theta),
+            distance=self._sensor_distance(),
+            collided=self._collided,
+        )

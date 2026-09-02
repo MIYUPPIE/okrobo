@@ -121,6 +121,91 @@ if (!Blockly.Blocks["okrobo_forward"]) {
       colour: 25,
       tooltip: "How high the arm's tip is above the ground",
     },
+    {
+      type: "okrobo_drone_takeoff",
+      message0: "takeoff to %1 m",
+      args0: [{ type: "field_number", name: "HEIGHT", value: 0.4, min: 0.1, precision: 0.01 }],
+      previousStatement: null,
+      nextStatement: null,
+      colour: 140,
+      tooltip: "Rise straight up to this altitude",
+    },
+    {
+      type: "okrobo_drone_land",
+      message0: "land",
+      previousStatement: null,
+      nextStatement: null,
+      colour: 140,
+      tooltip: "Descend straight down to the ground",
+    },
+    {
+      type: "okrobo_drone_forward",
+      message0: "fly forward %1 m",
+      args0: [{ type: "field_number", name: "METERS", value: 0.1, min: 0.01, precision: 0.01 }],
+      previousStatement: null,
+      nextStatement: null,
+      colour: 140,
+      tooltip: "Fly straight ahead, stopping early at a wall",
+    },
+    {
+      type: "okrobo_drone_backward",
+      message0: "fly backward %1 m",
+      args0: [{ type: "field_number", name: "METERS", value: 0.1, min: 0.01, precision: 0.01 }],
+      previousStatement: null,
+      nextStatement: null,
+      colour: 140,
+      tooltip: "Fly straight back, stopping early at a wall",
+    },
+    {
+      type: "okrobo_drone_up",
+      message0: "rise %1 m",
+      args0: [{ type: "field_number", name: "METERS", value: 0.1, min: 0.01, precision: 0.01 }],
+      previousStatement: null,
+      nextStatement: null,
+      colour: 140,
+      tooltip: "Rise, stopping early at the altitude ceiling",
+    },
+    {
+      type: "okrobo_drone_down",
+      message0: "descend %1 m",
+      args0: [{ type: "field_number", name: "METERS", value: 0.1, min: 0.01, precision: 0.01 }],
+      previousStatement: null,
+      nextStatement: null,
+      colour: 140,
+      tooltip: "Descend, stopping early at the ground",
+    },
+    {
+      type: "okrobo_drone_turn_left",
+      message0: "turn left %1 °",
+      args0: [{ type: "field_number", name: "DEGREES", value: 90, min: 1, max: 360, precision: 1 }],
+      previousStatement: null,
+      nextStatement: null,
+      colour: 205,
+      tooltip: "Rotate in place, counter-clockwise",
+    },
+    {
+      type: "okrobo_drone_turn_right",
+      message0: "turn right %1 °",
+      args0: [{ type: "field_number", name: "DEGREES", value: 90, min: 1, max: 360, precision: 1 }],
+      previousStatement: null,
+      nextStatement: null,
+      colour: 205,
+      tooltip: "Rotate in place, clockwise",
+    },
+    {
+      type: "okrobo_drone_altitude",
+      message0: "altitude (m)",
+      output: "Number",
+      colour: 25,
+      tooltip: "Meters above the ground",
+    },
+    {
+      type: "okrobo_drone_distance",
+      message0: "distance to wall (m)",
+      output: "Number",
+      colour: 25,
+      tooltip: "Meters from the drone to the wall it is facing (it flies above obstacles)",
+    },
   ]);
 }
 
@@ -150,6 +235,23 @@ javascriptGenerator.forBlock["okrobo_arm_tip_height"] = () => [
   "robot.armTip()[2]",
   JsOrder.MEMBER,
 ];
+javascriptGenerator.forBlock["okrobo_drone_takeoff"] = (block) =>
+  `await robot.droneTakeoff(${block.getFieldValue("HEIGHT")});\n`;
+javascriptGenerator.forBlock["okrobo_drone_land"] = () => `await robot.droneLand();\n`;
+javascriptGenerator.forBlock["okrobo_drone_forward"] = (block) =>
+  `await robot.droneForward(${block.getFieldValue("METERS")});\n`;
+javascriptGenerator.forBlock["okrobo_drone_backward"] = (block) =>
+  `await robot.droneBackward(${block.getFieldValue("METERS")});\n`;
+javascriptGenerator.forBlock["okrobo_drone_up"] = (block) =>
+  `await robot.droneUp(${block.getFieldValue("METERS")});\n`;
+javascriptGenerator.forBlock["okrobo_drone_down"] = (block) =>
+  `await robot.droneDown(${block.getFieldValue("METERS")});\n`;
+javascriptGenerator.forBlock["okrobo_drone_turn_left"] = (block) =>
+  `await robot.droneTurnLeft(${block.getFieldValue("DEGREES")});\n`;
+javascriptGenerator.forBlock["okrobo_drone_turn_right"] = (block) =>
+  `await robot.droneTurnRight(${block.getFieldValue("DEGREES")});\n`;
+javascriptGenerator.forBlock["okrobo_drone_altitude"] = () => ["robot.droneAltitude()", JsOrder.FUNCTION_CALL];
+javascriptGenerator.forBlock["okrobo_drone_distance"] = () => ["robot.droneDistance()", JsOrder.FUNCTION_CALL];
 
 pythonGenerator.forBlock["okrobo_forward"] = (block) =>
   `robot.forward(${block.getFieldValue("METERS")})\n`;
@@ -177,8 +279,23 @@ pythonGenerator.forBlock["okrobo_color_bearing"] = (block) => [
 pythonGenerator.forBlock["okrobo_arm_move"] = (block) =>
   `arm.move("${block.getFieldValue("JOINT")}", ${block.getFieldValue("DEGREES")})\n`;
 pythonGenerator.forBlock["okrobo_arm_tip_height"] = () => ["arm.tip()[2]", PyOrder.MEMBER];
+pythonGenerator.forBlock["okrobo_drone_takeoff"] = (block) =>
+  `drone.takeoff(${block.getFieldValue("HEIGHT")})\n`;
+pythonGenerator.forBlock["okrobo_drone_land"] = () => `drone.land()\n`;
+pythonGenerator.forBlock["okrobo_drone_forward"] = (block) =>
+  `drone.forward(${block.getFieldValue("METERS")})\n`;
+pythonGenerator.forBlock["okrobo_drone_backward"] = (block) =>
+  `drone.backward(${block.getFieldValue("METERS")})\n`;
+pythonGenerator.forBlock["okrobo_drone_up"] = (block) => `drone.up(${block.getFieldValue("METERS")})\n`;
+pythonGenerator.forBlock["okrobo_drone_down"] = (block) => `drone.down(${block.getFieldValue("METERS")})\n`;
+pythonGenerator.forBlock["okrobo_drone_turn_left"] = (block) =>
+  `drone.turn_left(${block.getFieldValue("DEGREES")})\n`;
+pythonGenerator.forBlock["okrobo_drone_turn_right"] = (block) =>
+  `drone.turn_right(${block.getFieldValue("DEGREES")})\n`;
+pythonGenerator.forBlock["okrobo_drone_altitude"] = () => ["drone.altitude()", PyOrder.FUNCTION_CALL];
+pythonGenerator.forBlock["okrobo_drone_distance"] = () => ["drone.distance()", PyOrder.FUNCTION_CALL];
 
-export type RobotKind = "car" | "arm";
+export type RobotKind = "car" | "arm" | "drone";
 
 const COMMON_TOOLBOX_TAIL = [
   { kind: "block", type: "controls_if" },
@@ -215,6 +332,24 @@ export const ARM_TOOLBOX = {
     { kind: "block", type: "okrobo_arm_move" },
     { kind: "block", type: "okrobo_wait" },
     { kind: "block", type: "okrobo_arm_tip_height" },
+    ...COMMON_TOOLBOX_TAIL,
+  ],
+};
+
+export const DRONE_TOOLBOX = {
+  kind: "flyoutToolbox",
+  contents: [
+    { kind: "block", type: "okrobo_drone_takeoff" },
+    { kind: "block", type: "okrobo_drone_land" },
+    { kind: "block", type: "okrobo_drone_forward" },
+    { kind: "block", type: "okrobo_drone_backward" },
+    { kind: "block", type: "okrobo_drone_up" },
+    { kind: "block", type: "okrobo_drone_down" },
+    { kind: "block", type: "okrobo_drone_turn_left" },
+    { kind: "block", type: "okrobo_drone_turn_right" },
+    { kind: "block", type: "okrobo_wait" },
+    { kind: "block", type: "okrobo_drone_altitude" },
+    { kind: "block", type: "okrobo_drone_distance" },
     ...COMMON_TOOLBOX_TAIL,
   ],
 };
@@ -293,12 +428,49 @@ export const ARM_STARTER_WORKSPACE = {
   },
 };
 
+/** Takeoff, fly a 0.3 m square (four forward-and-turn legs), land. Traces
+ * back to its start point, well inside the shared 2x2 m arena. */
+export const DRONE_STARTER_WORKSPACE = {
+  blocks: {
+    languageVersion: 0,
+    blocks: [
+      {
+        type: "okrobo_drone_takeoff",
+        x: 24,
+        y: 24,
+        fields: { HEIGHT: 0.4 },
+        next: {
+          block: {
+            type: "controls_repeat_ext",
+            inputs: {
+              TIMES: { shadow: { type: "math_number", fields: { NUM: 4 } } },
+              DO: {
+                block: {
+                  type: "okrobo_drone_forward",
+                  fields: { METERS: 0.3 },
+                  next: {
+                    block: { type: "okrobo_drone_turn_right", fields: { DEGREES: 90 } },
+                  },
+                },
+              },
+            },
+            next: { block: { type: "okrobo_drone_land" } },
+          },
+        },
+      },
+    ],
+  },
+};
+
 export function starterWorkspace(robot: RobotKind): object {
-  return robot === "arm" ? ARM_STARTER_WORKSPACE : STARTER_WORKSPACE;
+  if (robot === "arm") return ARM_STARTER_WORKSPACE;
+  if (robot === "drone") return DRONE_STARTER_WORKSPACE;
+  return STARTER_WORKSPACE;
 }
 
 export function toolboxFor(robot: RobotKind): Blockly.utils.toolbox.ToolboxDefinition {
-  return (robot === "arm" ? ARM_TOOLBOX : TOOLBOX) as Blockly.utils.toolbox.ToolboxDefinition;
+  const toolbox = robot === "arm" ? ARM_TOOLBOX : robot === "drone" ? DRONE_TOOLBOX : TOOLBOX;
+  return toolbox as Blockly.utils.toolbox.ToolboxDefinition;
 }
 
 export function generateJavaScript(workspace: Blockly.Workspace): string {
@@ -311,12 +483,15 @@ export function generateJavaScript(workspace: Blockly.Workspace): string {
 const PYTHON_HEADERS: Record<RobotKind, string> = {
   car: "from okrobo import Robot\n\nrobot = Robot()\n\n",
   arm: "from okrobo import Arm\n\narm = Arm()\n\n",
+  drone: "from okrobo import Drone\n\ndrone = Drone()\n\n",
 };
+
+const RECEIVER_BY_ROBOT: Record<RobotKind, string> = { car: "robot", arm: "arm", drone: "drone" };
 
 const VISION_BLOCK_TYPES = ["okrobo_see_color", "okrobo_color_bearing"];
 
 export function generatePython(workspace: Blockly.Workspace, robot: RobotKind = "car"): string {
-  pythonReceiver = robot === "arm" ? "arm" : "robot";
+  pythonReceiver = RECEIVER_BY_ROBOT[robot];
   const body = pythonGenerator.workspaceToCode(workspace);
   pythonReceiver = "robot";
   // Only import find_color when a vision block is actually on the workspace,

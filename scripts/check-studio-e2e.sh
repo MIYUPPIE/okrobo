@@ -8,8 +8,19 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PORT="${PORT:-5198}"
 CDP_PORT="${CDP_PORT:-9230}"
 TMP="$(mktemp -d)"
+# `npm run dev` runs predev then dev as separate child processes; killing
+# just the top-level npm PID can leave the actual vite process (its
+# grandchild) orphaned and still holding the port. Kill the whole tree.
+kill_tree() {
+  local pid="$1"
+  local child
+  for child in $(pgrep -P "$pid" 2>/dev/null); do
+    kill_tree "$child"
+  done
+  kill "$pid" 2>/dev/null
+}
 cleanup() {
-  [ -n "${DEV_PID:-}" ] && kill "$DEV_PID" 2>/dev/null
+  [ -n "${DEV_PID:-}" ] && kill_tree "$DEV_PID"
   [ -n "${CHROME_PID:-}" ] && kill "$CHROME_PID" 2>/dev/null
   sleep 1
   rm -rf "$TMP" 2>/dev/null

@@ -71,7 +71,7 @@ describe("core pack", () => {
     for (const file of manifest.contents.lessons) {
       const lesson = parseLesson(read(file));
       expect(lesson.title.length).toBeGreaterThan(0);
-      expect(["car", "arm"]).toContain(lesson.robot);
+      expect(["car", "arm", "drone"]).toContain(lesson.robot);
       expect(lesson.steps.some((step) => step.code)).toBe(true);
     }
   });
@@ -109,10 +109,11 @@ describe("core pack", () => {
     const known = [
       /robot\.(forward|backward|turn_left|turn_right|wait|distance|lidar|camera|heading|position|stop)\(/,
       /arm\.(move|move_all|angles|tip|wait|stop)\(/,
+      /drone\.(takeoff|land|forward|backward|up|down|turn_left|turn_right|altitude|distance|heading|position|wait|stop)\(/,
       /(find_color|find_color_opencv)\(/,
       /(frame|picture)\.(pixel|width|height|pixels)/,
       /target\.(bearing|coverage|area|color|x|y)/,
-      /^(from okrobo|import |robot = Robot\(\)|arm = Arm\(\)|frame = |target = |print\(|while |if |elif |else:|for |x, y, z =|x, y =|$)/,
+      /^(from okrobo|import |robot = Robot\(\)|arm = Arm\(\)|drone = Drone\(\)|frame = |target = |print\(|while |if |elif |else:|for |x, y, z =|x, y =|$)/,
     ];
 
     const packsDir = join(process.cwd(), "..", "..", "packs");

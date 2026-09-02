@@ -1,0 +1,6 @@
+{
+  "tick": 142,
+  "pose": { "x": 1.3, "y": 1.0, "z": 0.4, "theta": 0.0 },
+  "sensors": { "distance": 0.6 },
+  "collided": false
+}

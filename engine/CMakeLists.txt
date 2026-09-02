@@ -4,7 +4,7 @@ project(okrobo_engine CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_library(okrobo_engine src/world.cpp src/arm.cpp)
+add_library(okrobo_engine src/world.cpp src/arm.cpp src/drone.cpp)
 target_include_directories(okrobo_engine PUBLIC src)
 target_compile_options(okrobo_engine PRIVATE -Wall -Wextra -Werror)
 
@@ -30,3 +30,6 @@ add_test(NAME arm COMMAND test_arm)
 
 okrobo_add_test(test_camera tests/test_camera.cpp)
 add_test(NAME camera COMMAND test_camera)
+
+okrobo_add_test(test_drone tests/test_drone.cpp)
+add_test(NAME drone COMMAND test_drone)

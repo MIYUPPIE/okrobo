@@ -2,6 +2,7 @@ import * as Blockly from "blockly/core";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   ARM_STARTER_WORKSPACE,
+  DRONE_STARTER_WORKSPACE,
   generateJavaScript,
   generatePython,
   STARTER_WORKSPACE,
@@ -54,6 +55,58 @@ describe("block code generation", () => {
     expect(py).toContain("arm = Arm()");
     expect(py).toContain('arm.move("shoulder", 85)');
     expect(py).not.toContain("robot.");
+  });
+
+  it("generates the drone square flight in JavaScript against the runner API", () => {
+    const js = generateJavaScript(load(DRONE_STARTER_WORKSPACE));
+    expect(js).toContain("await robot.droneTakeoff(0.4);");
+    expect(js).toContain("for (");
+    expect(js).toContain("await robot.droneForward(0.3);");
+    expect(js).toContain("await robot.droneTurnRight(90);");
+    expect(js).toContain("await robot.droneLand();");
+  });
+
+  it("generates the drone square flight in Python against the okrobo Drone API", () => {
+    const py = generatePython(load(DRONE_STARTER_WORKSPACE), "drone");
+    expect(py).toContain("from okrobo import Drone");
+    expect(py).toContain("drone = Drone()");
+    expect(py).toContain("drone.takeoff(0.4)");
+    expect(py).toContain("for ");
+    expect(py).toContain("drone.forward(0.3)");
+    expect(py).toContain("drone.turn_right(90)");
+    expect(py).toContain("drone.land()");
+    expect(py).not.toContain("robot.");
+    expect(py).not.toContain("arm.");
+  });
+
+  it("drone distance and altitude blocks target the drone API, not the car's", () => {
+    const sensors = {
+      blocks: {
+        languageVersion: 0,
+        blocks: [
+          { type: "okrobo_drone_altitude", x: 0, y: 0 },
+          { type: "okrobo_drone_distance", x: 0, y: 40 },
+        ],
+      },
+    };
+    const js = generateJavaScript(load(sensors));
+    expect(js).toContain("robot.droneAltitude()");
+    expect(js).toContain("robot.droneDistance()");
+    expect(js).not.toContain("robot.distance()"); // the car's sensor, not the drone's
+
+    const py = generatePython(load(sensors), "drone");
+    expect(py).toContain("drone.altitude()");
+    expect(py).toContain("drone.distance()");
+  });
+
+  it("wait targets the drone too, sharing the same block as car and arm", () => {
+    const waitOnly = {
+      blocks: {
+        languageVersion: 0,
+        blocks: [{ type: "okrobo_wait", x: 0, y: 0, fields: { SECONDS: 3 } }],
+      },
+    };
+    expect(generatePython(load(waitOnly), "drone")).toContain("drone.wait(3)");
   });
 
   const sensorWorkspaceState = {

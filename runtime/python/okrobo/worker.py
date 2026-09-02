@@ -107,9 +107,58 @@ def make_okrobo_module(rpc) -> types.ModuleType:
         def stop(self) -> None:
             rpc("stop")
 
+    class Drone:
+        """Remote proxy with the exact okrobo.Drone surface."""
+
+        HOVER_HEIGHT = 0.4
+
+        def takeoff(self, height: float = HOVER_HEIGHT) -> None:
+            rpc("drone_takeoff", height=height)
+
+        def land(self) -> None:
+            rpc("drone_land")
+
+        def forward(self, meters: float = 0.1) -> None:
+            rpc("drone_forward", meters=meters)
+
+        def backward(self, meters: float = 0.1) -> None:
+            rpc("drone_backward", meters=meters)
+
+        def up(self, meters: float = 0.1) -> None:
+            rpc("drone_up", meters=meters)
+
+        def down(self, meters: float = 0.1) -> None:
+            rpc("drone_down", meters=meters)
+
+        def turn_left(self, degrees: float = 90.0) -> None:
+            rpc("drone_turn_left", degrees=degrees)
+
+        def turn_right(self, degrees: float = 90.0) -> None:
+            rpc("drone_turn_right", degrees=degrees)
+
+        def altitude(self) -> float:
+            return float(rpc("drone_altitude"))
+
+        def distance(self) -> float:
+            return float(rpc("drone_distance"))
+
+        def heading(self) -> float:
+            return float(rpc("drone_heading"))
+
+        def position(self) -> tuple:
+            result = rpc("drone_position")
+            return (float(result[0]), float(result[1]), float(result[2]))
+
+        def wait(self, seconds: float = 1.0) -> None:
+            rpc("wait", seconds=seconds)
+
+        def stop(self) -> None:
+            rpc("stop")
+
     module = types.ModuleType("okrobo")
     module.Robot = Robot
     module.Arm = Arm
+    module.Drone = Drone
     # Make the stand-in a real package pointing at the installed okrobo
     # directory, so `from okrobo.vision import find_color` and friends load the
     # genuine submodules while `okrobo.Robot` stays the remote proxy. Without

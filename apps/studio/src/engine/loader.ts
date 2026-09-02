@@ -57,6 +57,29 @@ export interface EngineModule {
   _arm_tip_x(arm: number): number;
   _arm_tip_y(arm: number): number;
   _arm_tip_z(arm: number): number;
+  _drone_create(
+    arenaWidth: number,
+    arenaHeight: number,
+    robotRadius: number,
+    maxAltitude: number,
+    startX: number,
+    startY: number,
+    startZ: number,
+    startTheta: number,
+  ): number;
+  _drone_destroy(drone: number): void;
+  _drone_drive(drone: number, forward: number, vertical: number, yawRate: number): void;
+  _drone_stop(drone: number): void;
+  _drone_reset(drone: number): void;
+  _drone_step(drone: number, dt: number): void;
+  _drone_tick(drone: number): number;
+  _drone_x(drone: number): number;
+  _drone_y(drone: number): number;
+  _drone_z(drone: number): number;
+  _drone_theta(drone: number): number;
+  _drone_distance(drone: number): number;
+  _drone_collided(drone: number): number;
+  _drone_ray(drone: number, offset: number): number;
 }
 
 type EngineFactory = { default: () => Promise<EngineModule> };

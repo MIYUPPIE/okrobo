@@ -198,11 +198,63 @@ try {
   );
   check("switching back to Car works", backOnCar);
 
+  // -- drone: switch, telemetry, Python API, and its own starter program ------
+  await page.clickText(".robot.selectable", "/Drone/");
+  const onDrone = await waitForCondition(
+    "document.querySelector('.robot.selectable.active')?.textContent?.includes('Drone')",
+    5000,
+  );
+  check("clicking Drone switches the active robot", onDrone);
+  check(
+    "Drone status line shows altitude telemetry",
+    await waitForCondition("/alt \\d/.test(document.querySelector('.run-bar .status')?.textContent ?? '')", 5000),
+  );
+
+  await page.clickText(".code-tab", "/^Python$/");
+  const dronePythonReady = await waitForCondition(
+    `/from okrobo import Drone/.test(${PYTHON_EDITOR_TEXT_EXPR})`,
+    5000,
+  );
+  check(
+    "Python tab switches to the okrobo Drone API for the drone",
+    dronePythonReady,
+    (await pythonEditorText()).slice(0, 60),
+  );
+  check("Python tab shows the square flight's takeoff call", /drone\.takeoff\(0\.4\)/.test(await pythonEditorText()));
+
+  // Unlike the car's while(true) wall avoider, the drone's square flight
+  // terminates on its own — and headless Chrome can run well faster than 1x
+  // real time (each animation frame steps up to a full simulated second), so
+  // the whole ~20 s program can finish before any "still running" poll ever
+  // observes it mid-flight. That race makes an intermediate check unreliable;
+  // waiting for the terminal landed state is definitive proof Run executed
+  // takeoff, the full square, and land correctly either way.
+  const tickBeforeRun = await page.evaluate(
+    "Number((document.querySelector('.run-bar .status')?.textContent ?? '').match(/tick (\\d+)/)?.[1] ?? 0)",
+  );
+  await page.evalClick(".run-bar .run");
+  const droneLanded = await waitForCondition(
+    `(() => {
+      const s = document.querySelector('.run-bar .status')?.textContent ?? '';
+      const tick = Number(/tick (\\d+)/.exec(s)?.[1] ?? 0);
+      return tick > ${tickBeforeRun} && /alt 0\\.00 m/.test(s);
+    })()`,
+    30000,
+  );
+  check("Run executes the drone's takeoff-square-land program to completion", droneLanded, await status());
+
+  await page.clickText(".robot.selectable", "/Car/");
+  const backOnCarAgain = await waitForCondition(
+    "document.querySelector('.robot.selectable.active')?.textContent?.includes('Car')",
+    5000,
+  );
+  check("switching from Drone back to Car works", backOnCarAgain);
+
   // -- lessons: list, open, "Try this" loads code and can switch robots -------
   await page.clickText(".code-tab", "/^Lessons$/");
-  const lessonsReady = await waitForCondition("document.querySelectorAll('.lesson-card').length >= 2", 5000);
+  const lessonsReady = await waitForCondition("document.querySelectorAll('.lesson-card').length >= 3", 5000);
   const lessonCount = await page.evaluate("document.querySelectorAll('.lesson-card').length");
-  check("Lessons tab lists at least the two core lessons", lessonsReady, `${lessonCount} lessons`);
+  check("Lessons tab lists at least the three core lessons", lessonsReady, `${lessonCount} lessons`);
 
   await page.clickText(".lesson-card", "/Wave the arm/");
   const stepsReady = await waitForCondition("document.querySelectorAll('.lesson-step').length >= 2", 5000);
@@ -223,6 +275,37 @@ try {
   const triedCodeReady = await waitForCondition(`/arm\\.move\\(/.test(${PYTHON_EDITOR_TEXT_EXPR})`, 5000);
   const triedCode = (await pythonEditorText()) ?? "";
   check('"Try this" loads real runnable code into the editor', triedCodeReady, triedCode.slice(0, 60));
+
+  // Regression check: the lesson parser used to hardcode `robot === "arm" ?
+  // "arm" : "car"`, so a `robot: drone` lesson would have silently switched
+  // to Car instead — caught by inspection, not by any existing check, before
+  // this one was added.
+  // The lesson reader stays open across tab switches (LessonsPanel keeps its
+  // own "open lesson" state while merely hidden, not unmounted), so go back
+  // to the card list explicitly rather than assuming the tab click resets it.
+  await page.clickText(".code-tab", "/^Lessons$/");
+  await page.clickText(".lesson-header .link-button", "/all lessons/i");
+  await page.clickText(".lesson-card", "/Fly a square/");
+  await waitForCondition("document.querySelectorAll('.lesson-step').length >= 2", 5000);
+  await page.click(".try-button");
+  const droneTrySwitched = await waitForCondition(
+    `(() => {
+      const robot = document.querySelector('.robot.selectable.active')?.textContent ?? '';
+      const tab = document.querySelector('.code-tab.active')?.textContent ?? '';
+      return robot.includes('Drone') && tab === 'Python';
+    })()`,
+    5000,
+  );
+  check('"Try this" on a drone lesson switches to Drone (not Car) and the Python tab', droneTrySwitched);
+  const droneTriedCodeReady = await waitForCondition(
+    `/drone\\.takeoff\\(/.test(${PYTHON_EDITOR_TEXT_EXPR})`,
+    5000,
+  );
+  check(
+    '"Try this" on a drone lesson loads real okrobo Drone code',
+    droneTriedCodeReady,
+    (await pythonEditorText()).slice(0, 60),
+  );
 } catch (error) {
   console.error("e2e check threw:", error);
   failures.push(String(error));

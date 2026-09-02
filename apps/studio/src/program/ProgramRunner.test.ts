@@ -58,6 +58,99 @@ describe("ProgramRunner movements (real WASM engine)", () => {
     engine.destroy();
   });
 
+  it("drone takeoff rises to the hover height, matching the Python API", async () => {
+    const { engine, drone, runner } = await makeRunner();
+    const move = runner.api.droneTakeoff(); // 0.4 m at 0.1 m/s = 4 s = 400 steps
+    runner.tick(450);
+    await move;
+    expect(drone.state().pose.z).toBeCloseTo(0.4, 9);
+    expect(drone.state().pose.x).toBeCloseTo(1.0, 9);
+    engine.destroy();
+    drone.destroy();
+  });
+
+  it("drone land descends exactly to the ground", async () => {
+    const { engine, drone, runner } = await makeRunner();
+    const takeoff = runner.api.droneTakeoff(0.5); // 5 s = 500 steps
+    runner.tick(550);
+    await takeoff;
+    const land = runner.api.droneLand(); // another 5 s = 500 steps
+    runner.tick(550);
+    await land;
+    expect(drone.state().pose.z).toBeCloseTo(0.0, 9);
+    engine.destroy();
+    drone.destroy();
+  });
+
+  it("drone forward moves the exact distance", async () => {
+    const { engine, drone, runner } = await makeRunner();
+    const move = runner.api.droneForward(0.2);
+    runner.tick(100);
+    await move;
+    expect(drone.state().pose.x).toBeCloseTo(1.2, 9);
+    expect(drone.state().pose.y).toBeCloseTo(1.0, 9);
+    engine.destroy();
+    drone.destroy();
+  });
+
+  it("drone turnRight lands exactly on the angle via the partial end step", async () => {
+    const { engine, drone, runner } = await makeRunner();
+    const move = runner.api.droneTurnRight(90);
+    runner.tick(400);
+    await move;
+    expect(runner.api.droneHeading()).toBeCloseTo(-90, 6);
+    expect(drone.state().pose.x).toBeCloseTo(1.0, 6);
+    engine.destroy();
+    drone.destroy();
+  });
+
+  it("drone forward stops early at the wall, mirroring the car", async () => {
+    const { engine, drone, runner } = await makeRunner();
+    const move = runner.api.droneForward(5.0);
+    runner.tick(3000);
+    await move;
+    expect(drone.state().pose.x).toBeCloseTo(1.9, 9); // arena_width - robot_radius
+    expect(runner.api.droneDistance()).toBeCloseTo(0.0, 9);
+    engine.destroy();
+    drone.destroy();
+  });
+
+  it("drone up stops early at the altitude ceiling", async () => {
+    const { engine, drone, runner } = await makeRunner();
+    // Ceiling is 1.0 m at 0.1 m/s = 10 s = 1000 steps to collide and stop early.
+    const move = runner.api.droneUp(5.0);
+    runner.tick(1100);
+    await move;
+    expect(runner.api.droneAltitude()).toBeCloseTo(1.0, 9); // default max_altitude
+    engine.destroy();
+    drone.destroy();
+  });
+
+  it("drone abort rejects the active movement and stops the rotors", async () => {
+    const { engine, drone, runner } = await makeRunner();
+    const move = runner.api.droneForward(1.0);
+    runner.tick(10);
+    runner.abort();
+    await expect(move).rejects.toBeInstanceOf(ProgramStoppedError);
+    const stoppedAt = drone.state().pose.x;
+    runner.tick(100);
+    expect(drone.state().pose.x).toBeCloseTo(stoppedAt, 9);
+    engine.destroy();
+    drone.destroy();
+  });
+
+  it("drone and car can each be mid-movement at once without interfering", async () => {
+    const { engine, drone, runner } = await makeRunner();
+    const carMove = runner.api.forward(0.1);
+    const droneMove = runner.api.droneForward(0.1);
+    runner.tick(100);
+    await Promise.all([carMove, droneMove]);
+    expect(engine.state().pose.x).toBeCloseTo(1.1, 9);
+    expect(drone.state().pose.x).toBeCloseTo(1.1, 9);
+    engine.destroy();
+    drone.destroy();
+  });
+
   it("findColor sees the shipped arena's red box straight ahead", async () => {
     const { engine, runner } = await makeRunner();
     const detection = runner.api.findColor("red");

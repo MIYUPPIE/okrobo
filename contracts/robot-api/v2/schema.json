@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "okrobo:robot-api:v2",
+  "title": "OKROBO Robot API v2",
+  "description": "v1 (car + arm + lidar, unchanged) plus the drone. Units: meters, radians, seconds. theta=0 faces +x, CCW positive, normalized to (-pi, pi].",
+  "definitions": {
+    "car_command": { "$ref": "../v1/schema.json#/definitions/car_command" },
+    "car_state": { "$ref": "../v1/schema.json#/definitions/car_state" },
+    "lidar": { "$ref": "../v1/schema.json#/definitions/lidar" },
+    "arm_command": { "$ref": "../v1/schema.json#/definitions/arm_command" },
+    "arm_state": { "$ref": "../v1/schema.json#/definitions/arm_state" },
+    "drone_command": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "forward", "vertical", "yaw_rate"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "drone_drive" },
+            "forward": { "type": "number", "description": "m/s along the current heading" },
+            "vertical": { "type": "number", "description": "m/s, positive is up" },
+            "yaw_rate": { "type": "number", "description": "rad/s, CCW positive" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": { "type": { "const": "drone_stop" } }
+        },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": { "type": { "const": "drone_reset" } }
+        }
+      ]
+    },
+    "drone_state": {
+      "type": "object",
+      "required": ["tick", "pose", "sensors", "collided"],
+      "additionalProperties": false,
+      "properties": {
+        "tick": { "type": "integer", "minimum": 0 },
+        "pose": {
+          "type": "object",
+          "required": ["x", "y", "z", "theta"],
+          "additionalProperties": false,
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "z": { "type": "number", "minimum": 0, "description": "altitude, meters" },
+            "theta": { "type": "number" }
+          }
+        },
+        "sensors": {
+          "type": "object",
+          "required": ["distance"],
+          "additionalProperties": false,
+          "properties": {
+            "distance": {
+              "type": "number",
+              "minimum": 0,
+              "description": "meters to the nearest arena wall along the heading; walls only, the drone flies above obstacles"
+            }
+          }
+        },
+        "collided": { "type": "boolean", "description": "true when this step clamped against a wall, the floor, or the altitude ceiling" }
+      }
+    }
+  }
+}

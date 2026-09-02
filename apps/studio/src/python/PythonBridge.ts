@@ -78,6 +78,30 @@ export async function executeRemoteRequest(
       return robot.armAngles();
     case "arm_tip":
       return robot.armTip();
+    case "drone_takeoff":
+      return robot.droneTakeoff(num(args.height, 0.4));
+    case "drone_land":
+      return robot.droneLand();
+    case "drone_forward":
+      return robot.droneForward(num(args.meters, 0.1));
+    case "drone_backward":
+      return robot.droneBackward(num(args.meters, 0.1));
+    case "drone_up":
+      return robot.droneUp(num(args.meters, 0.1));
+    case "drone_down":
+      return robot.droneDown(num(args.meters, 0.1));
+    case "drone_turn_left":
+      return robot.droneTurnLeft(num(args.degrees, 90));
+    case "drone_turn_right":
+      return robot.droneTurnRight(num(args.degrees, 90));
+    case "drone_altitude":
+      return robot.droneAltitude();
+    case "drone_distance":
+      return robot.droneDistance();
+    case "drone_heading":
+      return robot.droneHeading();
+    case "drone_position":
+      return robot.dronePosition();
     default:
       throw new Error(`unknown method: ${method}`);
   }

@@ -38,7 +38,8 @@ export function parseLesson(source: string): Lesson {
   const { fields, body } = parseFrontMatter(source);
   const title = fields.title?.trim();
   if (!title) throw new Error("lesson: missing 'title' in front matter");
-  const robot: RobotKind = fields.robot === "arm" ? "arm" : "car";
+  const robot: RobotKind =
+    fields.robot === "arm" ? "arm" : fields.robot === "drone" ? "drone" : "car";
 
   const steps: LessonStep[] = [];
   let cursor = 0;

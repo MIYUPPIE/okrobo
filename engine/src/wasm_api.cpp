@@ -4,6 +4,7 @@
 
 #include "arm.hpp"
 #include "camera.hpp"
+#include "drone.hpp"
 #include "world.hpp"
 
 #include <emscripten/emscripten.h>
@@ -148,5 +149,65 @@ double arm_tip_y(const okrobo::Arm* arm) { return arm->state().tip.y; }
 
 EMSCRIPTEN_KEEPALIVE
 double arm_tip_z(const okrobo::Arm* arm) { return arm->state().tip.z; }
+
+// ---- drone (contract v2) ----
+
+EMSCRIPTEN_KEEPALIVE
+okrobo::Drone* drone_create(double arena_width, double arena_height, double robot_radius,
+                            double max_altitude, double start_x, double start_y, double start_z,
+                            double start_theta) {
+    okrobo::DroneConfig config;
+    config.arena_width = arena_width;
+    config.arena_height = arena_height;
+    config.robot_radius = robot_radius;
+    config.max_altitude = max_altitude;
+    config.start = okrobo::DronePose{start_x, start_y, start_z, start_theta};
+    return new okrobo::Drone(config);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void drone_destroy(okrobo::Drone* drone) { delete drone; }
+
+EMSCRIPTEN_KEEPALIVE
+void drone_drive(okrobo::Drone* drone, double forward, double vertical, double yaw_rate) {
+    drone->drive(forward, vertical, yaw_rate);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void drone_stop(okrobo::Drone* drone) { drone->stop(); }
+
+EMSCRIPTEN_KEEPALIVE
+void drone_reset(okrobo::Drone* drone) { drone->reset(); }
+
+EMSCRIPTEN_KEEPALIVE
+void drone_step(okrobo::Drone* drone, double dt) { drone->step(dt); }
+
+EMSCRIPTEN_KEEPALIVE
+double drone_tick(const okrobo::Drone* drone) {
+    return static_cast<double>(drone->state().tick);
+}
+
+EMSCRIPTEN_KEEPALIVE
+double drone_x(const okrobo::Drone* drone) { return drone->state().pose.x; }
+
+EMSCRIPTEN_KEEPALIVE
+double drone_y(const okrobo::Drone* drone) { return drone->state().pose.y; }
+
+EMSCRIPTEN_KEEPALIVE
+double drone_z(const okrobo::Drone* drone) { return drone->state().pose.z; }
+
+EMSCRIPTEN_KEEPALIVE
+double drone_theta(const okrobo::Drone* drone) { return drone->state().pose.theta; }
+
+EMSCRIPTEN_KEEPALIVE
+double drone_distance(const okrobo::Drone* drone) { return drone->state().distance; }
+
+EMSCRIPTEN_KEEPALIVE
+int drone_collided(const okrobo::Drone* drone) {
+    return drone->state().collided ? 1 : 0;
+}
+
+EMSCRIPTEN_KEEPALIVE
+double drone_ray(const okrobo::Drone* drone, double offset) { return drone->ray(offset); }
 
 }  // extern "C"
