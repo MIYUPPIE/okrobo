@@ -1,14 +1,16 @@
 import * as Blockly from "blockly/core";
 import "blockly/blocks";
 import * as en from "blockly/msg/en";
-import { javascriptGenerator, Order as JsOrder } from "blockly/javascript";
+import { javascriptGenerator, JavascriptGenerator, Order as JsOrder } from "blockly/javascript";
 import { Order as PyOrder, pythonGenerator } from "blockly/python";
 import { COLORS } from "../lib/vision";
 
-// OKROBO's Blockly vocabulary. Each block generates two languages:
-// JavaScript for execution now (async calls into ProgramRunner.api) and
-// Python for the read-only Monaco preview, matching the okrobo package API
-// exactly so the same program runs unchanged in Phase 3's real Python.
+// OKROBO's Blockly vocabulary. Each block generates up to three languages:
+// JavaScript for execution now (async calls into ProgramRunner.api), Python
+// for the read-only Monaco preview (matching the okrobo package API exactly
+// so the same program runs unchanged in Phase 3's real Python), and for the
+// Car, C++ for the read-only preview against engine/api/robot.hpp — real,
+// compilable code (see its README), just not runnable in-browser.
 
 Blockly.setLocale(en as unknown as { [key: string]: string });
 
@@ -294,6 +296,63 @@ pythonGenerator.forBlock["okrobo_drone_turn_right"] = (block) =>
   `drone.turn_right(${block.getFieldValue("DEGREES")})\n`;
 pythonGenerator.forBlock["okrobo_drone_altitude"] = () => ["drone.altitude()", PyOrder.FUNCTION_CALL];
 pythonGenerator.forBlock["okrobo_drone_distance"] = () => ["drone.distance()", PyOrder.FUNCTION_CALL];
+
+// ---- C++ (Car only): real code against engine/api/robot.hpp -------------
+//
+// Blockly ships no C++ generator, but its JavaScript one already emits
+// valid C++ for every control/logic/math block the toolbox uses --
+// `if (a < b) { }`, `while (true) { }`, comparisons, booleans, numeric
+// literals are identical in both languages. controls_repeat_ext is the one
+// exception (`for (var count = ...`, and C++ has no `var`), overridden
+// below by patching the borrowed output rather than reimplementing
+// Blockly's own collision-safe loop-variable naming. Verified against the
+// real generator's output, not assumed from the languages' similarity.
+const cppGenerator = new JavascriptGenerator("Cpp");
+for (const type of ["controls_if", "controls_whileUntil", "logic_compare", "logic_boolean", "math_number"]) {
+  cppGenerator.forBlock[type] = javascriptGenerator.forBlock[type];
+}
+cppGenerator.forBlock["controls_repeat_ext"] = (block, generator) => {
+  const code = javascriptGenerator.forBlock["controls_repeat_ext"](block, generator);
+  return (code as string).replace(/^for \(var /, "for (int ");
+};
+
+cppGenerator.forBlock["okrobo_forward"] = (block) =>
+  `robot.forward(${block.getFieldValue("METERS")});\n`;
+cppGenerator.forBlock["okrobo_backward"] = (block) =>
+  `robot.backward(${block.getFieldValue("METERS")});\n`;
+cppGenerator.forBlock["okrobo_turn_left"] = (block) =>
+  `robot.turn_left(${block.getFieldValue("DEGREES")});\n`;
+cppGenerator.forBlock["okrobo_turn_right"] = (block) =>
+  `robot.turn_right(${block.getFieldValue("DEGREES")});\n`;
+cppGenerator.forBlock["okrobo_wait"] = (block) => `robot.wait(${block.getFieldValue("SECONDS")});\n`;
+cppGenerator.forBlock["okrobo_distance"] = () => ["robot.distance()", JsOrder.FUNCTION_CALL];
+// Lidar and vision have no C++ port yet (engine/api/README.md says so
+// plainly); a placeholder keeps the preview compiling instead of throwing
+// Blockly's generic "does not know how to generate" error mid-program.
+cppGenerator.forBlock["okrobo_lidar_min"] = () => [
+  "0.0 /* lidar not in the C++ track yet */",
+  JsOrder.FUNCTION_CALL,
+];
+cppGenerator.forBlock["okrobo_see_color"] = () => [
+  "false /* vision not in the C++ track yet */",
+  JsOrder.FUNCTION_CALL,
+];
+cppGenerator.forBlock["okrobo_color_bearing"] = () => [
+  "0.0 /* vision not in the C++ track yet */",
+  JsOrder.FUNCTION_CALL,
+];
+
+export function generateCpp(workspace: Blockly.Workspace): string {
+  // 2 spaces, matching the borrowed JS generator's own internal indent width
+  // (Blockly's default), so nested block bodies stay evenly stepped.
+  const body = cppGenerator.workspaceToCode(workspace);
+  const indented = body
+    .split("\n")
+    .map((line) => (line ? `  ${line}` : line))
+    .join("\n")
+    .replace(/\n+$/, "\n");
+  return `#include "robot.hpp"\n\nint main() {\n  okrobo::Robot robot;\n\n${indented}\n  return 0;\n}\n`;
+}
 
 export type RobotKind = "car" | "arm" | "drone";
 

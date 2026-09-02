@@ -168,6 +168,17 @@ try {
   check("Python tab shows okrobo Robot code generated from the blocks", pythonReady, pythonText.slice(0, 60));
   check("Python tab shows the wall-avoider's turn_left call", /turn_left\(90\)/.test(pythonText));
 
+  // -- C++ tab: real code against engine/api/robot.hpp, Car only --------------
+  await page.evalClickText(".code-tab", "/^C\\+\\+$/");
+  const cppReady = await waitForCondition(
+    "document.querySelector('.cpp-preview')?.textContent?.includes('#include \"robot.hpp\"')",
+    5000,
+  );
+  const cppText = await page.evaluate("document.querySelector('.cpp-preview')?.textContent ?? ''");
+  check("C++ tab shows real code against robot.hpp for the Car", cppReady, cppText.slice(0, 40));
+  check("C++ tab mirrors the wall-avoider's turn_left call", /robot\.turn_left\(90\)/.test(cppText));
+  check("C++ tab has no JS/Python leftovers (await, def, etc.)", !/\bawait\b|\bdef\b/.test(cppText));
+
   // -- robot switching: Car -> Arm -> Car --------------------------------------
   await page.clickText(".robot.selectable", "/Arm/");
   const onArm = await waitForCondition(
@@ -178,6 +189,19 @@ try {
   check(
     "Arm status line shows joint telemetry",
     await waitForCondition("/joints/.test(document.querySelector('.run-bar .status')?.textContent ?? '')", 5000),
+  );
+
+  // C++ tab is Car-only (no Arm SDK yet); confirm it says so honestly
+  // instead of showing stale or wrong content when the robot switches.
+  await page.evalClickText(".code-tab", "/^C\\+\\+$/");
+  await sleep(300);
+  const armCppNote = await page.evaluate(
+    "document.querySelector('.tab-panel.active .placeholder-note')?.textContent ?? ''",
+  );
+  check(
+    "C++ tab honestly says it doesn't cover the Arm yet, rather than showing stale content",
+    /Arm.*doesn't have a C\+\+ SDK/.test(armCppNote),
+    armCppNote,
   );
 
   await page.clickText(".code-tab", "/^Python$/"); // re-select Python for the arm

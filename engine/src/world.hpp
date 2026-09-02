@@ -75,6 +75,12 @@ public:
     void add_obstacle(const Obstacle& obstacle);
     int obstacle_count() const { return config_.obstacle_count; }
 
+    /** Read-only access to the arena/robot geometry this World was built
+        with (mirrors Python's public `World.config`), for callers that need
+        it directly rather than duplicating it -- e.g. engine/api/robot.hpp's
+        turn-radius calculation. */
+    const WorldConfig& config() const { return config_; }
+
 private:
     double sensor_distance() const;
 

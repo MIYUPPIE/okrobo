@@ -1,12 +1,19 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import * as Blockly from "blockly/core";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   ARM_STARTER_WORKSPACE,
   DRONE_STARTER_WORKSPACE,
+  generateCpp,
   generateJavaScript,
   generatePython,
   STARTER_WORKSPACE,
 } from "./okroboBlocks";
+
+const ENGINE_DIR = join(process.cwd(), "..", "..", "engine");
 
 // Headless workspace: no DOM needed for loading and code generation.
 let workspace: Blockly.Workspace;
@@ -41,6 +48,86 @@ describe("block code generation", () => {
     expect(py).toContain("robot.turn_left(90)");
     expect(py).not.toContain("await");
   });
+
+  it("generates the matching C++ preview against engine/api/robot.hpp", () => {
+    const cpp = generateCpp(loadStarter());
+    expect(cpp).toContain('#include "robot.hpp"');
+    expect(cpp).toContain("okrobo::Robot robot;");
+    expect(cpp).toContain("while (true) {");
+    expect(cpp).toContain("robot.forward(0.05);");
+    expect(cpp).toContain("if (robot.distance() < 0.2) {");
+    expect(cpp).toContain("robot.turn_left(90);");
+    expect(cpp).not.toContain("await");
+    expect(cpp).not.toContain("var ");
+  });
+
+  it("C++ preview marks vision/lidar blocks as unavailable instead of crashing", () => {
+    const cpp = generateCpp(
+      load({
+        blocks: {
+          languageVersion: 0,
+          blocks: [
+            { type: "okrobo_lidar_min", x: 0, y: 0 },
+            { type: "okrobo_see_color", x: 0, y: 40, fields: { COLOR: "red" } },
+          ],
+        },
+      }),
+    );
+    expect(cpp).toContain("/* lidar not in the C++ track yet */");
+    expect(cpp).toContain("/* vision not in the C++ track yet */");
+  });
+
+  it(
+    "the generated C++ actually compiles and runs correctly, matching the sim",
+    () => {
+      const cpp = generateCpp(
+        load({
+          blocks: {
+            languageVersion: 0,
+            blocks: [
+              {
+                type: "okrobo_forward",
+                x: 0,
+                y: 0,
+                fields: { METERS: 0.3 },
+                next: { block: { type: "okrobo_turn_left", fields: { DEGREES: 90 } } },
+              },
+            ],
+          },
+        }),
+      );
+      const dir = mkdtempSync(join(tmpdir(), "okrobo-cpp-"));
+      const source = join(dir, "program.cpp");
+      const binary = join(dir, "program");
+      writeFileSync(
+        source,
+        cpp
+          .replace('#include "robot.hpp"', '#include <cstdio>\n#include "robot.hpp"')
+          .replace(
+            "return 0;",
+            'auto [x, y] = robot.position(); ' +
+              'std::printf("%.2f %.2f %.0f\\n", x, y, robot.heading()); return 0;',
+          ),
+      );
+      execFileSync("g++", [
+        "-std=c++17",
+        "-I",
+        join(ENGINE_DIR, "src"),
+        "-I",
+        join(ENGINE_DIR, "api"),
+        source,
+        join(ENGINE_DIR, "src", "world.cpp"),
+        "-o",
+        binary,
+      ]);
+      const output = execFileSync(binary, { encoding: "utf8", timeout: 5000 }).trim();
+      // Forward 0.3m from arena centre (1.0, 1.0) reaches (1.3, 1.0), then
+      // turning left 90 degrees changes heading only: matches
+      // test_robot.py/test_robot_api.cpp's numbers for the same sequence.
+      expect(output).toBe("1.30 1.00 90");
+    },
+    20000,
+  );
 
   it("generates the arm wave in JavaScript against the runner API", () => {
     const js = generateJavaScript(load(ARM_STARTER_WORKSPACE));

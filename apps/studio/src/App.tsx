@@ -68,6 +68,7 @@ export default function App() {
   const [runner, setRunner] = useState<ProgramRunner | null>(null);
   const [runStatus, setRunStatus] = useState<RunStatus>("idle");
   const [pythonCode, setPythonCode] = useState("");
+  const [cppCode, setCppCode] = useState("");
   const [pythonConnected, setPythonConnected] = useState(false);
   const [pythonOutput, setPythonOutput] = useState<OutputLine[]>([]);
   const [ports, setPorts] = useState<SerialPort[]>([]);
@@ -234,9 +235,10 @@ export default function App() {
     autopilotRef.current = false;
     setRunStatus("wall");
   }, []);
-  const onCode = useCallback((js: string, python: string) => {
+  const onCode = useCallback((js: string, python: string, cpp: string) => {
     jsCodeRef.current = js;
     setPythonCode(python);
+    setCppCode(cpp);
   }, []);
   const onPythonSource = useCallback((code: string) => {
     pythonSourceRef.current = code;
@@ -719,8 +721,21 @@ export default function App() {
             <LessonsPanel onTryStep={tryLessonStep} />
           </div>
           <div className={tab === "C++" ? "tab-panel active padded" : "tab-panel padded"}>
-            <pre className="cpp-placeholder">{`// Advanced track: extend the engine itself.\n// See engine/src/world.hpp`}</pre>
-            <p className="placeholder-note">C++ track opens after Phase 6</p>
+            {robot === "car" ? (
+              <>
+                <pre className="cpp-preview">{cppCode}</pre>
+                <p className="placeholder-note">
+                  Real, compilable C++ against engine/api/robot.hpp — not runnable here (no
+                  browser has a C++ compiler), but yours to take and build: see
+                  engine/api/README.md.
+                </p>
+              </>
+            ) : (
+              <p className="placeholder-note">
+                The C++ track covers the Car so far; {robot === "arm" ? "the Arm" : "the Drone"}{" "}
+                doesn't have a C++ SDK yet.
+              </p>
+            )}
           </div>
         </div>
       </section>

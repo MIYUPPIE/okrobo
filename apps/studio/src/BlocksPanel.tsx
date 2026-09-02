@@ -1,6 +1,7 @@
 import { useEffect, useImperativeHandle, useRef } from "react";
 import * as Blockly from "blockly";
 import {
+  generateCpp,
   generateJavaScript,
   generatePython,
   type RobotKind,
@@ -30,8 +31,10 @@ const darkTheme = Blockly.Theme.defineTheme("okrobo-dark", {
 export interface BlocksPanelProps {
   /** Which robot's blocks and starter program to use. Remount (key) to switch. */
   robot: RobotKind;
-  /** Called with regenerated (javascript, python) after every real edit. */
-  onCode: (js: string, python: string) => void;
+  /** Called with regenerated (javascript, python, cpp) after every real edit.
+   * cpp is "" for the Arm and Drone, which have no C++ SDK yet
+   * (engine/api/README.md). */
+  onCode: (js: string, python: string, cpp: string) => void;
   /**
    * Seeds a freshly-mounted instance (a robot switch from a lesson's "Try
    * this" or an opened project), instead of the starter workspace. Read only
@@ -89,7 +92,11 @@ export function BlocksPanel({ robot, onCode, initialWorkspace, onWorkspaceConsum
     if (initialWorkspace !== undefined) onWorkspaceConsumed?.();
 
     const regenerate = () => {
-      onCodeRef.current(generateJavaScript(workspace), generatePython(workspace, robot));
+      onCodeRef.current(
+        generateJavaScript(workspace),
+        generatePython(workspace, robot),
+        robot === "car" ? generateCpp(workspace) : "",
+      );
     };
     regenerate();
     workspace.addChangeListener((event) => {
