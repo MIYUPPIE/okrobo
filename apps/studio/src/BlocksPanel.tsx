@@ -32,10 +32,24 @@ export interface BlocksPanelProps {
   robot: RobotKind;
   /** Called with regenerated (javascript, python) after every real edit. */
   onCode: (js: string, python: string) => void;
+  /**
+   * Seeds a freshly-mounted instance (a robot switch from a lesson's "Try
+   * this" or an opened project), instead of the starter workspace. Read only
+   * at mount: a parent effect calling `ref.load(...)` after this panel has
+   * already mounted races against React StrictMode's dev-mode double-invoke
+   * of effects (mount -> cleanup -> mount again), which disposes and
+   * recreates the Blockly workspace right after such a call and silently
+   * drops it. Seeding through a prop at construction time is immune to that,
+   * because both StrictMode passes replay the same render's closure.
+   */
+  initialWorkspace?: object | null;
+  /** Called once `initialWorkspace` has been applied, so the parent can clear
+   * it — otherwise a later, unrelated remount would reapply stale content. */
+  onWorkspaceConsumed?: () => void;
   ref?: React.Ref<BlocksPanelHandle>;
 }
 
-export function BlocksPanel({ robot, onCode, ref }: BlocksPanelProps) {
+export function BlocksPanel({ robot, onCode, initialWorkspace, onWorkspaceConsumed, ref }: BlocksPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const workspaceRef = useRef<Blockly.WorkspaceSvg | null>(null);
   const onCodeRef = useRef(onCode);
@@ -71,7 +85,8 @@ export function BlocksPanel({ robot, onCode, ref }: BlocksPanelProps) {
       zoom: { controls: true, wheel: false, startScale: 0.9 },
     });
     workspaceRef.current = workspace;
-    Blockly.serialization.workspaces.load(starterWorkspace(robot), workspace);
+    Blockly.serialization.workspaces.load(initialWorkspace ?? starterWorkspace(robot), workspace);
+    if (initialWorkspace !== undefined) onWorkspaceConsumed?.();
 
     const regenerate = () => {
       onCodeRef.current(generateJavaScript(workspace), generatePython(workspace, robot));
@@ -90,6 +105,10 @@ export function BlocksPanel({ robot, onCode, ref }: BlocksPanelProps) {
       workspaceRef.current = null;
       workspace.dispose();
     };
+    // initialWorkspace/onWorkspaceConsumed are deliberately excluded: they
+    // are a one-time seed for this mount, like useState's initial value, not
+    // something later changes should re-apply.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [robot]);
 
   return <div ref={containerRef} className="blocks-editor" />;

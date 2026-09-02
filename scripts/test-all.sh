@@ -61,5 +61,11 @@ cd "$ROOT/apps/studio"
 npm run test
 npm run build
 
+echo "== browser: dev server loads the engine =="
+"$ROOT/scripts/check-dev-server.sh"
+
+echo "== browser: studio E2E (robot switching, running a program, camera, lessons) =="
+"$ROOT/scripts/check-studio-e2e.sh"
+
 echo
 echo "ALL GATES GREEN"

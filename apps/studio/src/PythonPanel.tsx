@@ -29,10 +29,33 @@ export interface PythonPanelProps {
   connected: boolean;
   /** Reports the current editor content after every change. */
   onSource: (code: string) => void;
+  /**
+   * Seeds a freshly-mounted instance (a robot switch from a lesson's "Try
+   * this" or an opened project) with specific content, marked edited so the
+   * generatedCode-effect below leaves it alone. Read only at mount: a parent
+   * effect calling `ref.load(...)` after this panel has already mounted
+   * races against React StrictMode's dev-mode double-invoke of effects
+   * (mount -> cleanup -> mount again), which disposes and recreates the
+   * Monaco editor right after such a call and silently drops it. Seeding
+   * through a prop at construction time is immune to that, because both
+   * StrictMode passes replay the same render's closure.
+   */
+  initialOverride?: { code: string; edited: boolean };
+  /** Called once `initialOverride` has been applied, so the parent can clear
+   * it — otherwise a later, unrelated remount would reapply stale content. */
+  onOverrideConsumed?: () => void;
   ref?: React.Ref<PythonPanelHandle>;
 }
 
-export function PythonPanel({ generatedCode, output, connected, onSource, ref }: PythonPanelProps) {
+export function PythonPanel({
+  generatedCode,
+  output,
+  connected,
+  onSource,
+  initialOverride,
+  onOverrideConsumed,
+  ref,
+}: PythonPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -56,6 +79,15 @@ export function PythonPanel({ generatedCode, output, connected, onSource, ref }:
         applyingRef.current = true;
         editor.setValue(code);
         applyingRef.current = false;
+        // Set the ref synchronously, not just the state: on a robot switch
+        // this fires from a *parent* effect right after this panel remounts
+        // (a fresh instance, key={robot}), and that new instance's own
+        // generatedCode-effect below can still run afterward with a stale
+        // `generatedCode` prop (the parent hasn't re-rendered with the new
+        // robot's generated code yet) and a closure over the pre-load()
+        // `userEdited=false`. Reading the ref there instead of the closured
+        // state makes the guard correct regardless of effect ordering.
+        userEditedRef.current = edited;
         setUserEdited(edited);
       },
     }),
@@ -66,7 +98,7 @@ export function PythonPanel({ generatedCode, output, connected, onSource, ref }:
     const container = containerRef.current;
     if (!container) return;
     const editor = monaco.editor.create(container, {
-      value: "",
+      value: initialOverride?.code ?? "",
       language: "python",
       theme: "vs-dark",
       minimap: { enabled: false },
@@ -77,6 +109,11 @@ export function PythonPanel({ generatedCode, output, connected, onSource, ref }:
       occurrencesHighlight: "off",
     });
     editorRef.current = editor;
+    if (initialOverride) {
+      userEditedRef.current = initialOverride.edited;
+      setUserEdited(initialOverride.edited);
+      onOverrideConsumed?.();
+    }
     editor.onDidChangeModelContent(() => {
       if (!applyingRef.current) setUserEdited(true);
       onSourceRef.current(editor.getValue());
@@ -85,16 +122,23 @@ export function PythonPanel({ generatedCode, output, connected, onSource, ref }:
       editorRef.current = null;
       editor.dispose();
     };
+    // initialOverride/onOverrideConsumed are deliberately excluded: they are
+    // a one-time seed for this mount, like useState's initial value, not
+    // something later changes should re-apply.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     const editor = editorRef.current;
-    if (!editor || userEdited) return;
+    // Guard on the ref, not the `userEdited` closure: see the comment on
+    // load() above for why the closure can be stale here.
+    if (!editor || userEditedRef.current) return;
     if (editor.getValue() !== generatedCode) {
       applyingRef.current = true;
       editor.setValue(generatedCode);
       applyingRef.current = false;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [generatedCode, userEdited]);
 
   useEffect(() => {

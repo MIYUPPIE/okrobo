@@ -84,8 +84,20 @@ export default function App() {
   const [notice, setNotice] = useState("");
   const blocksRef = useRef<BlocksPanelHandle>(null);
   const pythonRef = useRef<PythonPanelHandle>(null);
-  const pendingPayloadRef = useRef<ProjectPayload | null>(null);
-  const pendingPythonRef = useRef<string | null>(null);
+  // Seeds a freshly-mounted BlocksPanel/PythonPanel (after a robot switch)
+  // with content other than the default starter. State, not a ref: BOTH
+  // panels read it via props at their OWN mount time, which is immune to
+  // React StrictMode's dev-mode double-invoke of effects — an imperative
+  // ref.load() call from a parent effect is not (see the comments on
+  // PythonPanelProps.initialOverride and BlocksPanelProps.initialWorkspace).
+  const [pendingContent, setPendingContent] = useState<{
+    robot: RobotKind;
+    blocks?: object | null;
+    python?: string;
+    pythonEdited: boolean;
+  } | null>(null);
+  const pendingForRobot = pendingContent?.robot === robot ? pendingContent : null;
+  const clearPendingContent = useCallback(() => setPendingContent(null), []);
   const noticeTimer = useRef(0);
 
   const world = useMemo(() => validateWorld(arenaJson), []);
@@ -329,10 +341,12 @@ export default function App() {
   };
 
   // "Try this" in a lesson: put the step's code in the Python editor, switch
-  // robots if the lesson needs the other one, and show the editor.
+  // robots if the lesson needs the other one, and show the editor. A robot
+  // switch seeds the new PythonPanel instance via the pendingContent prop
+  // (see its docstring for why not an imperative ref call).
   const tryLessonStep = (code: string, lessonRobot: RobotKind) => {
     if (lessonRobot !== robot) {
-      pendingPythonRef.current = code;
+      setPendingContent({ robot: lessonRobot, python: code, pythonEdited: true });
       switchRobot(lessonRobot);
     } else {
       pythonRef.current?.load(code, true);
@@ -340,22 +354,6 @@ export default function App() {
     setTab("Python");
     showNotice("loaded lesson step · press Run");
   };
-
-  // A project load that switches robots applies its content after the
-  // panels remount for the new robot.
-  useEffect(() => {
-    const pending = pendingPayloadRef.current;
-    if (pending) {
-      pendingPayloadRef.current = null;
-      applyPayload(pending);
-    }
-    const pendingPython = pendingPythonRef.current;
-    if (pendingPython !== null) {
-      pendingPythonRef.current = null;
-      pythonRef.current?.load(pendingPython, true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [robot]);
 
   const refreshProjects = async () => {
     try {
@@ -405,7 +403,12 @@ export default function App() {
       const [meta, payload] = await loadProject(id);
       const target: RobotKind = payload.robot === "arm" ? "arm" : "car";
       if (target !== robot) {
-        pendingPayloadRef.current = payload;
+        setPendingContent({
+          robot: target,
+          blocks: (payload.blocks ?? null) as object | null,
+          python: payload.python,
+          pythonEdited: payload.python_edited,
+        });
         switchRobot(target);
       } else {
         applyPayload(payload);
@@ -638,7 +641,14 @@ export default function App() {
         </div>
         <div className="code-content">
           <div className={tab === "Blocks" ? "tab-panel active" : "tab-panel"}>
-            <BlocksPanel key={robot} robot={robot} onCode={onCode} ref={blocksRef} />
+            <BlocksPanel
+              key={robot}
+              robot={robot}
+              onCode={onCode}
+              ref={blocksRef}
+              initialWorkspace={pendingForRobot?.blocks}
+              onWorkspaceConsumed={clearPendingContent}
+            />
           </div>
           <div className={tab === "Python" ? "tab-panel active" : "tab-panel"}>
             <PythonPanel
@@ -648,6 +658,12 @@ export default function App() {
               connected={pythonConnected}
               onSource={onPythonSource}
               ref={pythonRef}
+              initialOverride={
+                pendingForRobot?.python !== undefined
+                  ? { code: pendingForRobot.python, edited: pendingForRobot.pythonEdited }
+                  : undefined
+              }
+              onOverrideConsumed={clearPendingContent}
             />
           </div>
           <div className={tab === "Lessons" ? "tab-panel active scrolls" : "tab-panel scrolls"}>
