@@ -6,7 +6,7 @@ dist/
 engine/build/
 
 # Generated WASM engine (scripts/build-engine-wasm.sh)
-apps/studio/public/engine/
+apps/studio/src/generated/
 
 # Synced Blockly media (apps/studio/scripts/sync-blockly-media.mjs)
 apps/studio/public/blockly-media/

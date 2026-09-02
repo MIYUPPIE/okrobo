@@ -211,6 +211,7 @@ Tests added: 6 ctest (arm), 12 pytest (arm model, Arm API, lidar, worker arm RPC
 ## Rules for every session
 
 1. **Gate tests with every change.** Engine: ctest + WASM parity vs the Python reference. Python: pytest. Studio: `tsc --noEmit` + vitest + `vite build`. All free, all fast, all in `scripts/test-all.sh`. A phase task without its test in the same commit is not done.
+1b. **Verify the dev server, not only the built app.** They differ: Vite's dev server transforms modules while `vite build` copies `public/` verbatim, so a broken import can pass the build and fail `npm run dev`. That exact bug shipped in Phase 1 and survived to Phase 5. Run `./scripts/check-dev-server.sh` (headless, asserts the engine loads and the 3D renders) whenever you touch loading, assets, or the build config.
 2. **Offline check.** Before checking off any task: does it work with the network off? Asset store and updates are the only exceptions.
 3. **One directory per session** where possible. Contract changes are the exception and get called out in the commit message.
 4. **Sim math lives in `engine/` only.** `okrobo/_sim.py` is the frozen reference spec, changed only together with the engine and the parity test.
@@ -226,6 +227,7 @@ Tests added: 6 ctest (arm), 12 pytest (arm model, Arm API, lidar, worker arm RPC
 
 ```bash
 ./scripts/test-all.sh                 # everything green before you start
+./scripts/check-dev-server.sh         # the dev server really loads the engine + 3D
 ./scripts/run-python-sidecar.sh       # optional: real Python execution (py ✓ in the studio)
 cd apps/studio && npm run dev         # the studio: blocks, python, 3D sim, teleop
 python3 -m okrobo.demo                # student API on the reference sim (from runtime/python)

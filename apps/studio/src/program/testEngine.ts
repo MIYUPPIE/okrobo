@@ -1,10 +1,11 @@
 // Test helper: load the real WASM engine (built by scripts/build-engine-wasm.sh)
-// so program tests run against the production sim, not a mock.
+// through the app's own loader, so tests run against the production sim and
+// cover the exact module-loading path the studio uses.
 
 import arenaJson from "@packs/core/worlds/arena.json";
 import { EngineArm } from "../engine/EngineArm";
 import { EngineWorld } from "../engine/EngineWorld";
-import type { EngineModule } from "../engine/loader";
+import { type EngineModule, loadEngine } from "../engine/loader";
 import { validateWorld } from "../lib/validateWorld";
 import { ProgramRunner } from "./ProgramRunner";
 
@@ -14,15 +15,11 @@ let modulePromise: Promise<EngineModule> | null = null;
 
 export function loadTestEngineModule(): Promise<EngineModule> {
   if (!modulePromise) {
-    const enginePath = new URL("../../public/engine/okrobo_engine.js", import.meta.url).pathname;
-    modulePromise = import(/* @vite-ignore */ enginePath).then(
-      (m: { default: () => Promise<EngineModule> }) => m.default(),
-      () => {
-        throw new Error(
-          "WASM engine not built: run ./scripts/build-engine-wasm.sh first (test-all.sh does this)",
-        );
-      },
-    );
+    modulePromise = loadEngine().catch(() => {
+      throw new Error(
+        "WASM engine not built: run ./scripts/build-engine-wasm.sh first (test-all.sh does this)",
+      );
+    });
   }
   return modulePromise;
 }

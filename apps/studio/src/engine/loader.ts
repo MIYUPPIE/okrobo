@@ -1,6 +1,12 @@
 // Loads the WASM engine built by scripts/build-engine-wasm.sh from
-// public/engine/okrobo_engine.js. The file is generated (gitignored); when it
-// is missing the studio falls back to the 2D placeholder view.
+// src/generated/okrobo_engine.js. The file is generated (gitignored), so it is
+// referenced through import.meta.glob: Vite resolves it as a normal module in
+// dev, build, and tests, and yields nothing (instead of failing the build)
+// when the engine has not been compiled yet — the studio then shows its
+// "engine not built" fallback.
+//
+// It must NOT live in public/: Vite's dev server refuses to serve public files
+// as ES modules, which silently breaks `npm run dev` and `tauri dev`.
 
 export interface EngineModule {
   _world_create(
@@ -39,11 +45,16 @@ export interface EngineModule {
   _arm_tip_z(arm: number): number;
 }
 
-const ENGINE_URL = "/engine/okrobo_engine.js";
+type EngineFactory = { default: () => Promise<EngineModule> };
+
+const ENGINE_PATH = "../generated/okrobo_engine.js";
+const engineModules = import.meta.glob<EngineFactory>("../generated/okrobo_engine.js");
+
+export const ENGINE_MISSING_MESSAGE =
+  "engine not built: run ./scripts/build-engine-wasm.sh, then reload";
 
 export async function loadEngine(): Promise<EngineModule> {
-  const module = (await import(/* @vite-ignore */ ENGINE_URL)) as {
-    default: () => Promise<EngineModule>;
-  };
-  return module.default();
+  const load = engineModules[ENGINE_PATH];
+  if (!load) throw new Error(ENGINE_MISSING_MESSAGE);
+  return (await load()).default();
 }

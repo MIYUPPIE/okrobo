@@ -12,7 +12,7 @@ const TOLERANCE = 1e-9;
 
 const worldPath = join(ROOT, "packs", "core", "worlds", "arena.json");
 const scenarioPath = join(ROOT, "engine", "tests", "parity", "scenario.json");
-const enginePath = join(ROOT, "apps", "studio", "public", "engine", "okrobo_engine.js");
+const enginePath = join(ROOT, "apps", "studio", "src", "generated", "okrobo_engine.js");
 
 // Reference trace from Python.
 const referenceLines = execFileSync(

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Compile the C++ engine to WASM for the studio.
-# Output: apps/studio/public/engine/okrobo_engine.js (generated, gitignored).
+# Output: apps/studio/src/generated/okrobo_engine.js (generated, gitignored).
+# It lives under src/ (not public/) because Vite's dev server refuses to serve
+# files from public/ as ES modules; src/ makes it a normal module in dev,
+# build, tests, and the desktop bundle alike.
 # Requires the Emscripten SDK in tools/emsdk (see build.md, Phase 1).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,8 +20,10 @@ if ! command -v emcc >/dev/null 2>&1; then
   fi
 fi
 
-OUT_DIR="$ROOT/apps/studio/public/engine"
+OUT_DIR="$ROOT/apps/studio/src/generated"
 mkdir -p "$OUT_DIR"
+# Clean up the pre-Phase-6 location so a stale copy cannot be picked up.
+rm -rf "$ROOT/apps/studio/public/engine"
 
 em++ -O2 -std=c++17 --no-entry \
   -I "$ROOT/engine/src" \
@@ -34,4 +39,4 @@ em++ -O2 -std=c++17 --no-entry \
   -sFILESYSTEM=0 \
   -sALLOW_MEMORY_GROWTH=0
 
-echo "built $(du -h "$OUT_DIR/okrobo_engine.js" | cut -f1) -> apps/studio/public/engine/okrobo_engine.js"
+echo "built $(du -h "$OUT_DIR/okrobo_engine.js" | cut -f1) -> apps/studio/src/generated/okrobo_engine.js"
