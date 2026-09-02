@@ -2,6 +2,9 @@
 node_modules/
 dist/
 
+# Built pack archives + index (scripts/build-pack-index.mjs)
+/dist/packs/
+
 # C++
 engine/build/
 

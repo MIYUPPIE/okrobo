@@ -1,0 +1,12 @@
+{
+  "id": "robotics",
+  "name": "Robotics Pack",
+  "description": "A bigger arena for longer drives and navigation practice.",
+  "version": "1.0.0",
+  "requires": { "studio": "0.1.0" },
+  "contents": {
+    "worlds": ["worlds/big-arena.json"],
+    "robots": [],
+    "lessons": []
+  }
+}

@@ -261,6 +261,75 @@ body {
   font-size: 11px;
 }
 
+/* --- asset store --- */
+
+.store-source {
+  display: flex;
+  gap: 8px;
+}
+
+.store-source input {
+  flex: 1;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 7px 10px;
+}
+
+.store-source button {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.store-status {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.store-row {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.store-install {
+  background: var(--panel-2);
+  border: 1px solid var(--green);
+  color: var(--text);
+  font-size: 12px;
+  padding: 0 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.store-install:disabled {
+  border-color: var(--border);
+  color: var(--text-dim);
+  cursor: default;
+}
+
+.store-badge {
+  align-self: center;
+  font-size: 11px;
+  color: var(--green);
+  padding: 0 4px;
+}
+
 .sidebar {
   grid-area: sidebar;
   background: var(--panel);
@@ -445,6 +514,121 @@ body {
 .tab-panel.padded {
   padding: 14px;
   overflow: auto;
+}
+
+.tab-panel.scrolls {
+  overflow: auto;
+}
+
+/* --- lessons --- */
+
+.lessons-empty {
+  padding: 18px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.lesson-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+  padding: 14px;
+}
+
+.lesson-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.lesson-card:hover {
+  border-color: var(--accent);
+}
+
+.lesson-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.lesson-meta {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.lesson-header {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  z-index: 1;
+}
+
+.lesson-body {
+  padding: 4px 18px 24px;
+  max-width: 760px;
+}
+
+.lesson-step p,
+.lesson-step li {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text);
+}
+
+.lesson-step code {
+  background: var(--panel-2);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 12px;
+  color: #c8e1ff;
+}
+
+.lesson-code {
+  position: relative;
+  background: #14161b;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 10px 0 18px;
+}
+
+.lesson-code pre {
+  margin: 0;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #c8e1ff;
+  white-space: pre-wrap;
+}
+
+.try-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--green);
+  color: var(--text);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.try-button:hover {
+  background: var(--green);
+  color: #0e1116;
 }
 
 .blocks-editor {

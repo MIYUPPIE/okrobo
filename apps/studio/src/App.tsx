@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import arenaJson from "@packs/core/worlds/arena.json";
+import { AssetStore } from "./AssetStore";
 import type { RobotKind } from "./blocks/okroboBlocks";
 import { BlocksPanel, type BlocksPanelHandle } from "./BlocksPanel";
 import { EngineArm } from "./engine/EngineArm";
 import { EngineWorld } from "./engine/EngineWorld";
 import { loadEngine } from "./engine/loader";
+import { LessonsPanel } from "./LessonsPanel";
 import { validateWorld } from "./lib/validateWorld";
 import { runProgram } from "./program/execute";
 import { ProgramRunner, ProgramStoppedError } from "./program/ProgramRunner";
@@ -35,7 +37,7 @@ const ROBOTS: Array<{ id: RobotKind | null; icon: string; name: string; phase?: 
 ];
 
 
-const CODE_TABS = ["Blocks", "Python", "C++"] as const;
+const CODE_TABS = ["Blocks", "Python", "Lessons", "C++"] as const;
 type CodeTab = (typeof CODE_TABS)[number];
 
 const TELEOP_SPEED = CRUISE_SPEED;
@@ -43,7 +45,7 @@ const TELEOP_TURN = 0.06;
 
 type EngineStatus = "loading" | "ready" | "missing";
 type RunStatus = "idle" | "cruise" | "wall" | "program" | "python" | "error";
-type Dialog = "none" | "save-as" | "open";
+type Dialog = "none" | "save-as" | "open" | "store";
 
 export default function App() {
   const [tab, setTab] = useState<CodeTab>("Blocks");
@@ -72,6 +74,7 @@ export default function App() {
   const blocksRef = useRef<BlocksPanelHandle>(null);
   const pythonRef = useRef<PythonPanelHandle>(null);
   const pendingPayloadRef = useRef<ProjectPayload | null>(null);
+  const pendingPythonRef = useRef<string | null>(null);
   const noticeTimer = useRef(0);
 
   const world = useMemo(() => validateWorld(arenaJson), []);
@@ -303,6 +306,19 @@ export default function App() {
     setRobot(target);
   };
 
+  // "Try this" in a lesson: put the step's code in the Python editor, switch
+  // robots if the lesson needs the other one, and show the editor.
+  const tryLessonStep = (code: string, lessonRobot: RobotKind) => {
+    if (lessonRobot !== robot) {
+      pendingPythonRef.current = code;
+      switchRobot(lessonRobot);
+    } else {
+      pythonRef.current?.load(code, true);
+    }
+    setTab("Python");
+    showNotice("loaded lesson step · press Run");
+  };
+
   // A project load that switches robots applies its content after the
   // panels remount for the new robot.
   useEffect(() => {
@@ -310,6 +326,11 @@ export default function App() {
     if (pending) {
       pendingPayloadRef.current = null;
       applyPayload(pending);
+    }
+    const pendingPython = pendingPythonRef.current;
+    if (pendingPython !== null) {
+      pendingPythonRef.current = null;
+      pythonRef.current?.load(pendingPython, true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [robot]);
@@ -465,6 +486,15 @@ export default function App() {
                 <button onClick={() => void actionSave()}>
                   Save <span className="shortcut">Ctrl+S</span>
                 </button>
+                <div className="menu-sep" />
+                <button
+                  onClick={() => {
+                    setFileMenuOpen(false);
+                    setDialog("store");
+                  }}
+                >
+                  Asset Store…
+                </button>
                 {projectList.length > 0 && <div className="menu-sep" />}
                 {projectList.slice(0, 5).map((p) => (
                   <button key={p.id} className="recent" onClick={() => void openProjectById(p.id)}>
@@ -569,6 +599,9 @@ export default function App() {
               ref={pythonRef}
             />
           </div>
+          <div className={tab === "Lessons" ? "tab-panel active scrolls" : "tab-panel scrolls"}>
+            <LessonsPanel onTryStep={tryLessonStep} />
+          </div>
           <div className={tab === "C++" ? "tab-panel active padded" : "tab-panel padded"}>
             <pre className="cpp-placeholder">{`// Advanced track: extend the engine itself.\n// See engine/src/world.hpp`}</pre>
             <p className="placeholder-note">C++ track opens after Phase 6</p>
@@ -596,6 +629,7 @@ export default function App() {
           onCancel={() => setDialog("none")}
         />
       )}
+      {dialog === "store" && <AssetStore onClose={() => setDialog("none")} />}
       {dialog === "open" && (
         <OpenDialog
           projects={projectList}

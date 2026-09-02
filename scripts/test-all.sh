@@ -18,6 +18,10 @@ echo "== engine (WASM + parity vs reference model) =="
 "$ROOT/scripts/build-engine-wasm.sh"
 node "$ROOT/engine/tests/parity/parity.mjs"
 
+echo "== packs (index + school server) =="
+node "$ROOT/scripts/build-pack-index.mjs" >/dev/null
+node "$ROOT/scripts/lib/school-server-check.mjs" 8482
+
 echo "== desktop shell (rust) =="
 export PATH="$HOME/.cargo/bin:$PATH"
 if command -v cargo >/dev/null 2>&1; then

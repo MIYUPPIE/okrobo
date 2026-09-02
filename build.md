@@ -186,15 +186,23 @@ Tests added: 6 ctest (arm), 12 pytest (arm model, Arm API, lidar, worker arm RPC
 
 **Acceptance: verified in headless Chrome** — from a clean load on Car, clicking Arm swapped the viewport, blocks, and Python (`from okrobo import Arm`); Run executed the wave and the HUD showed the joints sweeping through four distinct readings (0°/60° → 45°/35°), Stop cleared it. Camera framing was fixed after the first screenshot showed the arm rendered too small in the arena-sized view.
 
-### Phase 6: Packs and the school server
+### Phase 6: Packs and the school server ✅
 
-- [ ] Pack format: manifest + assets + lessons, signed, versioned
-- [ ] URDF import for robot models shipped in packs (carried from Phase 5)
-- [ ] Asset store UI: list, download, install, fully usable offline afterwards
-- [ ] School server: one static-file server on the LAN that mirrors packs; app discovers it and prefers it over the internet
-- [ ] Lesson player: markdown lessons with embedded runnable exercises from `packs/`
+- [x] Pack format (`contracts/pack/v0`): `pack.json` manifest + worlds/robots/lessons, semver'd, with `sha256` and `size_bytes`. `scripts/build-pack-index.mjs` builds deterministic `.tar.gz` archives and an `index.json`. Two packs ship: `core` (arena, arm URDF, two lessons) and `robotics` (4x4 m arena)
+- [x] URDF import (`src/packs/urdf.ts`): the documented subset — links, revolute/continuous/fixed joints, origins, axes, limits — ignoring unsupported elements rather than rejecting real-world files. A gate test asserts `packs/core/robots/arm.urdf` describes the same arm `engine/src/arm.cpp` simulates (link lengths, limits, velocities), so the two cannot drift
+- [x] Asset store UI (`src/AssetStore.tsx`): discovers a source, lists packs as available/installed/upgradable, downloads, installs, uninstalls. Install goes through Rust (`src-tauri/src/packs.rs`): digest verified before unpacking, staging directory swapped in atomically, previous version restored on any failure, archives that lie about their contents refused
+- [x] School server (`scripts/school-server.mjs`): a static file server with CORS, prints its LAN addresses on start, refuses path traversal. The studio tries school-server addresses before the internet, so 30 students download a pack once over the LAN
+- [x] Lesson player: a Lessons tab listing lessons from the core pack, with per-step "Try this" that loads the code into the Python editor and switches robots when the lesson needs the other one. Lesson prose renders through React text nodes only (`src/packs/markdown.tsx`) — pack content is untrusted, so there is no HTML injection surface at all rather than a sanitiser to trust
+
+Tests: 31 pack tests (manifest/index validation incl. path-escape rejection, URDF parsing, lesson parsing, the shipped packs, store discovery and catalogue), 9 Rust pack tests (SHA-256 known-answer vectors, tamper rejection with rollback, upgrade, uninstall), and a seam test asserting the frontend's invoke payloads match the Rust command signatures — verified by renaming a Rust parameter and watching it fail. The school-server check is now part of `scripts/test-all.sh`.
+
+**Acceptance: verified in headless Chrome** — the Lessons tab listed both core lessons; opening "Wave the arm" showed 4 steps with 3 runnable blocks; "Try this" switched the robot from Car to Arm, moved to the Python tab, and loaded `from okrobo import Arm` code ready to Run. The store pipeline was verified against a live school server: index published with digests, archive downloaded, digest matched.
+
+Not done here: pack signing (the manifest carries a content digest, not a publisher signature) — it needs a key-distribution decision for schools, so it is deliberately deferred rather than half-built.
 
 ### Phase 7: Hardware
+
+- [ ] Pack signing: publisher keys and signature verification on install (deferred from Phase 6; needs a key-distribution decision for schools)
 
 - [ ] Serial transport (decide webview vs sidecar, see open decisions)
 - [ ] ESP32/Arduino firmware speaking contract robot-api over serial
@@ -229,8 +237,12 @@ Tests added: 6 ctest (arm), 12 pytest (arm model, Arm API, lidar, worker arm RPC
 ./scripts/test-all.sh                 # everything green before you start
 ./scripts/check-dev-server.sh         # the dev server really loads the engine + 3D
 ./scripts/run-python-sidecar.sh       # optional: real Python execution (py ✓ in the studio)
-cd apps/studio && npm run dev         # the studio: blocks, python, 3D sim, teleop
+cd apps/studio && npm run dev         # the studio: blocks, python, lessons, 3D sim, teleop
 python3 -m okrobo.demo                # student API on the reference sim (from runtime/python)
+
+# packs / school server
+node scripts/build-pack-index.mjs     # archives + index.json in dist/packs
+node scripts/school-server.mjs        # serve them to the LAN (File → Asset Store…)
 ```
 
-Then open Phase 6, take the first unchecked box, build it with its test, check it off here, commit.
+Then open Phase 7, take the first unchecked box, build it with its test, check it off here, commit.

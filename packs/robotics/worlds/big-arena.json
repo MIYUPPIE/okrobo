@@ -1,0 +1,9 @@
+{
+  "name": "Big Arena",
+  "description": "A 4x4 m arena: room for longer drives and wider turns.",
+  "arena_width": 4.0,
+  "arena_height": 4.0,
+  "robot_radius": 0.1,
+  "wheel_base": 0.12,
+  "start": { "x": 2.0, "y": 2.0, "theta": 0.0 }
+}

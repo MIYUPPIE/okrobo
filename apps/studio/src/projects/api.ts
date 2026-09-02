@@ -35,3 +35,19 @@ export const loadProject = (id: string) =>
   invoke<[ProjectMeta, ProjectPayload]>("load_project", { id });
 
 export const deleteProject = (id: string) => invoke<void>("delete_project", { id });
+
+// --- packs (contracts/pack/v0) ---
+
+export interface InstalledPack {
+  id: string;
+  name: string;
+  version: string;
+}
+
+export const listPacks = () => invoke<InstalledPack[]>("list_packs");
+
+/** The shell verifies `sha256` against the bytes before unpacking anything. */
+export const installPack = (id: string, version: string, sha256: string, archive: Uint8Array) =>
+  invoke<InstalledPack>("install_pack", { id, version, sha256, archive: Array.from(archive) });
+
+export const uninstallPack = (id: string) => invoke<void>("uninstall_pack", { id });
