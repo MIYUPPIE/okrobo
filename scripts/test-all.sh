@@ -18,6 +18,15 @@ echo "== engine (WASM + parity vs reference model) =="
 "$ROOT/scripts/build-engine-wasm.sh"
 node "$ROOT/engine/tests/parity/parity.mjs"
 
+echo "== desktop shell (rust) =="
+export PATH="$HOME/.cargo/bin:$PATH"
+if command -v cargo >/dev/null 2>&1; then
+  (cd "$ROOT/apps/studio/src-tauri" && cargo test --quiet 2>&1 | grep -E "test result|running" | head -4)
+else
+  echo "FAIL: rust not installed (rustup.rs), required since Phase 4" >&2
+  exit 1
+fi
+
 echo "== apps/studio (typecheck + unit tests + build) =="
 cd "$ROOT/apps/studio"
 [ -d node_modules ] || npm install --no-audit --no-fund

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useRef, useState } from "react";
 // Core editor + the Python grammar only: the full "monaco-editor" entry drags
 // in every language service worker (7MB+ of TS tooling) we don't need.
 // monaco's exports map rebases subpaths onto esm/vs/.
@@ -15,6 +15,13 @@ export interface OutputLine {
   text: string;
 }
 
+export interface PythonPanelHandle {
+  /** Current buffer and whether the user has hand-edited it. */
+  get(): { code: string; edited: boolean };
+  /** Replace the buffer (project load / new project). */
+  load(code: string, edited: boolean): void;
+}
+
 export interface PythonPanelProps {
   /** Python generated from the blocks; applied while the user hasn't edited. */
   generatedCode: string;
@@ -22,16 +29,38 @@ export interface PythonPanelProps {
   connected: boolean;
   /** Reports the current editor content after every change. */
   onSource: (code: string) => void;
+  ref?: React.Ref<PythonPanelHandle>;
 }
 
-export function PythonPanel({ generatedCode, output, connected, onSource }: PythonPanelProps) {
+export function PythonPanel({ generatedCode, output, connected, onSource, ref }: PythonPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const applyingRef = useRef(false);
   const [userEdited, setUserEdited] = useState(false);
+  const userEditedRef = useRef(false);
   const onSourceRef = useRef(onSource);
   onSourceRef.current = onSource;
+  userEditedRef.current = userEdited;
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      get: () => ({
+        code: editorRef.current?.getValue() ?? "",
+        edited: userEditedRef.current,
+      }),
+      load: (code, edited) => {
+        const editor = editorRef.current;
+        if (!editor) return;
+        applyingRef.current = true;
+        editor.setValue(code);
+        applyingRef.current = false;
+        setUserEdited(edited);
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     const container = containerRef.current;

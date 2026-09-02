@@ -151,16 +151,24 @@ Tests: 8 new pytest cases (worker RPC protocol, clean tracebacks, full sidecar l
 
 **Acceptance: verified in headless Chrome with the sidecar running** — Run on the Python tab executed the Monaco file (the vision snippet) as real CPython: status showed "python running", the robot crossed the arena and turned (y reached 1.70), Stop killed the subprocess and the output pane logged the exit.
 
-### Phase 4: Desktop app
+### Phase 4: Desktop app ✅
 
 Goal: it stops being a dev server and becomes OKHUB Robotics Studio.
 
-- [ ] Prerequisite: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh` (Rust for Tauri, user-space, no sudo)
-- [ ] Tauri wraps `apps/studio`; engine WASM bundled as a resource
-- [ ] Bundle python-build-standalone CPython (+ `.deps` wheels) and have the shell spawn/stop the sidecar automatically (carried over from Phase 3)
-- [ ] Project save/load: SQLite index + project directories (blocks, python files, world ref)
-- [ ] File menu: New/Open/Save project; recent projects
-- [ ] Installer builds for Linux (deb/AppImage) in CI
+- [x] Prerequisites installed (Rust 1.98 via rustup, webkit2gtk/gtk3/librsvg dev packages)
+- [x] Tauri 2 wraps `apps/studio` (`src-tauri/`); the engine WASM ships inside the frontend dist; the okrobo Python runtime and its `.deps` bundle as resources
+- [x] Shell spawns the sidecar on launch and kills it on exit (`src-tauri/src/sidecar.rs`); interpreter resolution: bundled CPython → system python3 → repo dev path. `scripts/fetch-python-runtime.sh` downloads python-build-standalone into `src-tauri/runtime-dist/` (gitignored) for fully offline installs; without it the package falls back to the machine's python3
+- [x] Project store (`src-tauri/src/projects.rs`): SQLite index + one directory per project (blocks.json, program.py, project.json with world + python_edited), in the app data dir; 6 cargo tests
+- [x] File menu is real in the desktop app: New / Open… (list, delete with confirm) / Save (Ctrl+S), recent projects, project name in the window title and titlebar chip. Browser mode keeps the menu disabled
+- [x] Installer build: `scripts/build-desktop.sh` produces deb (70 MB) + AppImage (108 MB, fully self-contained) locally (no CI until a git remote exists, deliberate)
+
+Deviations and hard-won facts:
+- "CI builds the installer" became a local build script; there is no remote or CI by choice (GitHub parked).
+- The sidecar child gets `PR_SET_PDEATHSIG`, because SIGTERM on the app skips Tauri's RunEvent::Exit and would orphan it; and the spawn scrubs `PYTHONHOME`/`PYTHONPATH`, because the AppImage GTK AppRun exports PYTHONHOME (and shells can carry ROS paths), which breaks the bundled interpreter.
+- tkinter is pruned from the bundled CPython: its tcl/tk 9 libs make linuxdeploy's dependency walk fail.
+- Tauri's bundler staging (`target/release/bundle/appimage_deb`, `runtime-dist` next to the binary) never refreshes stale files: after changing bundled resources, `rm -rf target/release/bundle` before rebundling.
+
+**Acceptance: verified on this machine** — the release binary and the AppImage both launch, autospawn the sidecar (the AppImage from its own bundled CPython, confirmed via /proc/pid/exe), initialize the project store, and kill the sidecar on exit including plain SIGTERM. Full offline install on a clean machine: install the deb or run the AppImage; nothing else needed. In-app File menu (New/Open/Save/recents) is wired to 6 cargo-tested store commands; a hands-on UI pass is Olayemi's to do on first launch.
 
 **Acceptance:** install the package on a machine with no toolchains and no internet; create, save, reopen, and run a project.
 
@@ -202,7 +210,8 @@ Goal: it stops being a dev server and becomes OKHUB Robotics Studio.
 
 ## Current state and prerequisites
 
-- Machine has: Node 25, npm 11, Python 3.12 (+pytest), CMake 3.28, g++ 11, git, and the Emscripten SDK in `tools/emsdk` (gitignored; a fresh clone re-installs it, `scripts/build-engine-wasm.sh` prints the commands). Missing: Rust (needed Phase 4).
+- Machine has: Node 25, npm 11, Python 3.12 (+pytest), CMake 3.28, g++ 11, git, Rust 1.98 (~/.cargo, add to PATH), webkit2gtk/gtk3 dev libs, and the Emscripten SDK in `tools/emsdk` (gitignored; a fresh clone re-installs it, `scripts/build-engine-wasm.sh` prints the commands).
+- Desktop build: `./scripts/build-desktop.sh` (runs `scripts/fetch-python-runtime.sh` output if present). Dev app: `cd apps/studio && npx tauri dev`.
 - No git remote configured (the gh token can't create repos); work is committed locally.
 
 ## How to continue
@@ -214,4 +223,4 @@ cd apps/studio && npm run dev         # the studio: blocks, python, 3D sim, tele
 python3 -m okrobo.demo                # student API on the reference sim (from runtime/python)
 ```
 
-Then open Phase 4, take the first unchecked box, build it with its test, check it off here, commit.
+Then open Phase 5, take the first unchecked box, build it with its test, check it off here, commit.

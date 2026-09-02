@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useImperativeHandle, useRef } from "react";
 import * as Blockly from "blockly";
 import {
   generateJavaScript,
@@ -6,6 +6,13 @@ import {
   STARTER_WORKSPACE,
   TOOLBOX,
 } from "./blocks/okroboBlocks";
+
+export interface BlocksPanelHandle {
+  /** Serialize the workspace (Blockly serialization JSON). */
+  save(): object;
+  /** Replace the workspace content; pass null for the starter program. */
+  load(state: object | null): void;
+}
 
 const darkTheme = Blockly.Theme.defineTheme("okrobo-dark", {
   name: "okrobo-dark",
@@ -22,12 +29,30 @@ const darkTheme = Blockly.Theme.defineTheme("okrobo-dark", {
 export interface BlocksPanelProps {
   /** Called with regenerated (javascript, python) after every real edit. */
   onCode: (js: string, python: string) => void;
+  ref?: React.Ref<BlocksPanelHandle>;
 }
 
-export function BlocksPanel({ onCode }: BlocksPanelProps) {
+export function BlocksPanel({ onCode, ref }: BlocksPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const workspaceRef = useRef<Blockly.WorkspaceSvg | null>(null);
   const onCodeRef = useRef(onCode);
   onCodeRef.current = onCode;
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      save: () => {
+        const workspace = workspaceRef.current;
+        return workspace ? Blockly.serialization.workspaces.save(workspace) : {};
+      },
+      load: (state) => {
+        const workspace = workspaceRef.current;
+        if (!workspace) return;
+        Blockly.serialization.workspaces.load(state ?? STARTER_WORKSPACE, workspace);
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     const container = containerRef.current;
@@ -42,6 +67,7 @@ export function BlocksPanel({ onCode }: BlocksPanelProps) {
       scrollbars: true,
       zoom: { controls: true, wheel: false, startScale: 0.9 },
     });
+    workspaceRef.current = workspace;
     Blockly.serialization.workspaces.load(STARTER_WORKSPACE, workspace);
 
     const regenerate = () => {
@@ -58,6 +84,7 @@ export function BlocksPanel({ onCode }: BlocksPanelProps) {
 
     return () => {
       observer.disconnect();
+      workspaceRef.current = null;
       workspace.dispose();
     };
   }, []);

@@ -11,6 +11,13 @@ apps/studio/public/engine/
 # Synced Blockly media (apps/studio/scripts/sync-blockly-media.mjs)
 apps/studio/public/blockly-media/
 
+# Tauri
+apps/studio/src-tauri/target/
+apps/studio/src-tauri/gen/schemas/
+
+# Bundled CPython (scripts/fetch-python-runtime.sh)
+apps/studio/src-tauri/runtime-dist/cpython/
+
 # Local toolchains (Emscripten SDK)
 tools/
 
