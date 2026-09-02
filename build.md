@@ -270,3 +270,13 @@ node scripts/school-server.mjs        # serve them to the LAN (File → Asset St
 ```
 
 All eight phases are done. Next work comes from the "Not done" notes in each phase (physics integration, firmware flashing from the studio, YOLO models) or from what students and teachers ask for once it is in their hands.
+
+## Post-Phase-8 hardening
+
+Work done after all eight phases shipped, closing gaps the phase-by-phase build left behind. Same bar as any phase: gate-tested, committed, `test-all.sh` green.
+
+- **Fresh-clone verification.** `git clone` into a clean directory and ran the documented steps — this is not implied by a green working tree, since a working tree accumulates installed dependencies and generated files the repo never mentions. Found and fixed: `requirements.txt` missing `pyserial` silently zeroed out all 83 Python tests (module-level `importorskip` in a package aborts collection of the whole package — `test-all.sh` now compares collected files to files on disk and fails loudly); a guard test crashing on a not-yet-generated directory; `scripts/setup.sh` added so a clone reaches green with two commands.
+- **Dev-server ENOSPC.** Vite was watching `src-tauri/target`, which stages a full bundled CPython (tens of thousands of files) once the desktop app is built, exhausting the inotify limit. `npm run dev` worked on a clean tree and crashed for anyone who had run `build-desktop.sh` first. Fixed by excluding `src-tauri`, `tools`, `dist` from Vite's watcher.
+- **React UI test coverage.** 109 studio tests existed and none touched the UI layer, including the Asset Store's install/trust decision — the single most security-relevant judgment call in the app. Added `@testing-library/react` + `user-event` + `jest-dom`, extracted `NameDialog`/`OpenDialog` out of `App.tsx` into `src/dialogs.tsx` for testability, and added 28 tests: the trust flow (verified installs silently, unsigned/unknown-publisher packs require explicit confirmation and install nothing on cancel, a signature mismatch is refused with no override), the project dialogs (delete requires a second confirming click), and the lesson player (list/open/back, "Try this" carries the right code and robot).
+
+Recurring theme across all three: a failure that looks like success (0 tests silently "passing", a crash only after a specific prior step, a UI path with no coverage at all) is worse than one that's visible. Guard accordingly before calling something done.
