@@ -40,6 +40,10 @@ public:
 
     State state() const;
 
+    /** Distance from the robot's front edge to the wall along heading+offset
+        (radians). offset 0 equals the state's distance sensor. */
+    double ray(double offset) const;
+
 private:
     double sensor_distance() const;
 

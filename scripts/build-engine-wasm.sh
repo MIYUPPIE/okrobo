@@ -23,6 +23,7 @@ mkdir -p "$OUT_DIR"
 em++ -O2 -std=c++17 --no-entry \
   -I "$ROOT/engine/src" \
   "$ROOT/engine/src/world.cpp" \
+  "$ROOT/engine/src/arm.cpp" \
   "$ROOT/engine/src/wasm_api.cpp" \
   -o "$OUT_DIR/okrobo_engine.js" \
   -sMODULARIZE=1 \

@@ -84,6 +84,40 @@ def test_student_error_gives_clean_traceback():
     assert "worker.py" not in stderr
 
 
+def test_arm_calls_become_rpc_requests():
+    code = (
+        "from okrobo import Arm\n"
+        "arm = Arm()\n"
+        "arm.move('shoulder', 80)\n"
+        "arm.move_all([0, 90, 0, 0])\n"
+    )
+    requests, _, stderr, exit_code = run_worker(code, lambda r: {"ok": True, "result": None})
+    assert exit_code == 0, stderr
+    assert [r["method"] for r in requests] == ["arm_move", "arm_move_all"]
+    assert requests[0]["args"] == {"joint": "shoulder", "degrees": 80}
+    assert requests[1]["args"] == {"angles": [0, 90, 0, 0]}
+
+
+def test_arm_readbacks():
+    code = "from okrobo import Arm\narm = Arm()\nprint(arm.tip()[2], arm.angles()[1])\n"
+    answers = {"arm_tip": [0.4, 0.0, 0.55], "arm_angles": [0.0, 60.0, -30.0, -30.0]}
+    _, stdout, stderr, exit_code = run_worker(
+        code, lambda r: {"ok": True, "result": answers[r["method"]]}
+    )
+    assert exit_code == 0, stderr
+    assert "0.55 60.0" in stdout
+
+
+def test_lidar_returns_floats():
+    code = "from okrobo import Robot\nprint(sum(Robot().lidar(rays=3)))\n"
+    requests, stdout, stderr, exit_code = run_worker(
+        code, lambda r: {"ok": True, "result": [0.5, 1.0, 0.5]}
+    )
+    assert exit_code == 0, stderr
+    assert requests[0]["args"] == {"rays": 3, "fov_degrees": 180.0}
+    assert "2.0" in stdout
+
+
 def test_position_tuple():
     code = "from okrobo import Robot\nx, y = Robot().position()\nprint(x + y)\n"
     _, stdout, stderr, exit_code = run_worker(code, lambda r: {"ok": True, "result": [1.0, 0.5]})

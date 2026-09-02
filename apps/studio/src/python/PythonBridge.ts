@@ -1,8 +1,8 @@
 import type { RobotApi } from "../program/ProgramRunner";
 
-// Client side of contracts/robot-remote/v0: connects to the local Python
-// sidecar and executes its robot requests on the engine via the runner's
-// robot API. Reconnects quietly while the sidecar is not running.
+// Client side of contracts/robot-remote/v1: connects to the local Python
+// sidecar and executes its robot requests (car, arm, sensors) on the engine
+// via the runner's robot API. Reconnects quietly while the sidecar is down.
 
 export const SIDECAR_URL = "ws://127.0.0.1:8355";
 const RETRY_MS = 3000;
@@ -37,12 +37,28 @@ export async function executeRemoteRequest(
       return robot.wait(num(args.seconds, 1));
     case "distance":
       return robot.distance();
+    case "lidar":
+      return robot.lidar(
+        Math.trunc(num(args.rays, 9)),
+        num(args.fov_degrees, 180),
+      );
     case "heading":
       return robot.heading();
     case "position":
       return robot.position();
     case "stop":
       return robot.stop();
+    case "arm_move":
+      return robot.armMove(
+        typeof args.joint === "string" ? args.joint : Math.trunc(num(args.joint, 0)),
+        num(args.degrees, 0),
+      );
+    case "arm_move_all":
+      return robot.armMoveAll(Array.isArray(args.angles) ? args.angles.map((a) => num(a, 0)) : []);
+    case "arm_angles":
+      return robot.armAngles();
+    case "arm_tip":
+      return robot.armTip();
     default:
       throw new Error(`unknown method: ${method}`);
   }

@@ -295,10 +295,22 @@ body {
   color: var(--text-dim);
 }
 
-.robot.available {
-  background: var(--panel-2);
+.robot.selectable {
+  width: 100%;
+  background: none;
+  border: 1px solid transparent;
   color: var(--text);
-  outline: 1px solid var(--border);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.robot.selectable:hover {
+  background: var(--panel-2);
+}
+
+.robot.selectable.active {
+  background: var(--panel-2);
+  border-color: var(--accent);
 }
 
 .badge {

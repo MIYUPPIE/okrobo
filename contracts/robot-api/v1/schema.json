@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "okrobo:robot-api:v1",
+  "title": "OKROBO Robot API v1",
+  "description": "v0 (differential-drive car) plus the 4-DOF arm and the car's lidar fan. Units: meters, radians, seconds. Arm joints in order: base (yaw), shoulder, elbow, wrist; pitch measured from horizontal, up positive.",
+  "definitions": {
+    "car_command": { "$ref": "../v0/schema.json#/definitions/command" },
+    "car_state": { "$ref": "../v0/schema.json#/definitions/state" },
+    "lidar": {
+      "type": "array",
+      "description": "Distances (m) along rays spread over a field of view centered on the heading, left to right.",
+      "items": { "type": "number", "minimum": 0 },
+      "minItems": 1
+    },
+    "arm_command": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "joint", "angle"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "arm_target" },
+            "joint": { "type": "integer", "minimum": 0, "maximum": 3 },
+            "angle": { "type": "number", "description": "radians, clamped to the joint's limits" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": { "type": { "const": "stop" } }
+        },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": { "type": { "const": "reset" } }
+        }
+      ]
+    },
+    "arm_state": {
+      "type": "object",
+      "required": ["tick", "joints", "moving", "tip"],
+      "additionalProperties": false,
+      "properties": {
+        "tick": { "type": "integer", "minimum": 0 },
+        "joints": {
+          "type": "object",
+          "required": ["angles", "targets"],
+          "additionalProperties": false,
+          "properties": {
+            "angles": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 },
+            "targets": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 }
+          }
+        },
+        "moving": { "type": "boolean" },
+        "tip": {
+          "type": "object",
+          "required": ["x", "y", "z"],
+          "additionalProperties": false,
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "z": { "type": "number" }
+          }
+        }
+      }
+    }
+  }
+}

@@ -52,6 +52,17 @@ class Robot:
         """Meters from the robot's front edge to the wall it is facing."""
         return self.world.state().distance
 
+    def lidar(self, rays: int = 9, fov: float = 180.0) -> list:
+        """Distances (m) along `rays` directions spread over `fov` degrees,
+        centered on the heading, left to right."""
+        if rays < 1:
+            return []
+        if rays == 1:
+            return [self.world.ray(0.0)]
+        half = math.radians(fov) / 2.0
+        step = math.radians(fov) / (rays - 1)
+        return [self.world.ray(half - i * step) for i in range(rays)]
+
     def heading(self) -> float:
         """Robot heading in degrees, (-180, 180], 0 = +x, counter-clockwise."""
         return math.degrees(self.world.state().pose.theta)

@@ -51,6 +51,19 @@ def test_forward_stops_at_wall():
     assert robot.distance() < 0.01
 
 
+def test_lidar_fan():
+    robot = Robot()
+    distances = robot.lidar(rays=5, fov=180)
+    assert len(distances) == 5
+    # Center ray equals the plain distance sensor.
+    assert math.isclose(distances[2], robot.distance(), abs_tol=1e-12)
+    # At the arena center all cardinal rays hit walls 0.9 m away.
+    assert math.isclose(distances[0], 0.9, abs_tol=1e-9)  # +90deg (left)
+    assert math.isclose(distances[4], 0.9, abs_tol=1e-9)  # -90deg (right)
+    # Diagonals are longer than cardinals from the center.
+    assert distances[1] > distances[2]
+
+
 def test_wait_passes_time_without_moving():
     robot = Robot()
     before = robot.world.state()

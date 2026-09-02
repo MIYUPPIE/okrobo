@@ -68,10 +68,14 @@ void World::step(double dt) {
 }
 
 double World::sensor_distance() const {
-    // Slab method: distance from robot center to the arena wall along heading,
-    // minus the robot radius, floored at 0.
-    const double dx = std::cos(pose_.theta);
-    const double dy = std::sin(pose_.theta);
+    return ray(0.0);
+}
+
+double World::ray(double offset) const {
+    // Slab method: distance from robot center to the arena wall along the
+    // given direction, minus the robot radius, floored at 0.
+    const double dx = std::cos(pose_.theta + offset);
+    const double dy = std::sin(pose_.theta + offset);
     double t = std::numeric_limits<double>::infinity();
 
     if (dx > kOmegaEpsilon) t = std::min(t, (config_.arena_width - pose_.x) / dx);

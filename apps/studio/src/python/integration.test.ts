@@ -110,6 +110,41 @@ describe("python sidecar end to end (real sidecar, real engine)", () => {
     engine.destroy();
   }, 30000);
 
+  it("an unmodified okrobo Arm student file drives the WASM arm (v1)", async () => {
+    const { engine, arm, runner } = await makeRunner();
+    const capture = makeCapture();
+    const bridge = new PythonBridge(url, runner.api, capture.events);
+    bridge.connect();
+    await waitFor(() => capture.connected.value);
+
+    bridge.run(
+      [
+        "from okrobo import Arm",
+        "arm = Arm()",
+        "arm.move('base', 90)",
+        "arm.move_all([90, 90, 0, 0])",
+        "x, y, z = arm.tip()",
+        "print('tip:', round(x, 3), round(y, 3), round(z, 3))",
+        "print('angles:', [round(a) for a in arm.angles()])",
+      ].join("\n"),
+    );
+    await waitFor(
+      () => capture.done.value,
+      () => runner.tick(100),
+    );
+
+    expect(capture.done.exitCode).toBe(0);
+    const stdout = capture.output.join("");
+    // base=90deg, arm straight up: tip directly above the base at 0.62 m.
+    expect(stdout).toContain("tip: 0.0 0.0 0.62");
+    expect(stdout).toContain("angles: [90, 90, 0, 0]");
+    expect(arm.state().tip.z).toBeCloseTo(0.62, 6);
+
+    bridge.dispose();
+    arm.destroy();
+    engine.destroy();
+  }, 30000);
+
   it("stop kills an infinite student program", async () => {
     const { engine, runner } = await makeRunner();
     const capture = makeCapture();

@@ -1,4 +1,4 @@
-"""The OKROBO Python sidecar. See contracts/robot-remote/v0.
+"""The OKROBO Python sidecar. See contracts/robot-remote/v1.
 
     python3 -m okrobo.sidecar [--port 8355]
 

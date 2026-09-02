@@ -65,6 +65,34 @@ if (!Blockly.Blocks["okrobo_forward"]) {
       colour: 25,
       tooltip: "Meters from the robot's front edge to the wall it is facing",
     },
+    {
+      type: "okrobo_arm_move",
+      message0: "move %1 to %2 °",
+      args0: [
+        {
+          type: "field_dropdown",
+          name: "JOINT",
+          options: [
+            ["base", "base"],
+            ["shoulder", "shoulder"],
+            ["elbow", "elbow"],
+            ["wrist", "wrist"],
+          ],
+        },
+        { type: "field_number", name: "DEGREES", value: 45, min: -180, max: 180, precision: 1 },
+      ],
+      previousStatement: null,
+      nextStatement: null,
+      colour: 290,
+      tooltip: "Move one arm joint to an absolute angle and wait until it arrives",
+    },
+    {
+      type: "okrobo_arm_tip_height",
+      message0: "tip height (m)",
+      output: "Number",
+      colour: 25,
+      tooltip: "How high the arm's tip is above the ground",
+    },
   ]);
 }
 
@@ -79,6 +107,12 @@ javascriptGenerator.forBlock["okrobo_turn_right"] = (block) =>
 javascriptGenerator.forBlock["okrobo_wait"] = (block) =>
   `await robot.wait(${block.getFieldValue("SECONDS")});\n`;
 javascriptGenerator.forBlock["okrobo_distance"] = () => ["robot.distance()", JsOrder.FUNCTION_CALL];
+javascriptGenerator.forBlock["okrobo_arm_move"] = (block) =>
+  `await robot.armMove("${block.getFieldValue("JOINT")}", ${block.getFieldValue("DEGREES")});\n`;
+javascriptGenerator.forBlock["okrobo_arm_tip_height"] = () => [
+  "robot.armTip()[2]",
+  JsOrder.MEMBER,
+];
 
 pythonGenerator.forBlock["okrobo_forward"] = (block) =>
   `robot.forward(${block.getFieldValue("METERS")})\n`;
@@ -88,9 +122,30 @@ pythonGenerator.forBlock["okrobo_turn_left"] = (block) =>
   `robot.turn_left(${block.getFieldValue("DEGREES")})\n`;
 pythonGenerator.forBlock["okrobo_turn_right"] = (block) =>
   `robot.turn_right(${block.getFieldValue("DEGREES")})\n`;
+// The wait block is shared between robots; its Python receiver depends on
+// which program is being generated (set by generatePython).
+let pythonReceiver = "robot";
 pythonGenerator.forBlock["okrobo_wait"] = (block) =>
-  `robot.wait(${block.getFieldValue("SECONDS")})\n`;
+  `${pythonReceiver}.wait(${block.getFieldValue("SECONDS")})\n`;
 pythonGenerator.forBlock["okrobo_distance"] = () => ["robot.distance()", PyOrder.FUNCTION_CALL];
+pythonGenerator.forBlock["okrobo_arm_move"] = (block) =>
+  `arm.move("${block.getFieldValue("JOINT")}", ${block.getFieldValue("DEGREES")})\n`;
+pythonGenerator.forBlock["okrobo_arm_tip_height"] = () => ["arm.tip()[2]", PyOrder.MEMBER];
+
+export type RobotKind = "car" | "arm";
+
+const COMMON_TOOLBOX_TAIL = [
+  { kind: "block", type: "controls_if" },
+  {
+    kind: "block",
+    type: "controls_repeat_ext",
+    inputs: { TIMES: { shadow: { type: "math_number", fields: { NUM: 4 } } } },
+  },
+  { kind: "block", type: "controls_whileUntil" },
+  { kind: "block", type: "logic_compare" },
+  { kind: "block", type: "logic_boolean" },
+  { kind: "block", type: "math_number" },
+];
 
 export const TOOLBOX = {
   kind: "flyoutToolbox",
@@ -101,16 +156,17 @@ export const TOOLBOX = {
     { kind: "block", type: "okrobo_turn_right" },
     { kind: "block", type: "okrobo_wait" },
     { kind: "block", type: "okrobo_distance" },
-    { kind: "block", type: "controls_if" },
-    {
-      kind: "block",
-      type: "controls_repeat_ext",
-      inputs: { TIMES: { shadow: { type: "math_number", fields: { NUM: 4 } } } },
-    },
-    { kind: "block", type: "controls_whileUntil" },
-    { kind: "block", type: "logic_compare" },
-    { kind: "block", type: "logic_boolean" },
-    { kind: "block", type: "math_number" },
+    ...COMMON_TOOLBOX_TAIL,
+  ],
+};
+
+export const ARM_TOOLBOX = {
+  kind: "flyoutToolbox",
+  contents: [
+    { kind: "block", type: "okrobo_arm_move" },
+    { kind: "block", type: "okrobo_wait" },
+    { kind: "block", type: "okrobo_arm_tip_height" },
+    ...COMMON_TOOLBOX_TAIL,
   ],
 };
 
@@ -156,6 +212,46 @@ export const STARTER_WORKSPACE = {
   },
 };
 
+/** A little wave: the arm sweeps its shoulder up and down three times. */
+export const ARM_STARTER_WORKSPACE = {
+  blocks: {
+    languageVersion: 0,
+    blocks: [
+      {
+        type: "controls_repeat_ext",
+        x: 24,
+        y: 24,
+        inputs: {
+          TIMES: { shadow: { type: "math_number", fields: { NUM: 3 } } },
+          DO: {
+            block: {
+              type: "okrobo_arm_move",
+              fields: { JOINT: "shoulder", DEGREES: 85 },
+              next: {
+                block: {
+                  type: "okrobo_arm_move",
+                  fields: { JOINT: "shoulder", DEGREES: 35 },
+                  next: {
+                    block: { type: "okrobo_arm_move", fields: { JOINT: "base", DEGREES: 45 } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    ],
+  },
+};
+
+export function starterWorkspace(robot: RobotKind): object {
+  return robot === "arm" ? ARM_STARTER_WORKSPACE : STARTER_WORKSPACE;
+}
+
+export function toolboxFor(robot: RobotKind): Blockly.utils.toolbox.ToolboxDefinition {
+  return (robot === "arm" ? ARM_TOOLBOX : TOOLBOX) as Blockly.utils.toolbox.ToolboxDefinition;
+}
+
 export function generateJavaScript(workspace: Blockly.Workspace): string {
   // Every loop iteration awaits a checkpoint: Stop can always interrupt and
   // `while (true)` can never freeze the UI.
@@ -163,8 +259,14 @@ export function generateJavaScript(workspace: Blockly.Workspace): string {
   return javascriptGenerator.workspaceToCode(workspace);
 }
 
-const PYTHON_HEADER = "from okrobo import Robot\n\nrobot = Robot()\n\n";
+const PYTHON_HEADERS: Record<RobotKind, string> = {
+  car: "from okrobo import Robot\n\nrobot = Robot()\n\n",
+  arm: "from okrobo import Arm\n\narm = Arm()\n\n",
+};
 
-export function generatePython(workspace: Blockly.Workspace): string {
-  return PYTHON_HEADER + pythonGenerator.workspaceToCode(workspace);
+export function generatePython(workspace: Blockly.Workspace, robot: RobotKind = "car"): string {
+  pythonReceiver = robot === "arm" ? "arm" : "robot";
+  const body = pythonGenerator.workspaceToCode(workspace);
+  pythonReceiver = "robot";
+  return PYTHON_HEADERS[robot] + body;
 }

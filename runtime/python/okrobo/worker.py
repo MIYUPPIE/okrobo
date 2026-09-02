@@ -1,12 +1,12 @@
-"""Student-code host subprocess. See contracts/robot-remote/v0.
+"""Student-code host subprocess. See contracts/robot-remote/v1.
 
 Run by the sidecar as: python3 -u worker.py <rpc_fd> <code_path>
 
 The rpc fd is one end of a socketpair. Every robot call becomes one JSONL
 request up the socket; the reply comes back on the same socket. Before the
-student file executes, a fake `okrobo` module is installed whose Robot proxies
-those calls, so an unmodified `from okrobo import Robot` file drives whatever
-robot backend sits on the other side of the sidecar.
+student file executes, a fake `okrobo` module is installed whose Robot and Arm
+proxy those calls, so an unmodified `from okrobo import Robot` (or `Arm`) file
+drives whatever robot backend sits on the other side of the sidecar.
 
 This file is executed by path (not imported as part of the package) so the
 real okrobo package is never loaded here.
@@ -59,6 +59,9 @@ def make_okrobo_module(rpc) -> types.ModuleType:
         def distance(self) -> float:
             return float(rpc("distance"))
 
+        def lidar(self, rays: int = 9, fov: float = 180.0) -> list:
+            return [float(d) for d in rpc("lidar", rays=rays, fov_degrees=fov)]
+
         def heading(self) -> float:
             return float(rpc("heading"))
 
@@ -69,8 +72,31 @@ def make_okrobo_module(rpc) -> types.ModuleType:
         def stop(self) -> None:
             rpc("stop")
 
+    class Arm:
+        """Remote proxy with the exact okrobo.Arm surface."""
+
+        def move(self, joint, degrees: float) -> None:
+            rpc("arm_move", joint=joint, degrees=degrees)
+
+        def move_all(self, degrees: list) -> None:
+            rpc("arm_move_all", angles=list(degrees))
+
+        def angles(self) -> list:
+            return [float(a) for a in rpc("arm_angles")]
+
+        def tip(self) -> tuple:
+            result = rpc("arm_tip")
+            return (float(result[0]), float(result[1]), float(result[2]))
+
+        def wait(self, seconds: float = 1.0) -> None:
+            rpc("wait", seconds=seconds)
+
+        def stop(self) -> None:
+            rpc("stop")
+
     module = types.ModuleType("okrobo")
     module.Robot = Robot
+    module.Arm = Arm
     return module
 
 

@@ -3,8 +3,9 @@ import * as Blockly from "blockly";
 import {
   generateJavaScript,
   generatePython,
-  STARTER_WORKSPACE,
-  TOOLBOX,
+  type RobotKind,
+  starterWorkspace,
+  toolboxFor,
 } from "./blocks/okroboBlocks";
 
 export interface BlocksPanelHandle {
@@ -27,12 +28,14 @@ const darkTheme = Blockly.Theme.defineTheme("okrobo-dark", {
 });
 
 export interface BlocksPanelProps {
+  /** Which robot's blocks and starter program to use. Remount (key) to switch. */
+  robot: RobotKind;
   /** Called with regenerated (javascript, python) after every real edit. */
   onCode: (js: string, python: string) => void;
   ref?: React.Ref<BlocksPanelHandle>;
 }
 
-export function BlocksPanel({ onCode, ref }: BlocksPanelProps) {
+export function BlocksPanel({ robot, onCode, ref }: BlocksPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const workspaceRef = useRef<Blockly.WorkspaceSvg | null>(null);
   const onCodeRef = useRef(onCode);
@@ -48,10 +51,10 @@ export function BlocksPanel({ onCode, ref }: BlocksPanelProps) {
       load: (state) => {
         const workspace = workspaceRef.current;
         if (!workspace) return;
-        Blockly.serialization.workspaces.load(state ?? STARTER_WORKSPACE, workspace);
+        Blockly.serialization.workspaces.load(state ?? starterWorkspace(robot), workspace);
       },
     }),
-    [],
+    [robot],
   );
 
   useEffect(() => {
@@ -59,7 +62,7 @@ export function BlocksPanel({ onCode, ref }: BlocksPanelProps) {
     if (!container) return;
 
     const workspace = Blockly.inject(container, {
-      toolbox: TOOLBOX,
+      toolbox: toolboxFor(robot),
       theme: darkTheme,
       media: "/blockly-media/",
       sounds: false,
@@ -68,10 +71,10 @@ export function BlocksPanel({ onCode, ref }: BlocksPanelProps) {
       zoom: { controls: true, wheel: false, startScale: 0.9 },
     });
     workspaceRef.current = workspace;
-    Blockly.serialization.workspaces.load(STARTER_WORKSPACE, workspace);
+    Blockly.serialization.workspaces.load(starterWorkspace(robot), workspace);
 
     const regenerate = () => {
-      onCodeRef.current(generateJavaScript(workspace), generatePython(workspace));
+      onCodeRef.current(generateJavaScript(workspace), generatePython(workspace, robot));
     };
     regenerate();
     workspace.addChangeListener((event) => {
@@ -87,7 +90,7 @@ export function BlocksPanel({ onCode, ref }: BlocksPanelProps) {
       workspaceRef.current = null;
       workspace.dispose();
     };
-  }, []);
+  }, [robot]);
 
   return <div ref={containerRef} className="blocks-editor" />;
 }

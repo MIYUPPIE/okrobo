@@ -1,15 +1,22 @@
 import * as Blockly from "blockly/core";
 import { afterEach, describe, expect, it } from "vitest";
-import { generateJavaScript, generatePython, STARTER_WORKSPACE } from "./okroboBlocks";
+import {
+  ARM_STARTER_WORKSPACE,
+  generateJavaScript,
+  generatePython,
+  STARTER_WORKSPACE,
+} from "./okroboBlocks";
 
 // Headless workspace: no DOM needed for loading and code generation.
 let workspace: Blockly.Workspace;
 
-const loadStarter = () => {
+const load = (state: object) => {
   workspace = new Blockly.Workspace();
-  Blockly.serialization.workspaces.load(STARTER_WORKSPACE, workspace);
+  Blockly.serialization.workspaces.load(state, workspace);
   return workspace;
 };
+
+const loadStarter = () => load(STARTER_WORKSPACE);
 
 afterEach(() => workspace?.dispose());
 
@@ -32,5 +39,32 @@ describe("block code generation", () => {
     expect(py).toContain("robot.distance() < 0.2");
     expect(py).toContain("robot.turn_left(90)");
     expect(py).not.toContain("await");
+  });
+
+  it("generates the arm wave in JavaScript against the runner API", () => {
+    const js = generateJavaScript(load(ARM_STARTER_WORKSPACE));
+    expect(js).toContain('await robot.armMove("shoulder", 85);');
+    expect(js).toContain('await robot.armMove("base", 45);');
+    expect(js).toContain("for (");
+  });
+
+  it("generates the arm wave in Python against the okrobo Arm API", () => {
+    const py = generatePython(load(ARM_STARTER_WORKSPACE), "arm");
+    expect(py).toContain("from okrobo import Arm");
+    expect(py).toContain("arm = Arm()");
+    expect(py).toContain('arm.move("shoulder", 85)');
+    expect(py).not.toContain("robot.");
+  });
+
+  it("wait targets the right receiver per robot", () => {
+    const waitOnly = {
+      blocks: {
+        languageVersion: 0,
+        blocks: [{ type: "okrobo_wait", x: 0, y: 0, fields: { SECONDS: 2 } }],
+      },
+    };
+    expect(generatePython(load(waitOnly), "arm")).toContain("arm.wait(2)");
+    workspace.dispose();
+    expect(generatePython(load(waitOnly), "car")).toContain("robot.wait(2)");
   });
 });

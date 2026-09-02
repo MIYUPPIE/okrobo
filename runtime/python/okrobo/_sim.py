@@ -119,8 +119,12 @@ class World:
         self._tick += 1
 
     def _sensor_distance(self) -> float:
-        dx = math.cos(self._pose.theta)
-        dy = math.sin(self._pose.theta)
+        return self.ray(0.0)
+
+    def ray(self, offset: float) -> float:
+        """Distance from the robot's front edge to the wall along heading+offset."""
+        dx = math.cos(self._pose.theta + offset)
+        dy = math.sin(self._pose.theta + offset)
         t = math.inf
         if dx > _OMEGA_EPSILON:
             t = min(t, (self.config.arena_width - self._pose.x) / dx)
@@ -138,4 +142,94 @@ class World:
             pose=Pose(self._pose.x, self._pose.y, self._pose.theta),
             distance=self._sensor_distance(),
             collided=self._collided,
+        )
+
+
+# ---- arm (contract v1) ----
+
+ARM_JOINTS = 4  # base, shoulder, elbow, wrist
+ARM_JOINT_NAMES = ("base", "shoulder", "elbow", "wrist")
+
+
+@dataclass
+class ArmConfig:
+    base_height: float = 0.12
+    link1: float = 0.22
+    link2: float = 0.18
+    link3: float = 0.10
+    lower: tuple = (-math.pi, -0.17453292519943295, -2.0943951023931953, -1.5707963267948966)
+    upper: tuple = (math.pi, 1.7453292519943295, 2.0943951023931953, 1.5707963267948966)
+    speed: tuple = (
+        1.5707963267948966,
+        1.5707963267948966,
+        1.5707963267948966,
+        1.5707963267948966,
+    )
+    start: tuple = (0.0, 1.0471975511965976, -0.5235987755982988, -0.5235987755982988)
+
+
+@dataclass
+class ArmState:
+    tick: int
+    angles: list
+    targets: list
+    moving: bool
+    tip: tuple  # (x, y, z)
+
+    def to_message(self) -> dict:
+        """Contract v1 arm state message."""
+        return {
+            "tick": self.tick,
+            "joints": {"angles": list(self.angles), "targets": list(self.targets)},
+            "moving": self.moving,
+            "tip": {"x": self.tip[0], "y": self.tip[1], "z": self.tip[2]},
+        }
+
+
+class ArmWorld:
+    """Reference model for the 4-DOF arm; mirrors engine/src/arm.cpp exactly."""
+
+    def __init__(self, config: ArmConfig | None = None) -> None:
+        self.config = config or ArmConfig()
+        self._angles = list(self.config.start)
+        self._targets = list(self.config.start)
+        self._tick = 0
+
+    def set_target(self, joint: int, angle: float) -> None:
+        if not 0 <= joint < ARM_JOINTS:
+            return
+        self._targets[joint] = min(max(angle, self.config.lower[joint]), self.config.upper[joint])
+
+    def stop(self) -> None:
+        self._targets = list(self._angles)
+
+    def reset(self) -> None:
+        self._angles = list(self.config.start)
+        self._targets = list(self.config.start)
+        self._tick = 0
+
+    def step(self, dt: float) -> None:
+        for j in range(ARM_JOINTS):
+            max_delta = self.config.speed[j] * dt
+            delta = min(max(self._targets[j] - self._angles[j], -max_delta), max_delta)
+            self._angles[j] += delta
+        self._tick += 1
+
+    def _forward_kinematics(self) -> tuple:
+        c = self.config
+        a1 = self._angles[1]
+        a2 = a1 + self._angles[2]
+        a3 = a2 + self._angles[3]
+        r = c.link1 * math.cos(a1) + c.link2 * math.cos(a2) + c.link3 * math.cos(a3)
+        z = c.base_height + c.link1 * math.sin(a1) + c.link2 * math.sin(a2) + c.link3 * math.sin(a3)
+        return (r * math.cos(self._angles[0]), r * math.sin(self._angles[0]), z)
+
+    def state(self) -> ArmState:
+        moving = any(abs(t - a) > _OMEGA_EPSILON for t, a in zip(self._targets, self._angles))
+        return ArmState(
+            tick=self._tick,
+            angles=list(self._angles),
+            targets=list(self._targets),
+            moving=moving,
+            tip=self._forward_kinematics(),
         )

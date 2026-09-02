@@ -2,6 +2,7 @@
 // as integers; state crosses as scalars so no JSON or memory marshalling is
 // needed. The TS side (apps/studio/src/engine/) assembles contract v0 messages.
 
+#include "arm.hpp"
 #include "world.hpp"
 
 #include <emscripten/emscripten.h>
@@ -59,5 +60,61 @@ EMSCRIPTEN_KEEPALIVE
 int world_collided(const okrobo::World* world) {
     return world->state().collided ? 1 : 0;
 }
+
+EMSCRIPTEN_KEEPALIVE
+double world_ray(const okrobo::World* world, double offset) {
+    return world->ray(offset);
+}
+
+// ---- arm (contract v1) ----
+
+EMSCRIPTEN_KEEPALIVE
+okrobo::Arm* arm_create() { return new okrobo::Arm(); }
+
+EMSCRIPTEN_KEEPALIVE
+void arm_destroy(okrobo::Arm* arm) { delete arm; }
+
+EMSCRIPTEN_KEEPALIVE
+void arm_set_target(okrobo::Arm* arm, int joint, double angle) {
+    arm->set_target(joint, angle);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void arm_stop(okrobo::Arm* arm) { arm->stop(); }
+
+EMSCRIPTEN_KEEPALIVE
+void arm_reset(okrobo::Arm* arm) { arm->reset(); }
+
+EMSCRIPTEN_KEEPALIVE
+void arm_step(okrobo::Arm* arm, double dt) { arm->step(dt); }
+
+EMSCRIPTEN_KEEPALIVE
+double arm_tick(const okrobo::Arm* arm) {
+    return static_cast<double>(arm->state().tick);
+}
+
+EMSCRIPTEN_KEEPALIVE
+double arm_angle(const okrobo::Arm* arm, int joint) {
+    const auto s = arm->state();
+    return (joint >= 0 && joint < okrobo::kArmJoints) ? s.angles[joint] : 0.0;
+}
+
+EMSCRIPTEN_KEEPALIVE
+double arm_target(const okrobo::Arm* arm, int joint) {
+    const auto s = arm->state();
+    return (joint >= 0 && joint < okrobo::kArmJoints) ? s.targets[joint] : 0.0;
+}
+
+EMSCRIPTEN_KEEPALIVE
+int arm_moving(const okrobo::Arm* arm) { return arm->state().moving ? 1 : 0; }
+
+EMSCRIPTEN_KEEPALIVE
+double arm_tip_x(const okrobo::Arm* arm) { return arm->state().tip.x; }
+
+EMSCRIPTEN_KEEPALIVE
+double arm_tip_y(const okrobo::Arm* arm) { return arm->state().tip.y; }
+
+EMSCRIPTEN_KEEPALIVE
+double arm_tip_z(const okrobo::Arm* arm) { return arm->state().tip.z; }
 
 }  // extern "C"

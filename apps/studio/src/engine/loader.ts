@@ -23,6 +23,20 @@ export interface EngineModule {
   _world_theta(world: number): number;
   _world_distance(world: number): number;
   _world_collided(world: number): number;
+  _world_ray(world: number, offset: number): number;
+  _arm_create(): number;
+  _arm_destroy(arm: number): void;
+  _arm_set_target(arm: number, joint: number, angle: number): void;
+  _arm_stop(arm: number): void;
+  _arm_reset(arm: number): void;
+  _arm_step(arm: number, dt: number): void;
+  _arm_tick(arm: number): number;
+  _arm_angle(arm: number, joint: number): number;
+  _arm_target(arm: number, joint: number): number;
+  _arm_moving(arm: number): number;
+  _arm_tip_x(arm: number): number;
+  _arm_tip_y(arm: number): number;
+  _arm_tip_z(arm: number): number;
 }
 
 const ENGINE_URL = "/engine/okrobo_engine.js";

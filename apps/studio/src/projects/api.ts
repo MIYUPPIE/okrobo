@@ -19,6 +19,8 @@ export interface ProjectPayload {
   python: string;
   python_edited: boolean;
   world: string;
+  /** "car" | "arm"; older projects without it load as "car". */
+  robot: string;
 }
 
 export const listProjects = () => invoke<ProjectMeta[]>("list_projects");

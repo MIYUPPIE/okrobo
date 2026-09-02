@@ -38,6 +38,11 @@ export class EngineWorld {
     this.module._world_step(this.handle, dt);
   }
 
+  /** Distance to the wall along heading+offset radians (v1 lidar primitive). */
+  ray(offset: number): number {
+    return this.module._world_ray(this.handle, offset);
+  }
+
   state(): State {
     return {
       tick: this.module._world_tick(this.handle),

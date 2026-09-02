@@ -1,5 +1,8 @@
 # Robot Remote v0
 
+> Superseded by [v1](../v1/contract.md), which adds the arm and lidar methods.
+> Everything here still holds: v1 is v0 plus methods.
+
 The bridge that lets real local Python drive a robot backend it does not own.
 Three processes, two hops:
 

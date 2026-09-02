@@ -29,7 +29,7 @@ These are settled. Do not re-litigate them in future sessions unless something b
 
 ## Open decisions (decide when the phase starts, not before)
 
-- **Phase 5:** MuJoCo vs Bullet3 vs Jolt for full physics. Re-run the library search then (stars, last commit, issue activity), per the search-before-building rule.
+- ~~Phase 5 physics library~~ decided: MuJoCo, integration deferred to the first contact-dynamics feature ([docs/decisions/physics-engine.md](docs/decisions/physics-engine.md)).
 - **Phase 7:** Web Serial from the webview vs serial from the Python sidecar for ESP32/Arduino. Depends on Tauri webview serial support at that time.
 - ~~Blockly execution target~~ decided in Phase 2: JS for execution (async runner, interruptible), Python for display until Phase 3 makes it the real path.
 
@@ -172,16 +172,24 @@ Deviations and hard-won facts:
 
 **Acceptance:** install the package on a machine with no toolchains and no internet; create, save, reopen, and run a project.
 
-### Phase 5: Real physics and more robots
+### Phase 5: More robots and the physics decision ✅
 
-- [ ] Choose physics lib (see open decisions), integrate into `engine/` behind the same contract
-- [ ] Robotic arm model, URDF import for the core robots
-- [ ] Contract v1: joint commands, joint state, camera/LiDAR sensor messages
-- [ ] Robot sidebar actually switches robots (Car, Arm as the first two)
+- [x] Physics library chosen: **MuJoCo**, with the integration deliberately deferred until a feature needs contact dynamics — reasoning and rejected alternatives in [docs/decisions/physics-engine.md](docs/decisions/physics-engine.md). The arm is joint-space kinematics (rate-limited targets + FK), which needs no solver; contract v1 is solver-agnostic so MuJoCo drops in behind it later
+- [x] 4-DOF arm in the engine (`engine/src/arm.cpp`): base yaw + shoulder/elbow/wrist pitch, clamped limits, FK tip. Second parity gate locks it to the reference model (838 states, 5.6e-17 max diff)
+- [x] Contract v1 (`contracts/robot-api/v1`): arm commands/state plus the lidar fan, `$ref`-ing v0 for the car so nothing v0 changed. Remote contract v1 (`contracts/robot-remote/v1`) adds `arm_move`, `arm_move_all`, `arm_angles`, `arm_tip`, `lidar`
+- [x] Lidar: `world_ray(offset)` primitive in the engine; `Robot.lidar(rays, fov)` in Python; a 9-ray fan drawn live in the car viewport
+- [x] Robot sidebar switches robots for real: Car and Arm each get their own 3D scene, camera framing, Blockly toolbox, starter program, Python header (`Robot` vs `Arm`), and HUD. Switching halts everything running first; projects remember their robot
+- [x] Student `Arm` API in Python (`okrobo/arm.py`) and its remote proxy, so the same file runs locally or in the studio
+- [ ] URDF import → moved to Phase 6 (pack format lands there; URDF is pack content, not engine core)
+
+Tests added: 6 ctest (arm), 12 pytest (arm model, Arm API, lidar, worker arm RPC), 12 vitest (arm runner, bridge v1 dispatch, generators, and an end-to-end real-sidecar `from okrobo import Arm` program driving the WASM arm).
+
+**Acceptance: verified in headless Chrome** — from a clean load on Car, clicking Arm swapped the viewport, blocks, and Python (`from okrobo import Arm`); Run executed the wave and the HUD showed the joints sweeping through four distinct readings (0°/60° → 45°/35°), Stop cleared it. Camera framing was fixed after the first screenshot showed the arm rendered too small in the arena-sized view.
 
 ### Phase 6: Packs and the school server
 
 - [ ] Pack format: manifest + assets + lessons, signed, versioned
+- [ ] URDF import for robot models shipped in packs (carried from Phase 5)
 - [ ] Asset store UI: list, download, install, fully usable offline afterwards
 - [ ] School server: one static-file server on the LAN that mirrors packs; app discovers it and prefers it over the internet
 - [ ] Lesson player: markdown lessons with embedded runnable exercises from `packs/`
@@ -223,4 +231,4 @@ cd apps/studio && npm run dev         # the studio: blocks, python, 3D sim, tele
 python3 -m okrobo.demo                # student API on the reference sim (from runtime/python)
 ```
 
-Then open Phase 5, take the first unchecked box, build it with its test, check it off here, commit.
+Then open Phase 6, take the first unchecked box, build it with its test, check it off here, commit.

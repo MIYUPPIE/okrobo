@@ -38,6 +38,41 @@ describe("executeRemoteRequest (real WASM engine)", () => {
     engine.destroy();
   });
 
+  it("maps arm methods (v1)", async () => {
+    const { engine, arm, runner } = await makeRunner();
+    const request = executeRemoteRequest(runner.api, "arm_move", {
+      joint: "shoulder",
+      degrees: 85,
+    });
+    runner.tick(200);
+    await request;
+    await expect(executeRemoteRequest(runner.api, "arm_angles", {})).resolves.toBeInstanceOf(Array);
+    const angles = (await executeRemoteRequest(runner.api, "arm_angles", {})) as number[];
+    expect(angles[1]).toBeCloseTo(85, 6);
+    const tip = (await executeRemoteRequest(runner.api, "arm_tip", {})) as number[];
+    expect(tip).toHaveLength(3);
+    arm.destroy();
+    engine.destroy();
+  });
+
+  it("maps arm_move_all and lidar (v1)", async () => {
+    const { engine, arm, runner } = await makeRunner();
+    const request = executeRemoteRequest(runner.api, "arm_move_all", { angles: [0, 90, 0, 0] });
+    runner.tick(400);
+    await request;
+    const tip = (await executeRemoteRequest(runner.api, "arm_tip", {})) as number[];
+    expect(tip[2]).toBeCloseTo(0.62, 6);
+
+    const fan = (await executeRemoteRequest(runner.api, "lidar", {
+      rays: 3,
+      fov_degrees: 180,
+    })) as number[];
+    expect(fan).toHaveLength(3);
+    expect(fan[1]).toBeCloseTo(0.9, 9);
+    arm.destroy();
+    engine.destroy();
+  });
+
   it("rejects unknown methods", async () => {
     const { engine, runner } = await makeRunner();
     await expect(executeRemoteRequest(runner.api, "fly", {})).rejects.toThrow("unknown method");

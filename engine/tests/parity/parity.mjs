@@ -91,5 +91,78 @@ for (let i = 0; i < referenceLines.length; i++) {
 }
 
 console.log(
-  `parity: ${wasmStates.length} states match the reference (max diff ${maxDiff.toExponential(2)}, tol ${TOLERANCE})`,
+  `parity: car ${wasmStates.length} states match the reference (max diff ${maxDiff.toExponential(2)}, tol ${TOLERANCE})`,
+);
+
+// ---- arm (contract v1) ----
+
+const armScenarioPath = join(ROOT, "engine", "tests", "parity", "arm-scenario.json");
+const armReference = execFileSync(
+  "python3",
+  ["-m", "okrobo.dump_trace", "--robot", "arm", "--scenario", armScenarioPath],
+  { cwd: join(ROOT, "runtime", "python"), encoding: "utf8" },
+)
+  .trim()
+  .split("\n");
+
+const armScenario = JSON.parse(readFileSync(armScenarioPath, "utf8"));
+const arm = engine._arm_create();
+const armState = () => ({
+  tick: engine._arm_tick(arm),
+  joints: {
+    angles: [0, 1, 2, 3].map((j) => engine._arm_angle(arm, j)),
+    targets: [0, 1, 2, 3].map((j) => engine._arm_target(arm, j)),
+  },
+  moving: engine._arm_moving(arm) === 1,
+  tip: { x: engine._arm_tip_x(arm), y: engine._arm_tip_y(arm), z: engine._arm_tip_z(arm) },
+});
+
+const armStates = [];
+for (const phase of armScenario.phases) {
+  const c = phase.command;
+  if (c.type === "arm_target") engine._arm_set_target(arm, c.joint, c.angle);
+  else if (c.type === "stop") engine._arm_stop(arm);
+  else if (c.type === "reset") engine._arm_reset(arm);
+  else throw new Error(`unknown arm command: ${c.type}`);
+  armStates.push(armState());
+  for (let i = 0; i < phase.steps; i++) {
+    engine._arm_step(arm, armScenario.dt);
+    armStates.push(armState());
+  }
+}
+engine._arm_destroy(arm);
+
+if (armReference.length !== armStates.length) {
+  console.error(`arm parity: length mismatch ref=${armReference.length} wasm=${armStates.length}`);
+  process.exit(1);
+}
+
+let armMaxDiff = 0;
+for (let i = 0; i < armReference.length; i++) {
+  const ref = JSON.parse(armReference[i]);
+  const got = armStates[i];
+  const diffs = [
+    ["tick", Math.abs(ref.tick - got.tick)],
+    ["moving", ref.moving === got.moving ? 0 : 1],
+    ["tip.x", Math.abs(ref.tip.x - got.tip.x)],
+    ["tip.y", Math.abs(ref.tip.y - got.tip.y)],
+    ["tip.z", Math.abs(ref.tip.z - got.tip.z)],
+  ];
+  for (let j = 0; j < 4; j++) {
+    diffs.push([`angles[${j}]`, Math.abs(ref.joints.angles[j] - got.joints.angles[j])]);
+    diffs.push([`targets[${j}]`, Math.abs(ref.joints.targets[j] - got.joints.targets[j])]);
+  }
+  for (const [field, diff] of diffs) {
+    armMaxDiff = Math.max(armMaxDiff, diff);
+    if (diff > TOLERANCE) {
+      console.error(`arm parity: mismatch at state ${i}, field ${field}, diff ${diff}`);
+      console.error(`  ref:  ${JSON.stringify(ref)}`);
+      console.error(`  wasm: ${JSON.stringify(got)}`);
+      process.exit(1);
+    }
+  }
+}
+
+console.log(
+  `parity: arm ${armStates.length} states match the reference (max diff ${armMaxDiff.toExponential(2)}, tol ${TOLERANCE})`,
 );

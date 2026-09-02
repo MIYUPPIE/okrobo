@@ -1,3 +1,5 @@
+import { ARM_JOINT_NAMES } from "../contracts/robotApi";
+import type { EngineArm } from "../engine/EngineArm";
 import type { EngineWorld } from "../engine/EngineWorld";
 
 // Executes robot movements against the engine with the same semantics as the
@@ -31,20 +33,42 @@ export interface RobotApi {
   turnRight(degrees?: number): Promise<void>;
   wait(seconds: number): Promise<void>;
   distance(): number;
+  lidar(rays?: number, fovDegrees?: number): number[];
   heading(): number;
   position(): [number, number];
   stop(): void;
+  armMove(joint: number | string, degrees: number): Promise<void>;
+  armMoveAll(degrees: number[]): Promise<void>;
+  armAngles(): number[];
+  armTip(): [number, number, number];
   _checkpoint(): Promise<void>;
+}
+
+export function armJointIndex(joint: number | string): number {
+  if (typeof joint === "string") {
+    const index = (ARM_JOINT_NAMES as readonly string[]).indexOf(joint.toLowerCase());
+    if (index < 0) throw new Error(`unknown joint: ${joint}`);
+    return index;
+  }
+  if (joint < 0 || joint >= ARM_JOINT_NAMES.length) throw new Error(`joint out of range: ${joint}`);
+  return joint;
+}
+
+interface ArmWait {
+  resolve: () => void;
+  reject: (error: Error) => void;
 }
 
 export class ProgramRunner {
   readonly api: RobotApi;
   private movement: Movement | null = null;
+  private armWait: ArmWait | null = null;
   private aborted = false;
 
   constructor(
     private readonly engine: EngineWorld,
     private readonly wheelBase: number,
+    private readonly engineArm: EngineArm | null = null,
     private readonly dt = 0.01,
   ) {
     this.api = {
@@ -54,12 +78,42 @@ export class ProgramRunner {
       turnRight: (degrees = 90) => this.turn(-degrees),
       wait: (seconds: number) => this.move(0, 0, Math.max(0, seconds)),
       distance: () => this.engine.state().sensors.distance,
+      lidar: (rays = 9, fovDegrees = 180) => {
+        if (rays < 1) return [];
+        if (rays === 1) return [this.engine.ray(0)];
+        const half = (fovDegrees * Math.PI) / 360;
+        const step = (fovDegrees * Math.PI) / 180 / (rays - 1);
+        return Array.from({ length: rays }, (_, i) => this.engine.ray(half - i * step));
+      },
       heading: () => (this.engine.state().pose.theta * 180) / Math.PI,
       position: () => {
         const { x, y } = this.engine.state().pose;
         return [x, y];
       },
       stop: () => this.engine.apply({ type: "stop" }),
+      armMove: (joint, degrees) => {
+        let index: number;
+        try {
+          index = armJointIndex(joint);
+        } catch (error) {
+          return Promise.reject(error);
+        }
+        return this.armCommand(() =>
+          this.requireArm().apply({ type: "arm_target", joint: index, angle: (degrees * Math.PI) / 180 }),
+        );
+      },
+      armMoveAll: (degrees) =>
+        this.armCommand(() => {
+          const arm = this.requireArm();
+          degrees.forEach((value, joint) =>
+            arm.apply({ type: "arm_target", joint, angle: (value * Math.PI) / 180 }),
+          );
+        }),
+      armAngles: () => this.requireArm().state().joints.angles.map((a) => (a * 180) / Math.PI),
+      armTip: () => {
+        const { x, y, z } = this.requireArm().state().tip;
+        return [x, y, z];
+      },
       _checkpoint: async () => {
         if (this.aborted) throw new ProgramStoppedError();
         // Yield a macrotask so `while (true)` loops never freeze the UI.
@@ -69,24 +123,31 @@ export class ProgramRunner {
     };
   }
 
-  /** Step the world. Called from the render loop with this frame's budget. */
+  /** Step both worlds. Called from the render loop with this frame's budget. */
   tick(steps: number): void {
     for (let i = 0; i < steps; i++) {
       this.engine.step(this.dt);
+      this.engineArm?.step(this.dt);
       const m = this.movement;
-      if (!m) continue;
-      m.stepsLeft -= 1;
-      const collided = this.engine.state().collided;
-      if (m.stepsLeft <= 0 || collided) {
-        if (!collided && m.remainder > 1e-12) this.engine.step(m.remainder);
-        this.finishMovement();
-        m.resolve();
+      if (m) {
+        m.stepsLeft -= 1;
+        const collided = this.engine.state().collided;
+        if (m.stepsLeft <= 0 || collided) {
+          if (!collided && m.remainder > 1e-12) this.engine.step(m.remainder);
+          this.finishMovement();
+          m.resolve();
+        }
+      }
+      const wait = this.armWait;
+      if (wait && this.engineArm && !this.engineArm.state().moving) {
+        this.armWait = null;
+        wait.resolve();
       }
     }
   }
 
   get busy(): boolean {
-    return this.movement !== null;
+    return this.movement !== null || this.armWait !== null;
   }
 
   /** Allow a new program to run after a previous abort. */
@@ -94,12 +155,31 @@ export class ProgramRunner {
     this.aborted = false;
   }
 
-  /** Interrupt the program: the active movement rejects, wheels stop. */
+  /** Interrupt the program: active movements reject, wheels and joints stop. */
   abort(): void {
     this.aborted = true;
     const m = this.movement;
     this.finishMovement();
     m?.reject(new ProgramStoppedError());
+    const wait = this.armWait;
+    this.armWait = null;
+    this.engineArm?.apply({ type: "stop" });
+    wait?.reject(new ProgramStoppedError());
+  }
+
+  private requireArm(): EngineArm {
+    if (!this.engineArm) throw new Error("no arm in this world");
+    return this.engineArm;
+  }
+
+  private armCommand(applyTargets: () => void): Promise<void> {
+    if (this.aborted) return Promise.reject(new ProgramStoppedError());
+    if (this.armWait) return Promise.reject(new Error("the arm is already moving"));
+    applyTargets();
+    if (!this.requireArm().state().moving) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      this.armWait = { resolve, reject };
+    });
   }
 
   private finishMovement(): void {

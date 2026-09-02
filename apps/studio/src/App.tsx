@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import arenaJson from "@packs/core/worlds/arena.json";
+import type { RobotKind } from "./blocks/okroboBlocks";
 import { BlocksPanel, type BlocksPanelHandle } from "./BlocksPanel";
-import type { State } from "./contracts/robotApi";
+import { EngineArm } from "./engine/EngineArm";
 import { EngineWorld } from "./engine/EngineWorld";
 import { loadEngine } from "./engine/loader";
 import { validateWorld } from "./lib/validateWorld";
@@ -21,17 +22,18 @@ import {
 import { PythonBridge, SIDECAR_URL } from "./python/PythonBridge";
 import { type OutputLine, PythonPanel, type PythonPanelHandle } from "./PythonPanel";
 import { Viewport } from "./Viewport";
-import { CRUISE_SPEED, Viewport3D } from "./Viewport3D";
+import { CRUISE_SPEED, type HudInfo, Viewport3D } from "./Viewport3D";
 import "./App.css";
 
 const OTHER_MENUS = ["Edit", "Robot", "Simulation", "Help"];
 const WORLD_ID = "arena";
 
-const ROBOTS = [
-  { icon: "🚗", name: "Car", available: true },
-  { icon: "🦾", name: "Arm", available: false, phase: "Phase 5" },
-  { icon: "🛸", name: "Drone", available: false, phase: "Phase 5" },
+const ROBOTS: Array<{ id: RobotKind | null; icon: string; name: string; phase?: string }> = [
+  { id: "car", icon: "🚗", name: "Car" },
+  { id: "arm", icon: "🦾", name: "Arm" },
+  { id: null, icon: "🛸", name: "Drone", phase: "Phase 6+" },
 ];
+
 
 const CODE_TABS = ["Blocks", "Python", "C++"] as const;
 type CodeTab = (typeof CODE_TABS)[number];
@@ -45,14 +47,16 @@ type Dialog = "none" | "save-as" | "open";
 
 export default function App() {
   const [tab, setTab] = useState<CodeTab>("Blocks");
+  const [robot, setRobot] = useState<RobotKind>("car");
   const [engineStatus, setEngineStatus] = useState<EngineStatus>("loading");
   const [engine, setEngine] = useState<EngineWorld | null>(null);
+  const [arm, setArm] = useState<EngineArm | null>(null);
   const [runner, setRunner] = useState<ProgramRunner | null>(null);
   const [runStatus, setRunStatus] = useState<RunStatus>("idle");
   const [pythonCode, setPythonCode] = useState("");
   const [pythonConnected, setPythonConnected] = useState(false);
   const [pythonOutput, setPythonOutput] = useState<OutputLine[]>([]);
-  const [hud, setHud] = useState<State | null>(null);
+  const [hud, setHud] = useState<HudInfo | null>(null);
   const autopilotRef = useRef(false);
   const programActiveRef = useRef(false);
   const pythonActiveRef = useRef(false);
@@ -67,6 +71,7 @@ export default function App() {
   const [notice, setNotice] = useState("");
   const blocksRef = useRef<BlocksPanelHandle>(null);
   const pythonRef = useRef<PythonPanelHandle>(null);
+  const pendingPayloadRef = useRef<ProjectPayload | null>(null);
   const noticeTimer = useRef(0);
 
   const world = useMemo(() => validateWorld(arenaJson), []);
@@ -74,12 +79,15 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     let created: EngineWorld | null = null;
+    let createdArm: EngineArm | null = null;
     loadEngine()
       .then((module) => {
         if (cancelled) return;
         created = new EngineWorld(module, world);
+        createdArm = new EngineArm(module);
         setEngine(created);
-        setRunner(new ProgramRunner(created, world.wheel_base));
+        setArm(createdArm);
+        setRunner(new ProgramRunner(created, world.wheel_base, createdArm));
         setEngineStatus("ready");
       })
       .catch(() => {
@@ -88,7 +96,9 @@ export default function App() {
     return () => {
       cancelled = true;
       created?.destroy();
+      createdArm?.destroy();
       setEngine(null);
+      setArm(null);
       setRunner(null);
     };
   }, [world]);
@@ -119,9 +129,9 @@ export default function App() {
     };
   }, [engine, runner]);
 
-  // Keyboard teleop: arrows / WASD drive the wheels directly.
+  // Keyboard teleop: arrows / WASD drive the car's wheels directly.
   useEffect(() => {
-    if (!engine || !runner) return;
+    if (!engine || !runner || robot !== "car") return;
     const held = new Set<string>();
     const keyFor = (e: KeyboardEvent) => (e.key.length === 1 ? e.key.toLowerCase() : e.key);
 
@@ -165,9 +175,9 @@ export default function App() {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [engine, runner]);
+  }, [engine, runner, robot]);
 
-  const onState = useCallback((state: State) => setHud(state), []);
+  const onState = useCallback((info: HudInfo) => setHud(info), []);
   const onAutoStop = useCallback(() => {
     autopilotRef.current = false;
     setRunStatus("wall");
@@ -205,6 +215,7 @@ export default function App() {
     }
     const code = jsCodeRef.current.trim();
     if (code.length === 0) {
+      if (robot !== "car") return;
       // No blocks on the workspace: fall back to the Phase 1 cruise.
       engine.apply({ type: "drive", left: CRUISE_SPEED, right: CRUISE_SPEED });
       autopilotRef.current = true;
@@ -229,25 +240,19 @@ export default function App() {
       .finally(() => {
         programActiveRef.current = false;
         engine.apply({ type: "stop" });
+        arm?.apply({ type: "stop" });
       });
   };
 
   const stop = () => {
-    if (!engine || !runner) return;
-    if (pythonActiveRef.current) bridgeRef.current?.stop();
-    runner.abort();
-    autopilotRef.current = false;
-    engine.apply({ type: "stop" });
-    setRunStatus("idle");
+    haltEverything();
   };
 
   const reset = () => {
     if (!engine || !runner) return;
-    if (pythonActiveRef.current) bridgeRef.current?.stop();
-    runner.abort();
-    autopilotRef.current = false;
+    haltEverything();
     engine.apply({ type: "reset" });
-    setRunStatus("idle");
+    arm?.apply({ type: "reset" });
   };
 
   // Desktop window title follows the open project.
@@ -272,8 +277,42 @@ export default function App() {
       python: python.code,
       python_edited: python.edited,
       world: WORLD_ID,
+      robot,
     };
   };
+
+  const applyPayload = (payload: ProjectPayload) => {
+    blocksRef.current?.load((payload.blocks ?? null) as object | null);
+    pythonRef.current?.load(payload.python, payload.python_edited);
+  };
+
+  const haltEverything = () => {
+    if (!engine || !runner) return;
+    if (pythonActiveRef.current) bridgeRef.current?.stop();
+    runner.abort();
+    autopilotRef.current = false;
+    engine.apply({ type: "stop" });
+    arm?.apply({ type: "stop" });
+    setRunStatus("idle");
+  };
+
+  const switchRobot = (target: RobotKind) => {
+    if (target === robot) return;
+    haltEverything();
+    setHud(null);
+    setRobot(target);
+  };
+
+  // A project load that switches robots applies its content after the
+  // panels remount for the new robot.
+  useEffect(() => {
+    const pending = pendingPayloadRef.current;
+    if (pending) {
+      pendingPayloadRef.current = null;
+      applyPayload(pending);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [robot]);
 
   const refreshProjects = async () => {
     try {
@@ -321,8 +360,13 @@ export default function App() {
     setDialog("none");
     try {
       const [meta, payload] = await loadProject(id);
-      blocksRef.current?.load(payload.blocks as object);
-      pythonRef.current?.load(payload.python, payload.python_edited);
+      const target: RobotKind = payload.robot === "arm" ? "arm" : "car";
+      if (target !== robot) {
+        pendingPayloadRef.current = payload;
+        switchRobot(target);
+      } else {
+        applyPayload(payload);
+      }
       setCurrentProject(meta);
       reset();
       showNotice(`opened ${meta.name}`);
@@ -355,21 +399,33 @@ export default function App() {
   });
 
   const statusText = (() => {
-    const parts = [`offline · ${world.name}`];
+    const parts = [`offline · ${robot === "arm" ? "Arm" : world.name}`];
     if (engineStatus === "loading") parts.push("engine: loading…");
     if (engineStatus === "missing") parts.push("engine: not built · run scripts/build-engine-wasm.sh");
     if (engineStatus === "ready" && hud) {
-      parts.push(
-        `tick ${hud.tick}`,
-        `x ${hud.pose.x.toFixed(2)} y ${hud.pose.y.toFixed(2)}`,
-        `d ${hud.sensors.distance.toFixed(2)} m`,
-      );
+      if (hud.kind === "car") {
+        parts.push(
+          `tick ${hud.state.tick}`,
+          `x ${hud.state.pose.x.toFixed(2)} y ${hud.state.pose.y.toFixed(2)}`,
+          `d ${hud.state.sensors.distance.toFixed(2)} m`,
+        );
+      } else {
+        const degrees = hud.state.joints.angles
+          .map((a) => `${Math.round((a * 180) / Math.PI)}°`)
+          .join(" ");
+        parts.push(
+          `tick ${hud.state.tick}`,
+          `joints ${degrees}`,
+          `tip z ${hud.state.tip.z.toFixed(2)} m`,
+        );
+        if (hud.state.moving) parts.push("moving");
+      }
       if (runStatus === "program") parts.push("▶ blocks running");
       if (runStatus === "python") parts.push("▶ python running");
       if (runStatus === "cruise") parts.push("cruising");
       if (runStatus === "wall") parts.push("stopped at wall");
       if (runStatus === "error") parts.push("program error (see console)");
-      if (hud.collided) parts.push("⚠ wall contact");
+      if (hud.kind === "car" && hud.state.collided) parts.push("⚠ wall contact");
       parts.push(pythonConnected ? "py ✓" : "py ✗");
     }
     if (notice) parts.push(notice);
@@ -432,24 +488,43 @@ export default function App() {
       <aside className="sidebar">
         <h2>Robots</h2>
         <ul>
-          {ROBOTS.map((r) => (
-            <li key={r.name} className={r.available ? "robot available" : "robot"}>
-              <span className="robot-icon">{r.icon}</span>
-              <span>{r.name}</span>
-              {!r.available && <span className="badge">{r.phase}</span>}
-            </li>
-          ))}
+          {ROBOTS.map((r) =>
+            r.id ? (
+              <li key={r.name}>
+                <button
+                  className={robot === r.id ? "robot selectable active" : "robot selectable"}
+                  onClick={() => switchRobot(r.id as RobotKind)}
+                >
+                  <span className="robot-icon">{r.icon}</span>
+                  <span>{r.name}</span>
+                </button>
+              </li>
+            ) : (
+              <li key={r.name} className="robot">
+                <span className="robot-icon">{r.icon}</span>
+                <span>{r.name}</span>
+                <span className="badge">{r.phase}</span>
+              </li>
+            ),
+          )}
         </ul>
         <div className="teleop-hint">
           <h2>Drive</h2>
-          <p>Arrow keys or WASD steer the robot any time. Run executes your blocks.</p>
+          <p>
+            {robot === "car"
+              ? "Arrow keys or WASD steer the car any time. Run executes your blocks."
+              : "Run executes your blocks; the arm moves joint by joint."}
+          </p>
         </div>
       </aside>
 
       <main className="viewport">
-        {engine && runner ? (
+        {engine && arm && runner ? (
           <Viewport3D
+            key={robot}
+            robot={robot}
             engine={engine}
+            arm={arm}
             world={world}
             runner={runner}
             autopilotRef={autopilotRef}
@@ -482,10 +557,11 @@ export default function App() {
         </div>
         <div className="code-content">
           <div className={tab === "Blocks" ? "tab-panel active" : "tab-panel"}>
-            <BlocksPanel onCode={onCode} ref={blocksRef} />
+            <BlocksPanel key={robot} robot={robot} onCode={onCode} ref={blocksRef} />
           </div>
           <div className={tab === "Python" ? "tab-panel active" : "tab-panel"}>
             <PythonPanel
+              key={robot}
               generatedCode={pythonCode}
               output={pythonOutput}
               connected={pythonConnected}
@@ -495,7 +571,7 @@ export default function App() {
           </div>
           <div className={tab === "C++" ? "tab-panel active padded" : "tab-panel padded"}>
             <pre className="cpp-placeholder">{`// Advanced track: extend the engine itself.\n// See engine/src/world.hpp`}</pre>
-            <p className="placeholder-note">C++ track opens after Phase 5</p>
+            <p className="placeholder-note">C++ track opens after Phase 6</p>
           </div>
         </div>
       </section>

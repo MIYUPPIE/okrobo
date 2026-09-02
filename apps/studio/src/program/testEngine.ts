@@ -2,6 +2,7 @@
 // so program tests run against the production sim, not a mock.
 
 import arenaJson from "@packs/core/worlds/arena.json";
+import { EngineArm } from "../engine/EngineArm";
 import { EngineWorld } from "../engine/EngineWorld";
 import type { EngineModule } from "../engine/loader";
 import { validateWorld } from "../lib/validateWorld";
@@ -26,10 +27,15 @@ export function loadTestEngineModule(): Promise<EngineModule> {
   return modulePromise;
 }
 
-export async function makeRunner(): Promise<{ engine: EngineWorld; runner: ProgramRunner }> {
+export async function makeRunner(): Promise<{
+  engine: EngineWorld;
+  arm: EngineArm;
+  runner: ProgramRunner;
+}> {
   const module = await loadTestEngineModule();
   const engine = new EngineWorld(module, ARENA);
-  return { engine, runner: new ProgramRunner(engine, ARENA.wheel_base) };
+  const arm = new EngineArm(module);
+  return { engine, arm, runner: new ProgramRunner(engine, ARENA.wheel_base, arm) };
 }
 
 /** Drive runner ticks until `done.value`, yielding so program promises settle. */
