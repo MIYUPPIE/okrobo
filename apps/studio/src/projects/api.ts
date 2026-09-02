@@ -3,6 +3,7 @@
 // desktop app; `inDesktop` gates the File menu.
 
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import type { WorldDef } from "../lib/validateWorld";
 
 export const inDesktop = isTauri();
 
@@ -21,6 +22,13 @@ export interface ProjectPayload {
   world: string;
   /** "car" | "arm"; older projects without it load as "car". */
   robot: string;
+  /**
+   * A full contracts/world/v1 definition, when the student edited the
+   * environment (World tab). null means "use the named pack world
+   * unmodified" — also what every project saved before the world editor
+   * existed round-trips as, via the Rust side's `#[serde(default)]`.
+   */
+  world_custom: WorldDef | null;
 }
 
 export const listProjects = () => invoke<ProjectMeta[]>("list_projects");

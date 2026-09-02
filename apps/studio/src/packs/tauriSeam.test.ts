@@ -19,6 +19,47 @@ const LIB_RS = readFileSync(
   join(process.cwd(), "src-tauri", "src", "lib.rs"),
   "utf8",
 );
+const PROJECTS_RS = readFileSync(
+  join(process.cwd(), "src-tauri", "src", "projects.rs"),
+  "utf8",
+);
+const PROJECT_API_TS = readFileSync(join(process.cwd(), "src", "projects", "api.ts"), "utf8");
+
+/** Field names of a `pub struct <name> { ... }` in projects.rs. */
+function rustStructFields(source: string, name: string): string[] {
+  const match = new RegExp(`struct ${name} \\{([^}]*)\\}`, "s").exec(source);
+  if (!match) throw new Error(`no Rust struct named ${name}`);
+  const body = match[1]
+    .split("\n")
+    .map((line) => line.trim())
+    // Doc comments and serde attributes can contain commas of their own;
+    // drop those lines before splitting fields on commas.
+    .filter((line) => line.length > 0 && !line.startsWith("///") && !line.startsWith("#["))
+    .join(" ");
+  return body
+    .split(",")
+    .map((field) => field.trim())
+    .filter(Boolean)
+    .map((field) => field.replace(/^pub\s+/, "").split(":")[0].trim());
+}
+
+/** Field names of an `export interface <name> { ... }` in a TS source file. */
+function tsInterfaceFields(source: string, name: string): string[] {
+  const match = new RegExp(`interface ${name} \\{([^}]*)\\}`, "s").exec(source);
+  if (!match) throw new Error(`no TS interface named ${name}`);
+  const body = match[1]
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(
+      (line) => line.length > 0 && !line.startsWith("/*") && !line.startsWith("*") && !line.startsWith("//"),
+    )
+    .join(" ");
+  return body
+    .split(";")
+    .map((field) => field.trim())
+    .filter(Boolean)
+    .map((field) => field.split(":")[0].trim().replace(/\?$/, ""));
+}
 
 /** Parameter names of a #[tauri::command] fn, minus the injected state. */
 function rustCommandParams(name: string): string[] {
@@ -107,5 +148,21 @@ describe("pack command seam", () => {
     const [command, payload = {}] = invoke.mock.calls[0];
     expect(command).toBe("uninstall_pack");
     expect(Object.keys(payload)).toEqual(rustCommandParams("uninstall_pack"));
+  });
+});
+
+describe("project payload seam", () => {
+  // Regression: unlike the flat pack commands above, create_project and
+  // save_project take a single `payload` object, so a field present on one
+  // side and missing on the other is NOT caught by comparing invoke() args —
+  // Tauri/serde just silently drops the extra key or defaults the missing
+  // one. That's exactly how `robot` went unpersisted for a whole phase:
+  // the TS interface had it, nothing on the Rust struct did, and every
+  // saved Arm project silently reopened as Car. Compare the struct/interface
+  // field lists directly instead.
+  it("ProjectPayload has the same fields on both sides of the boundary", () => {
+    const rustFields = rustStructFields(PROJECTS_RS, "ProjectPayload");
+    const tsFields = tsInterfaceFields(PROJECT_API_TS, "ProjectPayload");
+    expect(tsFields.sort()).toEqual(rustFields.sort());
   });
 });

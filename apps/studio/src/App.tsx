@@ -12,7 +12,7 @@ import { loadEngine } from "./engine/loader";
 import { LessonsPanel } from "./LessonsPanel";
 import { formatStudioStatus } from "./lib/statusText";
 import { isTeleopKey, normalizeKey, teleopWheels } from "./lib/teleop";
-import { validateWorld } from "./lib/validateWorld";
+import { validateWorld, type WorldDef } from "./lib/validateWorld";
 import { runProgram } from "./program/execute";
 import { ProgramRunner, ProgramStoppedError } from "./program/ProgramRunner";
 import {
@@ -34,6 +34,7 @@ import {
 import { type OutputLine, PythonPanel, type PythonPanelHandle } from "./PythonPanel";
 import { Viewport } from "./Viewport";
 import { CRUISE_SPEED, type HudInfo, Viewport3D } from "./Viewport3D";
+import { WorldPanel } from "./WorldPanel";
 import "./App.css";
 
 const OTHER_MENUS = ["Edit", "Robot", "Simulation", "Help"];
@@ -46,7 +47,7 @@ const ROBOTS: Array<{ id: RobotKind | null; icon: string; name: string; phase?: 
 ];
 
 
-const CODE_TABS = ["Blocks", "Python", "Lessons", "C++"] as const;
+const CODE_TABS = ["Blocks", "Python", "World", "Lessons", "C++"] as const;
 type CodeTab = (typeof CODE_TABS)[number];
 
 const TELEOP_SPEED = CRUISE_SPEED;
@@ -100,7 +101,14 @@ export default function App() {
   const clearPendingContent = useCallback(() => setPendingContent(null), []);
   const noticeTimer = useRef(0);
 
-  const world = useMemo(() => validateWorld(arenaJson), []);
+  const defaultWorld = useMemo(() => validateWorld(arenaJson), []);
+  const [world, setWorld] = useState<WorldDef>(defaultWorld);
+  // Bumped whenever `world` changes for a reason other than the World tab's
+  // own "Apply changes" (a project load, "New", or "reset to default") so
+  // WorldPanel remounts and re-seeds its draft form from the new prop value,
+  // the same key-remount convention BlocksPanel/PythonPanel use for content
+  // seeded from outside — see their initialWorkspace/initialOverride docs.
+  const [worldEpoch, setWorldEpoch] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -315,12 +323,36 @@ export default function App() {
       python_edited: python.edited,
       world: WORLD_ID,
       robot,
+      world_custom: world,
     };
   };
 
   const applyPayload = (payload: ProjectPayload) => {
     blocksRef.current?.load((payload.blocks ?? null) as object | null);
     pythonRef.current?.load(payload.python, payload.python_edited);
+  };
+
+  /** Loads a project's world (custom or the pack default), resyncing the
+   * World tab's draft form via worldEpoch. Project files are untrusted data
+   * (see validateWorld's docstring), so a corrupted world_custom falls back
+   * to the pack default instead of crashing the app. */
+  const applyProjectWorld = (payload: ProjectPayload) => {
+    haltEverything();
+    try {
+      setWorld(payload.world_custom ? validateWorld(payload.world_custom) : defaultWorld);
+    } catch (error) {
+      console.error("invalid world_custom, falling back to the pack default:", error);
+      setWorld(defaultWorld);
+    }
+    setWorldEpoch((e) => e + 1);
+  };
+
+  /** Rebuilds the sim from an edited world (World tab "Apply"/"reset to
+   * default"); stop first, same as a robot switch, rather than let a running
+   * program keep driving a wheel_base/pose that's about to change under it. */
+  const applyWorld = (next: WorldDef) => {
+    haltEverything();
+    setWorld(next);
   };
 
   const haltEverything = () => {
@@ -368,6 +400,8 @@ export default function App() {
     blocksRef.current?.load(null);
     pythonRef.current?.load("", false);
     setCurrentProject(null);
+    setWorld(defaultWorld);
+    setWorldEpoch((e) => e + 1);
     reset();
     showNotice("new project");
   };
@@ -401,6 +435,7 @@ export default function App() {
     setDialog("none");
     try {
       const [meta, payload] = await loadProject(id);
+      applyProjectWorld(payload);
       const target: RobotKind = payload.robot === "arm" ? "arm" : "car";
       if (target !== robot) {
         setPendingContent({
@@ -665,6 +700,15 @@ export default function App() {
               }
               onOverrideConsumed={clearPendingContent}
             />
+          </div>
+          <div className={tab === "World" ? "tab-panel active padded" : "tab-panel padded"}>
+            {robot === "car" ? (
+              <WorldPanel key={worldEpoch} world={world} defaultWorld={defaultWorld} onApply={applyWorld} />
+            ) : (
+              <p className="placeholder-note">
+                World editing applies to the Car's arena; the Arm has no floor objects yet.
+              </p>
+            )}
           </div>
           <div className={tab === "Lessons" ? "tab-panel active scrolls" : "tab-panel scrolls"}>
             <LessonsPanel onTryStep={tryLessonStep} />

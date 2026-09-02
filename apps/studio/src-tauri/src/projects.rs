@@ -4,7 +4,7 @@
 //!   projects.db                       index (id, name, timestamps)
 //!   projects/<id>/blocks.json         Blockly workspace serialization
 //!   projects/<id>/program.py          the Python buffer
-//!   projects/<id>/project.json        {world, python_edited}
+//!   projects/<id>/project.json        {world, python_edited, robot, world_custom}
 
 use std::fs;
 use std::path::PathBuf;
@@ -21,6 +21,10 @@ pub struct ProjectMeta {
     pub updated_at: i64,
 }
 
+fn default_robot() -> String {
+    "car".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProjectPayload {
     /// Blockly workspace serialization (opaque to the shell).
@@ -30,12 +34,26 @@ pub struct ProjectPayload {
     pub python_edited: bool,
     /// world name from packs, e.g. "arena".
     pub world: String,
+    /// "car" | "arm". Defaults to "car" so project.json files saved before
+    /// this field existed still load as the robot they always were.
+    #[serde(default = "default_robot")]
+    pub robot: String,
+    /// A full world definition (contracts/world/v1), opaque to the shell,
+    /// overriding `world` when the student edited the environment. None
+    /// means "use the named pack world unmodified" (also the state of every
+    /// project saved before the world editor existed).
+    #[serde(default)]
+    pub world_custom: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize)]
 struct SideMeta {
     world: String,
     python_edited: bool,
+    #[serde(default = "default_robot")]
+    robot: String,
+    #[serde(default)]
+    world_custom: Option<serde_json::Value>,
 }
 
 fn now() -> i64 {
@@ -145,6 +163,8 @@ impl Store {
                 python,
                 python_edited: side.python_edited,
                 world: side.world,
+                robot: side.robot,
+                world_custom: side.world_custom,
             },
         ))
     }
@@ -189,6 +209,8 @@ impl Store {
         let side = SideMeta {
             world: payload.world.clone(),
             python_edited: payload.python_edited,
+            robot: payload.robot.clone(),
+            world_custom: payload.world_custom.clone(),
         };
         fs::write(
             dir.join("project.json"),
@@ -209,6 +231,8 @@ mod tests {
             python: python.to_string(),
             python_edited: false,
             world: "arena".to_string(),
+            robot: "car".to_string(),
+            world_custom: None,
         }
     }
 
@@ -284,5 +308,48 @@ mod tests {
         assert!(!project_dir.exists());
         assert!(store.list().unwrap().is_empty());
         assert!(store.load(&meta.id).is_err());
+    }
+
+    // Regression: `robot` used to be sent by the frontend on every save but
+    // had no field on this struct, so serde silently dropped it and every
+    // saved Arm project reopened as Car. `world_custom` is the analogous new
+    // field for the world editor; both are proven here so neither regresses
+    // the same way silently again.
+    #[test]
+    fn robot_and_world_custom_roundtrip() {
+        let (_dir, store) = store();
+        let mut arm_project = payload("from okrobo import Arm");
+        arm_project.robot = "arm".to_string();
+        arm_project.world_custom = Some(serde_json::json!({
+            "name": "Arena",
+            "arena_width": 3.0,
+            "arena_height": 2.0,
+            "robot_radius": 0.1,
+            "wheel_base": 0.12,
+            "start": { "x": 1.5, "y": 1.0, "theta": 0.0 },
+            "obstacles": [{ "x": 2.0, "y": 1.0, "width": 0.3, "height": 0.3, "color": [10, 200, 10] }]
+        }));
+        let meta = store.create("Arm project", &arm_project).unwrap();
+        let (_, loaded) = store.load(&meta.id).unwrap();
+        assert_eq!(loaded.robot, "arm");
+        assert_eq!(loaded.world_custom, arm_project.world_custom);
+    }
+
+    // Projects saved before `robot`/`world_custom` existed have a
+    // project.json on disk with neither key. They must keep loading, as
+    // Car with no custom world, rather than fail to deserialize.
+    #[test]
+    fn legacy_project_json_without_new_fields_still_loads() {
+        let (_dir, store) = store();
+        let meta = store.create("legacy", &payload("robot.forward()")).unwrap();
+        let dir = store.dir(&meta.id);
+        fs::write(
+            dir.join("project.json"),
+            r#"{"world":"arena","python_edited":false}"#,
+        )
+        .unwrap();
+        let (_, loaded) = store.load(&meta.id).unwrap();
+        assert_eq!(loaded.robot, "car");
+        assert_eq!(loaded.world_custom, None);
     }
 }

@@ -24,7 +24,7 @@ export interface WorldDef {
   obstacles: ObstacleDef[];
 }
 
-const MAX_OBSTACLES = 16;
+export const MAX_OBSTACLES = 16;
 
 function validateObstacles(value: unknown, worldName: string): ObstacleDef[] {
   if (value === undefined) return [];

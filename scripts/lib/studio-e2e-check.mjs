@@ -125,8 +125,41 @@ try {
   );
   check("Reset restores the starting pose", reset, await status());
 
+  // -- World tab: editing an object actually rebuilds the live sim ------------
+  // Coordinate-based click()/clickText() compute a bounding rect and dispatch
+  // at that fixed point; a state update from the field edit just before can
+  // shift the button before the dispatch lands (found writing this check).
+  // evalClick/evalClickText do a real DOM .click(), immune to that race.
+  await page.evalClickText(".code-tab", "/^World$/");
+  const worldTabReady = await waitForCondition("!!document.querySelector('.world-panel')");
+  check("World tab renders the editor for the Car robot", worldTabReady);
+
+  const startsWithShippedObjects = await waitForCondition(
+    "document.querySelector('.world-count')?.textContent?.trim() === '2 / 16'",
+  );
+  check(
+    "World tab starts with the arena's 2 shipped objects (red + blue box)",
+    startsWithShippedObjects,
+    await page.evaluate("document.querySelector('.world-count')?.textContent"),
+  );
+
+  // Move the red box (originally x=1.7) to x=1.3, still directly ahead of the
+  // car at x=1.0: the sensor reading should move from 0.50 m to 0.10 m —
+  // (1.3 - width/2) - (robot_x + robot_radius) = 1.2 - 1.1.
+  await page.setInputValue('[aria-label="object 1 x"]', "1.3");
+  const noValidationError = await page.evaluate("!document.querySelector('.world-error')");
+  check("editing an object to a valid position shows no validation error", noValidationError);
+
+  await page.evalClick(".world-actions .primary"); // Apply changes
+  const objectMoved = await waitForCondition("/d 0\\.10 m/.test(document.querySelector('.run-bar .status')?.textContent ?? '')");
+  check("editing an object and clicking Apply moves it in the live sim, not just the form", objectMoved, await status());
+
+  await page.evalClickText(".world-actions button", "/reset to pack default/i");
+  const worldReset = await waitForCondition("/d 0\\.50 m/.test(document.querySelector('.run-bar .status')?.textContent ?? '')");
+  check("reset to pack default restores the shipped arena", worldReset, await status());
+
   // -- Python tab mirrors the blocks --------------------------------------------
-  await page.click(".code-tab:nth-of-type(2)"); // Blocks, Python, Lessons, C++
+  await page.clickText(".code-tab", "/^Python$/");
   const pythonReady = await waitForCondition(
     `/from okrobo import Robot/.test(${PYTHON_EDITOR_TEXT_EXPR})`,
     5000,
@@ -147,7 +180,7 @@ try {
     await waitForCondition("/joints/.test(document.querySelector('.run-bar .status')?.textContent ?? '')", 5000),
   );
 
-  await page.click(".code-tab:nth-of-type(2)"); // re-select Python for the arm
+  await page.clickText(".code-tab", "/^Python$/"); // re-select Python for the arm
   const armPythonReady = await waitForCondition(
     `/from okrobo import Arm/.test(${PYTHON_EDITOR_TEXT_EXPR})`,
     5000,
@@ -166,7 +199,7 @@ try {
   check("switching back to Car works", backOnCar);
 
   // -- lessons: list, open, "Try this" loads code and can switch robots -------
-  await page.click(".code-tab:nth-of-type(3)"); // Lessons
+  await page.clickText(".code-tab", "/^Lessons$/");
   const lessonsReady = await waitForCondition("document.querySelectorAll('.lesson-card').length >= 2", 5000);
   const lessonCount = await page.evaluate("document.querySelectorAll('.lesson-card').length");
   check("Lessons tab lists at least the two core lessons", lessonsReady, `${lessonCount} lessons`);

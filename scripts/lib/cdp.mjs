@@ -88,6 +88,55 @@ export async function connect(cdpPort, { retries = 20, delayMs = 500 } = {}) {
     }
   };
 
+  /**
+   * Click via a real DOM `.click()` call instead of synthetic OS-level mouse
+   * events. `click`/`clickText` above compute a bounding-rect once and then
+   * dispatch at that fixed coordinate; if the element's position shifts
+   * between those two steps (e.g. a state update from a just-typed field
+   * re-renders the panel before the click lands), the dispatch can miss —
+   * found via the World tab editor, where a field edit immediately followed
+   * by clicking "Apply" raced exactly this way. Prefer this for a click that
+   * follows right after something else changed the DOM.
+   */
+  const evalClick = async (selector) => {
+    const ok = await evaluate(`(() => {
+      const el = document.querySelector(${JSON.stringify(selector)});
+      if (!el || el.disabled) return false;
+      el.click();
+      return true;
+    })()`);
+    if (!ok) throw new Error(`evalClick: no clickable element for ${selector}`);
+  };
+
+  /** Text-matching counterpart to evalClick; see its docstring. */
+  const evalClickText = async (containerSelector, pattern) => {
+    const ok = await evaluate(`(() => {
+      const el = [...document.querySelectorAll(${JSON.stringify(containerSelector)})]
+        .find((n) => ${pattern}.test(n.textContent || ""));
+      if (!el || el.disabled) return false;
+      el.click();
+      return true;
+    })()`);
+    if (!ok) throw new Error(`evalClickText: no ${containerSelector} matches ${pattern}`);
+  };
+
+  /**
+   * Set a controlled <input>'s value and fire a real 'input' event, so
+   * React's onChange sees it. Plain `el.value = x` doesn't: React tracks the
+   * native input's value setter itself, and a direct assignment bypasses it.
+   */
+  const setInputValue = async (selector, value) => {
+    const ok = await evaluate(`(() => {
+      const el = document.querySelector(${JSON.stringify(selector)});
+      if (!el) return false;
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      setter.call(el, ${JSON.stringify(String(value))});
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    })()`);
+    if (!ok) throw new Error(`setInputValue: no element for ${selector}`);
+  };
+
   const keyPress = async (key) => {
     for (const type of ["keyDown", "keyUp"]) {
       await send("Input.dispatchKeyEvent", { type, key, code: key });
@@ -96,7 +145,18 @@ export async function connect(cdpPort, { retries = 20, delayMs = 500 } = {}) {
 
   const close = () => ws.close();
 
-  return { send, evaluate, navigate, click, clickText, keyPress, close };
+  return {
+    send,
+    evaluate,
+    navigate,
+    click,
+    clickText,
+    evalClick,
+    evalClickText,
+    setInputValue,
+    keyPress,
+    close,
+  };
 }
 
 export { sleep };
