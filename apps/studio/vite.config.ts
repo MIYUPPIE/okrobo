@@ -12,6 +12,10 @@ export default defineConfig({
   },
   server: {
     fs: { allow: [repoRoot] },
+    // Never watch the Rust build tree. It stages a whole bundled CPython
+    // (tens of thousands of files), which exhausts the inotify limit and
+    // kills the dev server with ENOSPC once the desktop app has been built.
+    watch: { ignored: ["**/src-tauri/**", "**/tools/**", "**/dist/**"] },
   },
   build: {
     // Monaco and Blockly are large; this is a bundled local desktop app,
