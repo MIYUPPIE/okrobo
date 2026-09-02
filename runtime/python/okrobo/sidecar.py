@@ -14,6 +14,7 @@ from . import _deps  # noqa: F401  (adds .deps to sys.path before websockets imp
 import argparse
 import asyncio
 import json
+import math
 import os
 import socket
 import sys
@@ -21,6 +22,16 @@ import tempfile
 from pathlib import Path
 
 import websockets
+
+
+def serial_ports() -> list:
+    """Ports that might hold a robot; empty when pyserial is unavailable."""
+    try:
+        from .serial_link import list_ports
+
+        return list_ports()
+    except Exception:
+        return []
 
 WORKER_PATH = str(Path(__file__).resolve().parent / "worker.py")
 DEFAULT_PORT = 8355
@@ -37,6 +48,10 @@ class Session:
         self.next_id = 0
         self.tasks: list[asyncio.Task] = []
         self.code_path: str | None = None
+        # When a physical robot is connected, robot calls go to it instead of
+        # the studio's simulator (contracts/robot-serial/v0).
+        self.hardware = None
+        self.hardware_port: str | None = None
 
     async def send(self, message: dict) -> None:
         try:
@@ -54,6 +69,69 @@ class Session:
         elif op == "result":
             if self.pending_result and not self.pending_result.done():
                 self.pending_result.set_result(message)
+        elif op == "list_ports":
+            await self.send({"op": "ports", "ports": serial_ports()})
+        elif op == "connect_hardware":
+            await self.connect_hardware(str(message.get("port", "")))
+        elif op == "disconnect_hardware":
+            await self.disconnect_hardware()
+
+    # -- hardware -------------------------------------------------------------
+
+    async def connect_hardware(self, port: str) -> None:
+        await self.disconnect_hardware(notify=False)
+        try:
+            from .serial_link import SerialRobot
+
+            # Opening a port blocks; keep the event loop responsive.
+            robot = await asyncio.to_thread(SerialRobot, port)
+        except Exception as error:
+            await self.send({"op": "hardware", "connected": False, "error": str(error)})
+            return
+        self.hardware = robot
+        self.hardware_port = port
+        await self.send(
+            {
+                "op": "hardware",
+                "connected": True,
+                "port": port,
+                "identity": robot.identity,
+            }
+        )
+
+    async def disconnect_hardware(self, notify: bool = True) -> None:
+        robot = self.hardware
+        self.hardware = None
+        self.hardware_port = None
+        if robot is not None:
+            await asyncio.to_thread(robot.close)
+        if notify:
+            await self.send({"op": "hardware", "connected": False})
+
+    async def call_hardware(self, method: str, args: dict):
+        """Run one robot call against the physical robot (contract v1 names)."""
+        from .robot import Robot
+
+        robot = Robot(world=self.hardware)
+        if method in ("forward", "backward", "turn_left", "turn_right", "wait"):
+            await asyncio.to_thread(getattr(robot, method), *args.values())
+            return None
+        if method == "distance":
+            return await asyncio.to_thread(lambda: self.hardware.refresh().distance)
+        if method == "heading":
+            return await asyncio.to_thread(
+                lambda: math.degrees(self.hardware.refresh().pose.theta)
+            )
+        if method == "position":
+            def read_position():
+                pose = self.hardware.refresh().pose
+                return [pose.x, pose.y]
+
+            return await asyncio.to_thread(read_position)
+        if method == "stop":
+            await asyncio.to_thread(self.hardware.stop)
+            return None
+        raise ValueError(f"{method} is not available on hardware")
 
     async def start_program(self, code: str) -> None:
         parent_sock, child_sock = socket.socketpair()
@@ -106,16 +184,29 @@ class Session:
             request = json.loads(line)
             self.next_id += 1
             request_id = self.next_id
-            self.pending_result = asyncio.get_event_loop().create_future()
-            await self.send(
-                {
-                    "op": "request",
-                    "id": request_id,
-                    "method": request["method"],
-                    "args": request.get("args", {}),
-                }
-            )
-            reply = await self.pending_result
+
+            if self.hardware is not None:
+                # A physical robot is connected: serve the call here instead of
+                # asking the studio's simulator. The student's code is
+                # identical either way.
+                try:
+                    result = await self.call_hardware(
+                        request["method"], request.get("args", {})
+                    )
+                    reply = {"ok": True, "result": result}
+                except Exception as error:
+                    reply = {"ok": False, "error": str(error)}
+            else:
+                self.pending_result = asyncio.get_event_loop().create_future()
+                await self.send(
+                    {
+                        "op": "request",
+                        "id": request_id,
+                        "method": request["method"],
+                        "args": request.get("args", {}),
+                    }
+                )
+                reply = await self.pending_result
             if self.rpc_writer is None:
                 return
             self.rpc_writer.write(
@@ -187,6 +278,7 @@ async def handler(ws) -> None:
             await session.handle_message(message)
     finally:
         await session.stop_program()
+        await session.disconnect_hardware(notify=False)
         print("studio disconnected", flush=True)
 
 

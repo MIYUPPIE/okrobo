@@ -39,6 +39,23 @@ describe("pack manifest validation", () => {
     expect(() => validateManifest(absolute)).toThrow("unsafe path");
   });
 
+  it("accepts and preserves signature fields", () => {
+    const signed = validateManifest({
+      ...valid(),
+      signature: "d".repeat(128),
+      key_id: "e".repeat(16),
+    });
+    expect(signed.signature).toHaveLength(128);
+    expect(signed.key_id).toHaveLength(16);
+    // Unsigned packs stay valid: signing is a trust signal, not a requirement.
+    expect(validateManifest(valid()).signature).toBeUndefined();
+  });
+
+  it("rejects malformed signature fields", () => {
+    expect(() => validateManifest({ ...valid(), signature: "abc" })).toThrow("128 hex");
+    expect(() => validateManifest({ ...valid(), key_id: "xyz" })).toThrow("16 hex");
+  });
+
   it("validates a store index and rejects duplicate ids", () => {
     expect(validateIndex({ packs: [valid()] })).toHaveLength(1);
     expect(() => validateIndex({ packs: [valid(), valid()] })).toThrow("duplicate pack id");

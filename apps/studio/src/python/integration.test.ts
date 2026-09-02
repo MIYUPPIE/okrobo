@@ -43,16 +43,22 @@ interface Capture {
   output: string[];
   done: { value: boolean; exitCode: number | null };
   connected: { value: boolean };
+  ports: { value: unknown[] | null };
+  hardware: { value: { connected: boolean; error?: string } | null };
 }
 
 function makeCapture(): Capture {
   const output: string[] = [];
   const done = { value: false, exitCode: null as number | null };
   const connected = { value: false };
+  const ports = { value: null as unknown[] | null };
+  const hardware = { value: null as { connected: boolean; error?: string } | null };
   return {
     output,
     done,
     connected,
+    ports,
+    hardware,
     events: {
       onStatus: (isConnected) => (connected.value = isConnected),
       onStarted: () => {},
@@ -61,6 +67,8 @@ function makeCapture(): Capture {
         done.value = true;
         done.exitCode = exitCode;
       },
+      onPorts: (list) => (ports.value = list),
+      onHardware: (status) => (hardware.value = status),
     },
   };
 }
@@ -144,6 +152,28 @@ describe("python sidecar end to end (real sidecar, real engine)", () => {
     arm.destroy();
     engine.destroy();
   }, 30000);
+
+  it("lists serial ports and reports a failed hardware connect (v0 serial)", async () => {
+    const { engine, arm, runner } = await makeRunner();
+    const capture = makeCapture();
+    const bridge = new PythonBridge(url, runner.api, capture.events);
+    bridge.connect();
+    await waitFor(() => capture.connected.value);
+
+    bridge.listPorts();
+    await waitFor(() => capture.ports.value !== null);
+    expect(Array.isArray(capture.ports.value)).toBe(true);
+
+    // No robot on a made-up port: the studio must be told, not left hanging.
+    bridge.connectHardware("/dev/okrobo-does-not-exist");
+    await waitFor(() => capture.hardware.value !== null, undefined, 25000);
+    expect(capture.hardware.value?.connected).toBe(false);
+    expect(capture.hardware.value?.error).toBeTruthy();
+
+    bridge.dispose();
+    arm.destroy();
+    engine.destroy();
+  }, 40000);
 
   it("stop kills an infinite student program", async () => {
     const { engine, runner } = await makeRunner();

@@ -46,8 +46,49 @@ export interface InstalledPack {
 
 export const listPacks = () => invoke<InstalledPack[]>("list_packs");
 
-/** The shell verifies `sha256` against the bytes before unpacking anything. */
-export const installPack = (id: string, version: string, sha256: string, archive: Uint8Array) =>
-  invoke<InstalledPack>("install_pack", { id, version, sha256, archive: Array.from(archive) });
+/** How far a pack can be trusted (docs/decisions/pack-signing.md). */
+export type Trust = "verified" | "unsigned" | "unknown_key" | "invalid";
+
+export const checkPackSignature = (pack: {
+  id: string;
+  version: string;
+  sha256: string;
+  size_bytes: number;
+  signature?: string;
+  key_id?: string;
+}) =>
+  invoke<Trust>("check_pack_signature", {
+    id: pack.id,
+    version: pack.version,
+    sha256: pack.sha256,
+    sizeBytes: pack.size_bytes,
+    signature: pack.signature ?? null,
+    keyId: pack.key_id ?? null,
+  });
+
+/**
+ * The shell verifies the digest against the bytes before unpacking, and
+ * refuses outright when a signature is present but does not match.
+ */
+export const installPack = (
+  pack: {
+    id: string;
+    version: string;
+    sha256: string;
+    size_bytes?: number;
+    signature?: string;
+    key_id?: string;
+  },
+  archive: Uint8Array,
+) =>
+  invoke<InstalledPack>("install_pack", {
+    id: pack.id,
+    version: pack.version,
+    sha256: pack.sha256,
+    sizeBytes: pack.size_bytes ?? archive.length,
+    signature: pack.signature ?? null,
+    keyId: pack.key_id ?? null,
+    archive: Array.from(archive),
+  });
 
 export const uninstallPack = (id: string) => invoke<void>("uninstall_pack", { id });

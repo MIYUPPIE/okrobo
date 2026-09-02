@@ -21,7 +21,12 @@ import {
   type ProjectPayload,
   saveProject,
 } from "./projects/api";
-import { PythonBridge, SIDECAR_URL } from "./python/PythonBridge";
+import {
+  type HardwareStatus,
+  PythonBridge,
+  type SerialPort,
+  SIDECAR_URL,
+} from "./python/PythonBridge";
 import { type OutputLine, PythonPanel, type PythonPanelHandle } from "./PythonPanel";
 import { Viewport } from "./Viewport";
 import { CRUISE_SPEED, type HudInfo, Viewport3D } from "./Viewport3D";
@@ -58,6 +63,8 @@ export default function App() {
   const [pythonCode, setPythonCode] = useState("");
   const [pythonConnected, setPythonConnected] = useState(false);
   const [pythonOutput, setPythonOutput] = useState<OutputLine[]>([]);
+  const [ports, setPorts] = useState<SerialPort[]>([]);
+  const [hardware, setHardware] = useState<HardwareStatus>({ connected: false });
   const [hud, setHud] = useState<HudInfo | null>(null);
   const autopilotRef = useRef(false);
   const programActiveRef = useRef(false);
@@ -112,7 +119,24 @@ export default function App() {
     const appendOutput = (line: OutputLine) =>
       setPythonOutput((previous) => [...previous.slice(-499), line]);
     const bridge = new PythonBridge(SIDECAR_URL, runner.api, {
-      onStatus: setPythonConnected,
+      onStatus: (connected) => {
+        setPythonConnected(connected);
+        if (connected) bridge.listPorts();
+        else {
+          setPorts([]);
+          setHardware({ connected: false });
+        }
+      },
+      onPorts: setPorts,
+      onHardware: (status) => {
+        setHardware(status);
+        if (status.error) {
+          setPythonOutput((previous) => [
+            ...previous.slice(-499),
+            { stream: "stderr", text: `hardware: ${status.error}\n` },
+          ]);
+        }
+      },
       onStarted: () => {},
       onOutput: (stream, text) => appendOutput({ stream, text }),
       onDone: (exitCode) => {
@@ -448,6 +472,7 @@ export default function App() {
       if (runStatus === "error") parts.push("program error (see console)");
       if (hud.kind === "car" && hud.state.collided) parts.push("⚠ wall contact");
       parts.push(pythonConnected ? "py ✓" : "py ✗");
+      if (hardware.connected) parts.push(`🔌 ${hardware.identity ?? "robot"}`);
     }
     if (notice) parts.push(notice);
     return parts.join("  ·  ");
@@ -545,6 +570,56 @@ export default function App() {
               ? "Arrow keys or WASD steer the car any time. Run executes your blocks."
               : "Run executes your blocks; the arm moves joint by joint."}
           </p>
+        </div>
+
+        <div className="hardware-panel">
+          <h2>Hardware</h2>
+          {!pythonConnected ? (
+            <p className="hardware-note">
+              Start the Python sidecar to use a real robot.
+            </p>
+          ) : hardware.connected ? (
+            <>
+              <p className="hardware-note connected">
+                ✓ {hardware.identity ?? "robot"}
+                <br />
+                {hardware.port}
+              </p>
+              <button
+                className="hardware-button"
+                onClick={() => bridgeRef.current?.disconnectHardware()}
+              >
+                Disconnect
+              </button>
+              <p className="hardware-note">Run now drives the real robot.</p>
+            </>
+          ) : (
+            <>
+              {ports.length === 0 ? (
+                <p className="hardware-note">No robot found. Plug one in and refresh.</p>
+              ) : (
+                <ul className="port-list">
+                  {ports.map((port) => (
+                    <li key={port.device}>
+                      <button
+                        className="hardware-button"
+                        title={port.description || port.hwid}
+                        onClick={() => bridgeRef.current?.connectHardware(port.device)}
+                      >
+                        {port.device.replace("/dev/", "")}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <button
+                className="link-button"
+                onClick={() => bridgeRef.current?.listPorts()}
+              >
+                ↻ Refresh ports
+              </button>
+            </>
+          )}
         </div>
       </aside>
 

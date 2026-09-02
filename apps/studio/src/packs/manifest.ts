@@ -19,11 +19,17 @@ export interface PackManifest {
   contents: PackContents;
   /** Where the archive lives; set by the store index, absent for local packs. */
   url?: string;
+  /** Ed25519 signature over id|version|sha256|size_bytes (hex). */
+  signature?: string;
+  /** Id of the key that signed it. */
+  key_id?: string;
 }
 
 const ID_PATTERN = /^[a-z][a-z0-9-]{1,63}$/;
 const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const SIGNATURE_PATTERN = /^[a-f0-9]{128}$/;
+const KEY_ID_PATTERN = /^[a-f0-9]{16}$/;
 
 function stringArray(value: unknown, field: string, packId: string): string[] {
   if (value === undefined) return [];
@@ -63,6 +69,16 @@ export function validateManifest(data: unknown): PackManifest {
     throw new Error(`pack '${id}': size_bytes must be a non-negative number`);
   }
 
+  if (
+    d.signature !== undefined &&
+    (typeof d.signature !== "string" || !SIGNATURE_PATTERN.test(d.signature))
+  ) {
+    throw new Error(`pack '${id}': signature must be 128 hex characters`);
+  }
+  if (d.key_id !== undefined && (typeof d.key_id !== "string" || !KEY_ID_PATTERN.test(d.key_id))) {
+    throw new Error(`pack '${id}': key_id must be 16 hex characters`);
+  }
+
   const contents = (d.contents ?? {}) as Record<string, unknown>;
   if (typeof contents !== "object" || contents === null) {
     throw new Error(`pack '${id}': contents must be an object`);
@@ -84,6 +100,8 @@ export function validateManifest(data: unknown): PackManifest {
       lessons: stringArray(contents.lessons, "contents.lessons", id),
     },
     url: typeof d.url === "string" ? d.url : undefined,
+    signature: d.signature as string | undefined,
+    key_id: d.key_id as string | undefined,
   };
 }
 

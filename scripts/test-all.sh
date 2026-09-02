@@ -8,6 +8,11 @@ cmake -S "$ROOT/engine" -B "$ROOT/engine/build" -DCMAKE_BUILD_TYPE=Release >/dev
 cmake --build "$ROOT/engine/build" --parallel >/dev/null
 ctest --test-dir "$ROOT/engine/build" --output-on-failure
 
+echo "== firmware (C++ protocol, host build) =="
+cmake -S "$ROOT/firmware" -B "$ROOT/firmware/build" -DCMAKE_BUILD_TYPE=Release >/dev/null
+cmake --build "$ROOT/firmware/build" --parallel >/dev/null
+ctest --test-dir "$ROOT/firmware/build" --output-on-failure
+
 echo "== runtime/python =="
 if [ ! -d "$ROOT/runtime/python/.deps" ]; then
   (cd "$ROOT/runtime/python" && python3 -m pip install --quiet --target=.deps -r requirements.txt)
@@ -18,8 +23,9 @@ echo "== engine (WASM + parity vs reference model) =="
 "$ROOT/scripts/build-engine-wasm.sh"
 node "$ROOT/engine/tests/parity/parity.mjs"
 
-echo "== packs (index + school server) =="
+echo "== packs (index + signing + school server) =="
 node "$ROOT/scripts/build-pack-index.mjs" >/dev/null
+node "$ROOT/scripts/lib/signing-check.mjs"
 node "$ROOT/scripts/lib/school-server-check.mjs" 8482
 
 echo "== desktop shell (rust) =="

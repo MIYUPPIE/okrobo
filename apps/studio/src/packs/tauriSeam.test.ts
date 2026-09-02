@@ -35,8 +35,16 @@ function rustCommandParams(name: string): string[] {
 describe("pack command seam", () => {
   beforeEach(() => invoke.mockClear());
 
+  /** Tauri maps snake_case Rust params to camelCase on the JS side. */
+  const camel = (name: string) => name.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+
   it("registers every pack command in the handler", () => {
-    for (const command of ["list_packs", "install_pack", "uninstall_pack"]) {
+    for (const command of [
+      "list_packs",
+      "install_pack",
+      "uninstall_pack",
+      "check_pack_signature",
+    ]) {
       expect(LIB_RS).toMatch(new RegExp(`\\b${command}\\b`));
       expect(rustCommandParams(command)).toBeDefined();
     }
@@ -44,15 +52,47 @@ describe("pack command seam", () => {
 
   it("installPack sends exactly the arguments the Rust command declares", async () => {
     const { installPack } = await import("../projects/api");
-    await installPack("robotics", "1.0.0", "a".repeat(64), new Uint8Array([1, 2, 3]));
+    await installPack(
+      {
+        id: "robotics",
+        version: "1.0.0",
+        sha256: "a".repeat(64),
+        size_bytes: 467,
+        signature: "b".repeat(128),
+        key_id: "c".repeat(16),
+      },
+      new Uint8Array([1, 2, 3]),
+    );
 
     expect(invoke).toHaveBeenCalledTimes(1);
     const [command, payload = {}] = invoke.mock.calls[0];
     expect(command).toBe("install_pack");
-    expect(Object.keys(payload).sort()).toEqual(rustCommandParams("install_pack").sort());
+    expect(Object.keys(payload).sort()).toEqual(
+      rustCommandParams("install_pack").map(camel).sort(),
+    );
     // Archives cross the boundary as a plain number array (serde Vec<u8>).
     expect(payload.archive).toEqual([1, 2, 3]);
     expect(payload.sha256).toHaveLength(64);
+    expect(payload.signature).toHaveLength(128);
+  });
+
+  it("checkPackSignature matches its Rust signature", async () => {
+    const { checkPackSignature } = await import("../projects/api");
+    await checkPackSignature({
+      id: "core",
+      version: "1.0.0",
+      sha256: "a".repeat(64),
+      size_bytes: 2200,
+    });
+
+    const [command, payload = {}] = invoke.mock.calls[0];
+    expect(command).toBe("check_pack_signature");
+    expect(Object.keys(payload).sort()).toEqual(
+      rustCommandParams("check_pack_signature").map(camel).sort(),
+    );
+    // Absent optionals cross as null, which serde reads as None.
+    expect(payload.signature).toBeNull();
+    expect(payload.keyId).toBeNull();
   });
 
   it("uninstallPack and listPacks match their Rust signatures", async () => {

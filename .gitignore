@@ -39,3 +39,5 @@ runtime/python/.deps/
 # Secrets
 .env
 .env.*
+keys/
+firmware/build/

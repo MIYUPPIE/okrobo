@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { installPack, type InstalledPack, listPacks, uninstallPack } from "./projects/api";
+import {
+  checkPackSignature,
+  installPack,
+  type InstalledPack,
+  listPacks,
+  type Trust,
+  uninstallPack,
+} from "./projects/api";
 import {
   catalogue,
   DEFAULT_SOURCES,
@@ -19,6 +26,7 @@ export function AssetStore({ onClose }: { onClose: () => void }) {
   const [installed, setInstalled] = useState<InstalledPack[]>([]);
   const [status, setStatus] = useState("looking for a school server…");
   const [busy, setBusy] = useState<string | null>(null);
+  const [pendingTrust, setPendingTrust] = useState<{ entry: StoreEntry; trust: Trust } | null>(null);
 
   const refreshInstalled = async () => {
     try {
@@ -54,20 +62,59 @@ export function AssetStore({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const install = async (entry: StoreEntry) => {
+  const install = async (entry: StoreEntry, confirmedUnverified = false) => {
     const { manifest } = entry;
     if (!manifest.url || !manifest.sha256) {
       setStatus(`${manifest.id}: the index has no archive url or digest`);
       return;
     }
+
+    // Check the publisher before downloading anything
+    // (docs/decisions/pack-signing.md).
+    if (!confirmedUnverified) {
+      let trust: Trust = "unsigned";
+      try {
+        trust = await checkPackSignature({
+          id: manifest.id,
+          version: manifest.version,
+          sha256: manifest.sha256,
+          size_bytes: manifest.size_bytes ?? 0,
+          signature: manifest.signature,
+          key_id: manifest.key_id,
+        });
+      } catch {
+        // No shell (browser dev mode): treat as unsigned and ask.
+      }
+      if (trust === "invalid") {
+        setStatus(`${manifest.name}: signature does not match this archive · not installed`);
+        return;
+      }
+      if (trust !== "verified") {
+        setPendingTrust({ entry, trust });
+        return;
+      }
+    }
+
+    setPendingTrust(null);
     setBusy(manifest.id);
     setStatus(`downloading ${manifest.name}…`);
     try {
       const response = await fetch(manifest.url);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const archive = new Uint8Array(await response.arrayBuffer());
-      // The shell verifies the digest before unpacking anything.
-      const result = await installPack(manifest.id, manifest.version, manifest.sha256, archive);
+      // The shell verifies the digest, and refuses a mismatched signature,
+      // before unpacking anything.
+      const result = await installPack(
+        {
+          id: manifest.id,
+          version: manifest.version,
+          sha256: manifest.sha256,
+          size_bytes: manifest.size_bytes,
+          signature: manifest.signature,
+          key_id: manifest.key_id,
+        },
+        archive,
+      );
       await refreshInstalled();
       setStatus(`installed ${result.name} ${result.version} · works offline now`);
     } catch (error) {
@@ -114,6 +161,27 @@ export function AssetStore({ onClose }: { onClose: () => void }) {
 
         <p className="store-status">{status}</p>
 
+        {pendingTrust && (
+          <div className="trust-prompt">
+            <p>
+              <strong>{pendingTrust.entry.manifest.name}</strong>{" "}
+              {pendingTrust.trust === "unsigned"
+                ? "is not signed."
+                : "is signed by a publisher this studio does not know."}{" "}
+              Install it only if you trust where it came from.
+            </p>
+            <div className="dialog-actions">
+              <button onClick={() => setPendingTrust(null)}>Cancel</button>
+              <button
+                className="primary"
+                onClick={() => void install(pendingTrust.entry, true)}
+              >
+                Install anyway
+              </button>
+            </div>
+          </div>
+        )}
+
         <ul className="project-list">
           {entries.map((entry) => (
             <li key={entry.manifest.id}>
@@ -124,6 +192,7 @@ export function AssetStore({ onClose }: { onClose: () => void }) {
                   {entry.manifest.size_bytes
                     ? ` · ${(entry.manifest.size_bytes / 1_000_000).toFixed(1)} MB`
                     : ""}
+                  {entry.manifest.signature ? " · signed" : " · unsigned"}
                   {entry.state === "upgradable" ? ` · installed ${entry.installedVersion}` : ""}
                 </span>
               </div>

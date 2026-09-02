@@ -1,10 +1,12 @@
 mod packs;
 mod projects;
+mod signing;
 mod sidecar;
 
 use std::sync::Mutex;
 
 use packs::{InstalledPack, PackStore};
+use signing::Trust;
 use projects::{ProjectMeta, ProjectPayload, Store};
 use sidecar::SidecarState;
 use tauri::{Manager, RunEvent};
@@ -53,17 +55,63 @@ fn list_packs(state: tauri::State<PackState>) -> Result<Vec<InstalledPack>, Stri
     state.0.lock().map_err(|e| e.to_string())?.list()
 }
 
+/// How far a pack can be trusted before installing it, so the studio can ask
+/// for confirmation on anything unsigned or from an unknown publisher.
+#[tauri::command]
+fn check_pack_signature(
+    id: String,
+    version: String,
+    sha256: String,
+    size_bytes: u64,
+    signature: Option<String>,
+    key_id: Option<String>,
+) -> Trust {
+    let trusted: Vec<(String, String)> = signing::BUILTIN_KEYS
+        .iter()
+        .map(|(id, key)| ((*id).to_string(), (*key).to_string()))
+        .collect();
+    signing::verify_pack(
+        &id,
+        &version,
+        &sha256,
+        size_bytes,
+        signature.as_deref(),
+        key_id.as_deref(),
+        &trusted,
+    )
+}
+
 /// Install a pack from an already-downloaded archive. The frontend fetches the
 /// bytes (so a school server on the LAN works with no extra plumbing) and this
 /// side verifies the digest before anything touches the pack directory.
+///
+/// A signature that does not match the manifest is refused outright: unlike an
+/// unsigned pack, it means the bytes are not what the publisher approved.
 #[tauri::command]
 fn install_pack(
     state: tauri::State<PackState>,
     id: String,
     version: String,
     sha256: String,
+    size_bytes: Option<u64>,
+    signature: Option<String>,
+    key_id: Option<String>,
     archive: Vec<u8>,
 ) -> Result<InstalledPack, String> {
+    let trust = check_pack_signature(
+        id.clone(),
+        version.clone(),
+        sha256.clone(),
+        size_bytes.unwrap_or(archive.len() as u64),
+        signature,
+        key_id,
+    );
+    if trust == Trust::Invalid {
+        return Err(format!(
+            "{id} {version}: the signature does not match this archive; refusing to install"
+        ));
+    }
+
     state
         .0
         .lock()
@@ -87,7 +135,8 @@ pub fn run() {
             delete_project,
             list_packs,
             install_pack,
-            uninstall_pack
+            uninstall_pack,
+            check_pack_signature
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

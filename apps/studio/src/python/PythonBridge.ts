@@ -7,11 +7,28 @@ import type { RobotApi } from "../program/ProgramRunner";
 export const SIDECAR_URL = "ws://127.0.0.1:8355";
 const RETRY_MS = 3000;
 
+export interface SerialPort {
+  device: string;
+  description: string;
+  hwid: string;
+}
+
+export interface HardwareStatus {
+  connected: boolean;
+  port?: string;
+  identity?: string;
+  error?: string;
+}
+
 export interface BridgeEvents {
   onStatus(connected: boolean): void;
   onStarted(): void;
   onOutput(stream: "stdout" | "stderr", text: string): void;
   onDone(exitCode: number): void;
+  /** Serial ports the sidecar can see (contracts/robot-serial/v0). */
+  onPorts?(ports: SerialPort[]): void;
+  /** Physical robot connection state. */
+  onHardware?(status: HardwareStatus): void;
 }
 
 function num(value: unknown, fallback: number): number {
@@ -107,6 +124,18 @@ export class PythonBridge {
     this.send({ op: "stop" });
   }
 
+  listPorts(): void {
+    this.send({ op: "list_ports" });
+  }
+
+  connectHardware(port: string): void {
+    this.send({ op: "connect_hardware", port });
+  }
+
+  disconnectHardware(): void {
+    this.send({ op: "disconnect_hardware" });
+  }
+
   dispose(): void {
     this.disposed = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);
@@ -145,6 +174,17 @@ export class PythonBridge {
         break;
       case "done":
         this.events.onDone(Number(message.exit_code ?? 0));
+        break;
+      case "ports":
+        this.events.onPorts?.(Array.isArray(message.ports) ? (message.ports as SerialPort[]) : []);
+        break;
+      case "hardware":
+        this.events.onHardware?.({
+          connected: Boolean(message.connected),
+          port: typeof message.port === "string" ? message.port : undefined,
+          identity: typeof message.identity === "string" ? message.identity : undefined,
+          error: typeof message.error === "string" ? message.error : undefined,
+        });
         break;
       case "request": {
         const id = message.id;

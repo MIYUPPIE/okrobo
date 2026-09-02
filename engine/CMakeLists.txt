@@ -9,12 +9,20 @@ target_include_directories(okrobo_engine PUBLIC src)
 target_compile_options(okrobo_engine PRIVATE -Wall -Wextra -Werror)
 
 enable_testing()
-add_executable(test_world tests/test_world.cpp)
-target_link_libraries(test_world PRIVATE okrobo_engine)
+
+# The tests assert. A Release build defines NDEBUG, which compiles assert()
+# away and would make every suite pass without checking anything, so keep
+# assertions live in test targets whatever the build type.
+function(okrobo_add_test target source)
+  add_executable(${target} ${source})
+  target_link_libraries(${target} PRIVATE okrobo_engine)
+  target_compile_options(${target} PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+endfunction()
+
+okrobo_add_test(test_world tests/test_world.cpp)
 add_test(NAME world COMMAND test_world)
 
-add_executable(test_arm tests/test_arm.cpp)
-target_link_libraries(test_arm PRIVATE okrobo_engine)
+okrobo_add_test(test_arm tests/test_arm.cpp)
 add_test(NAME arm COMMAND test_arm)
 
 # Phase 1 adds an Emscripten target here exporting the contract v0 surface

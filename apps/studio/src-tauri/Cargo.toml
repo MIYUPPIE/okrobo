@@ -23,6 +23,8 @@ tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
 rusqlite = { version = "0.34", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
+ed25519-dalek = { version = "2.1.1", features = ["rand_core"] }
+hex = "0.4.3"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

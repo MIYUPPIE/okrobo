@@ -30,8 +30,8 @@ These are settled. Do not re-litigate them in future sessions unless something b
 ## Open decisions (decide when the phase starts, not before)
 
 - ~~Phase 5 physics library~~ decided: MuJoCo, integration deferred to the first contact-dynamics feature ([docs/decisions/physics-engine.md](docs/decisions/physics-engine.md)).
-- **Phase 7:** Web Serial from the webview vs serial from the Python sidecar for ESP32/Arduino. Depends on Tauri webview serial support at that time.
 - ~~Blockly execution target~~ decided in Phase 2: JS for execution (async runner, interruptible), Python for display until Phase 3 makes it the real path.
+- ~~Phase 7 serial transport~~ decided: the Python sidecar, because WebKitGTK has no Web Serial API ([docs/decisions/serial-transport.md](docs/decisions/serial-transport.md)).
 
 ---
 
@@ -78,6 +78,7 @@ okrobo/
 ├── engine/               # C++ core, CMake, ctest
 │   ├── src/
 │   └── tests/
+├── firmware/             # ESP32/Arduino robot, protocol gate-tested on host
 ├── runtime/
 │   └── python/           # okrobo package + tests
 ├── packs/
@@ -111,7 +112,7 @@ Each phase ends with a demo you can run, not a report. Don't start phase N+1 wit
 
 Goal: the robot visibly drives in the viewport, powered by the C++ engine.
 
-- [x] Emscripten SDK in `tools/emsdk` (gitignored); `scripts/build-engine-wasm.sh` compiles `engine/` to a single-file ES module at `apps/studio/public/engine/okrobo_engine.js` (generated, gitignored). API surface: scalar exports in `engine/src/wasm_api.cpp`, contract messages assembled on the TS side
+- [x] Emscripten SDK in `tools/emsdk` (gitignored); `scripts/build-engine-wasm.sh` compiles `engine/` to a single-file ES module at `apps/studio/src/generated/okrobo_engine.js` (generated, gitignored; it lived under `public/` until the Phase 6 dev-server fix). API surface: scalar exports in `engine/src/wasm_api.cpp`, contract messages assembled on the TS side
 - [x] Parity gate: `engine/tests/parity/parity.mjs` runs the shared scenario through `okrobo/_sim.py` (via `okrobo.dump_trace`) and the WASM engine; 1730 states match at 8.9e-16 max diff (tolerance 1e-9)
 - [x] Three.js viewport (`src/Viewport3D.tsx`): floor, grid, walls, cylinder robot with heading nose, orbit camera
 - [x] Run bar live: Run cruises forward and auto-stops at 0.2 m from the wall, Stop halts, Reset restores. Fixed 10 ms timestep via `src/lib/fixedStep.ts` (vitest-covered)
@@ -200,13 +201,24 @@ Tests: 31 pack tests (manifest/index validation incl. path-escape rejection, URD
 
 Not done here: pack signing (the manifest carries a content digest, not a publisher signature) — it needs a key-distribution decision for schools, so it is deliberately deferred rather than half-built.
 
-### Phase 7: Hardware
+### Phase 7: Hardware ✅
 
-- [ ] Pack signing: publisher keys and signature verification on install (deferred from Phase 6; needs a key-distribution decision for schools)
+- [x] Transport decided by evidence, not preference: **the Python sidecar, not Web Serial**. The desktop app renders in WebKitGTK, which has no Web Serial API, so building on it would work in a Chrome dev tab and be missing from the actual product ([docs/decisions/serial-transport.md](docs/decisions/serial-transport.md))
+- [x] `contracts/robot-serial/v0`: a compact ASCII line protocol a microcontroller can parse without an allocator, carrying exactly the fields of robot-api v0 state, with a 1-second no-command watchdog so an unplugged cable cannot leave a robot driving
+- [x] Firmware (`firmware/okrobo_car/`): `protocol.hpp` holds all parsing and formatting and is **gate-tested on this machine** (7 ctest cases: malformed input, overlong lines, fixed-point formatting without printf), so the code that ships to the board is tested without a board. `okrobo_car.ino` is only pins, motors, sensor, odometry
+- [x] `okrobo/serial_link.py` presents a physical robot behind the *simulated World's* interface, so `okrobo.Robot` drives real hardware with no change to student code. Tested end to end against a fake board on a pty (12 cases: identity handshake, boot noise, drive/state round trip, close-stops-wheels)
+- [x] Cross-language parity gate: every command the Python side emits is fed through the **firmware's real parser** and must be understood, mirroring the simulator's parity pattern
+- [x] Sidecar routes robot calls to hardware when connected, with `list_ports` / `connect_hardware` / `disconnect_hardware`. A test proves a student program drives the board **and the simulator is never asked**
+- [x] Studio sidebar has a Hardware section: port list, connect, disconnect, identity in the status bar
+- [x] Pack signing (carried from Phase 6): Ed25519 over `id|version|sha256|size_bytes`, signed by `scripts/sign-pack.mjs` (Node's native Ed25519, no dependency) and verified in Rust with ed25519-dalek. A mismatched signature is refused outright; unsigned or unknown-publisher packs install only after an explicit confirmation naming the pack, because refusing outright pushes teachers to disable checks entirely ([docs/decisions/pack-signing.md](docs/decisions/pack-signing.md))
 
-- [ ] Serial transport (decide webview vs sidecar, see open decisions)
-- [ ] ESP32/Arduino firmware speaking contract robot-api over serial
-- [ ] The same Blockly/Python program that drove the sim drives the physical robot
+**Bug found and fixed while wiring the gates:** `-DCMAKE_BUILD_TYPE=Release` defines `NDEBUG`, which compiles `assert()` away — so every C++ suite had been passing **vacuously** in `scripts/test-all.sh` since Phase 0. Test targets now compile with `-UNDEBUG`; verified by planting a wrong assertion and watching the Release run fail.
+
+Also fixed before shipping: the first draft of `sign-pack.mjs` derived the key id from the last 32 bytes of the PKCS8 DER, which for a private key is the **private seed** — it would have published the secret. Key ids now always go through `createPublicKey`, and a gate check asserts the private key text never contains the published id.
+
+**Acceptance:** the full hardware path runs locally with no board attached — a real sidecar, a fake ESP32 on a pty speaking the real protocol, and unmodified student Python driving it. Signing verified across languages: a signature made by the Node signer verifies in Rust (fixture test), and both a swapped archive digest and a version downgrade break it.
+
+Not done: flashing firmware from inside the studio (arduino-cli integration) and testing against a physical board, which needs hardware on the desk.
 
 ### Phase 8: ROS 2 and AI packs
 
@@ -245,4 +257,4 @@ node scripts/build-pack-index.mjs     # archives + index.json in dist/packs
 node scripts/school-server.mjs        # serve them to the LAN (File → Asset Store…)
 ```
 
-Then open Phase 7, take the first unchecked box, build it with its test, check it off here, commit.
+Then open Phase 8, take the first unchecked box, build it with its test, check it off here, commit.
