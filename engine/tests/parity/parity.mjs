@@ -29,15 +29,34 @@ const scenario = JSON.parse(readFileSync(scenarioPath, "utf8"));
 const createEngineModule = (await import(enginePath)).default;
 const engine = await createEngineModule();
 
-const w = engine._world_create(
-  world.arena_width,
-  world.arena_height,
-  world.robot_radius,
-  world.wheel_base,
-  world.start.x,
-  world.start.y,
-  world.start.theta,
-);
+/** Build a world in the engine exactly as the world file describes it. */
+function createWorld(startX, startY, startTheta) {
+  const handle = engine._world_create(
+    world.arena_width,
+    world.arena_height,
+    world.robot_radius,
+    world.wheel_base,
+    startX,
+    startY,
+    startTheta,
+  );
+  for (const obstacle of world.obstacles ?? []) {
+    const [r, g, b] = obstacle.color ?? [200, 60, 60];
+    engine._world_add_obstacle(
+      handle,
+      obstacle.x,
+      obstacle.y,
+      obstacle.width ?? 0.2,
+      obstacle.height ?? 0.2,
+      r,
+      g,
+      b,
+    );
+  }
+  return handle;
+}
+
+const w = createWorld(world.start.x, world.start.y, world.start.theta);
 
 const wasmState = () => ({
   tick: engine._world_tick(w),
@@ -165,4 +184,60 @@ for (let i = 0; i < armReference.length; i++) {
 
 console.log(
   `parity: arm ${armStates.length} states match the reference (max diff ${armMaxDiff.toExponential(2)}, tol ${TOLERANCE})`,
+);
+
+// ---- camera (contract v2): frames must match byte for byte ----
+
+const CAMERA_WIDTH = 64;
+const CAMERA_HEIGHT = 48;
+
+const cameraReference = execFileSync(
+  "python3",
+  [
+    "-m",
+    "okrobo.dump_camera",
+    "--world",
+    worldPath,
+    "--width",
+    String(CAMERA_WIDTH),
+    "--height",
+    String(CAMERA_HEIGHT),
+  ],
+  { cwd: join(ROOT, "runtime", "python"), encoding: "utf8" },
+)
+  .trim()
+  .split("\n");
+
+let cameraFrames = 0;
+for (const line of cameraReference) {
+  const [x, y, theta, expectedHex] = line.split(" ");
+  const camWorld = createWorld(Number(x), Number(y), Number(theta));
+  const written = engine._world_render_camera(camWorld, CAMERA_WIDTH, CAMERA_HEIGHT);
+  if (written !== CAMERA_WIDTH * CAMERA_HEIGHT * 3) {
+    console.error(`camera parity: engine wrote ${written} bytes`);
+    process.exit(1);
+  }
+  const address = engine._world_camera_buffer();
+  const actual = Buffer.from(engine.HEAPU8.buffer, address, written).toString("hex");
+  engine._world_destroy(camWorld);
+
+  if (actual !== expectedHex) {
+    // Report the first differing pixel rather than dumping the whole frame.
+    let index = 0;
+    while (index < actual.length && actual[index] === expectedHex[index]) index++;
+    const pixel = Math.floor(index / 6);
+    console.error(
+      `camera parity: frame at pose (${x}, ${y}, ${theta}) differs at pixel ${pixel} ` +
+        `(row ${Math.floor(pixel / CAMERA_WIDTH)}, column ${pixel % CAMERA_WIDTH})`,
+    );
+    console.error(`  ref:  ${expectedHex.slice(index - 6, index + 12)}`);
+    console.error(`  wasm: ${actual.slice(index - 6, index + 12)}`);
+    process.exit(1);
+  }
+  cameraFrames++;
+}
+
+console.log(
+  `parity: camera ${cameraFrames} frames match the reference byte for byte ` +
+    `(${CAMERA_WIDTH}x${CAMERA_HEIGHT})`,
 );

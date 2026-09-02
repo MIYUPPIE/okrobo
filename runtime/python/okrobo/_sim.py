@@ -25,16 +25,46 @@ class Pose:
 
 
 @dataclass
+class Obstacle:
+    """A coloured box the robot can see. Colour is what makes vision lessons
+    possible: the camera renders it and student code looks for it."""
+
+    x: float = 0.0
+    y: float = 0.0
+    width: float = 0.2
+    height: float = 0.2
+    color: tuple = (200, 60, 60)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Obstacle":
+        color = data.get("color", [200, 60, 60])
+        return cls(
+            x=float(data["x"]),
+            y=float(data["y"]),
+            width=float(data.get("width", 0.2)),
+            height=float(data.get("height", 0.2)),
+            color=(int(color[0]), int(color[1]), int(color[2])),
+        )
+
+
+@dataclass
+class RayHit:
+    distance: float
+    color: tuple
+
+
+@dataclass
 class WorldConfig:
     arena_width: float = 2.0
     arena_height: float = 2.0
     robot_radius: float = 0.1
     wheel_base: float = 0.12
     start: Pose = field(default_factory=lambda: Pose(1.0, 1.0, 0.0))
+    obstacles: list = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict) -> "WorldConfig":
-        """Build from a contracts/world/v0 document (extra keys ignored)."""
+        """Build from a contracts/world document (extra keys ignored)."""
         start = data["start"]
         return cls(
             arena_width=float(data["arena_width"]),
@@ -42,6 +72,7 @@ class WorldConfig:
             robot_radius=float(data["robot_radius"]),
             wheel_base=float(data["wheel_base"]),
             start=Pose(float(start["x"]), float(start["y"]), float(start["theta"])),
+            obstacles=[Obstacle.from_dict(o) for o in data.get("obstacles", [])],
         )
 
 
@@ -122,7 +153,11 @@ class World:
         return self.ray(0.0)
 
     def ray(self, offset: float) -> float:
-        """Distance from the robot's front edge to the wall along heading+offset."""
+        """Distance from the robot's front edge to the nearest wall or obstacle."""
+        return self.ray_hit(offset).distance
+
+    def ray_hit(self, offset: float) -> RayHit:
+        """Distance and colour along heading+offset. Mirrors engine ray_hit."""
         dx = math.cos(self._pose.theta + offset)
         dy = math.sin(self._pose.theta + offset)
         t = math.inf
@@ -134,7 +169,30 @@ class World:
             t = min(t, (self.config.arena_height - self._pose.y) / dy)
         if dy < -_OMEGA_EPSILON:
             t = min(t, -self._pose.y / dy)
-        return max(0.0, t - self.config.robot_radius)
+
+        color = (90, 90, 90)  # walls are grey
+        for box in self.config.obstacles:
+            near, far, miss = 0.0, t, False
+            for origin, direction, lo, hi in (
+                (self._pose.x, dx, box.x - box.width / 2, box.x + box.width / 2),
+                (self._pose.y, dy, box.y - box.height / 2, box.y + box.height / 2),
+            ):
+                if abs(direction) < _OMEGA_EPSILON:
+                    if origin < lo or origin > hi:
+                        miss = True
+                    continue
+                t1, t2 = (lo - origin) / direction, (hi - origin) / direction
+                if t1 > t2:
+                    t1, t2 = t2, t1
+                near, far = max(near, t1), min(far, t2)
+                if near > far:
+                    miss = True
+                    break
+            if not miss and near < t:
+                t = near
+                color = box.color
+
+        return RayHit(distance=max(0.0, t - self.config.robot_radius), color=color)
 
     def state(self) -> State:
         return State(

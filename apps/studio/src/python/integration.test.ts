@@ -109,7 +109,7 @@ describe("python sidecar end to end (real sidecar, real engine)", () => {
 
     expect(capture.done.exitCode).toBe(0);
     const stdout = capture.output.join("");
-    expect(stdout).toContain("distance: 0.65");
+    expect(stdout).toContain("distance: 0.25");
     expect(stdout).toContain("pose: 1.25 1.25 90");
     expect(engine.state().pose.x).toBeCloseTo(1.25, 9);
     expect(engine.state().pose.y).toBeCloseTo(1.25, 9);
@@ -147,6 +147,45 @@ describe("python sidecar end to end (real sidecar, real engine)", () => {
     expect(stdout).toContain("tip: 0.0 0.0 0.62");
     expect(stdout).toContain("angles: [90, 90, 0, 0]");
     expect(arm.state().tip.z).toBeCloseTo(0.62, 6);
+
+    bridge.dispose();
+    arm.destroy();
+    engine.destroy();
+  }, 30000);
+
+  it("a student vision program sees the arena through the sidecar (v2 camera)", async () => {
+    const { engine, arm, runner } = await makeRunner();
+    const capture = makeCapture();
+    const bridge = new PythonBridge(url, runner.api, capture.events);
+    bridge.connect();
+    await waitFor(() => capture.connected.value);
+
+    bridge.run(
+      [
+        "from okrobo import Robot",
+        "from okrobo.vision import find_color",
+        "robot = Robot()",
+        "frame = robot.camera()",
+        "print('frame:', frame.width, frame.height, len(frame.pixels))",
+        "target = find_color(frame, 'red')",
+        "print('bearing:', round(target.bearing, 1) if target else 'none')",
+        "robot.forward(0.2)",
+        "print('distance:', round(robot.distance(), 2))",
+      ].join("\n"),
+    );
+    await waitFor(
+      () => capture.done.value,
+      () => runner.tick(100),
+    );
+
+    const stdout = capture.output.join("");
+    expect(capture.done.exitCode, stdout).toBe(0);
+    // The frame crossed the boundary intact: 64x48 RGB.
+    expect(stdout).toContain("frame: 64 48 9216");
+    // The red box is dead ahead, so the bearing is near zero...
+    expect(stdout).toMatch(/bearing: -?0\.\d/);
+    // ...and driving 0.2 m of the 0.5 m gap leaves 0.3 m.
+    expect(stdout).toContain("distance: 0.3");
 
     bridge.dispose();
     arm.destroy();

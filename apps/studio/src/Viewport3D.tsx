@@ -115,6 +115,22 @@ export function Viewport3D({
         scene.add(wall);
       }
 
+      // Coloured boxes: what the camera sees and vision lessons look for.
+      for (const obstacle of world.obstacles) {
+        const box = new THREE.Mesh(
+          new THREE.BoxGeometry(obstacle.width, 0.2, obstacle.height),
+          new THREE.MeshStandardMaterial({
+            color: new THREE.Color(
+              obstacle.color[0] / 255,
+              obstacle.color[1] / 255,
+              obstacle.color[2] / 255,
+            ),
+          }),
+        );
+        box.position.set(obstacle.x, 0.1, -obstacle.y);
+        scene.add(box);
+      }
+
       carGroup = new THREE.Group();
       const body = new THREE.Mesh(
         new THREE.CylinderGeometry(radius, radius, 0.06, 32),

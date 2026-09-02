@@ -24,7 +24,8 @@ describe("executeRemoteRequest (real WASM engine)", () => {
 
   it("returns sensor readings and position", async () => {
     const { engine, runner } = await makeRunner();
-    await expect(executeRemoteRequest(runner.api, "distance", {})).resolves.toBeCloseTo(0.9, 9);
+    // The red box in the shipped arena sits 0.5 m ahead.
+    await expect(executeRemoteRequest(runner.api, "distance", {})).resolves.toBeCloseTo(0.5, 9);
     await expect(executeRemoteRequest(runner.api, "position", {})).resolves.toEqual([1.0, 1.0]);
     engine.destroy();
   });
@@ -68,7 +69,7 @@ describe("executeRemoteRequest (real WASM engine)", () => {
       fov_degrees: 180,
     })) as number[];
     expect(fan).toHaveLength(3);
-    expect(fan[1]).toBeCloseTo(0.9, 9);
+    expect(fan[1]).toBeCloseTo(0.5, 9);
     arm.destroy();
     engine.destroy();
   });

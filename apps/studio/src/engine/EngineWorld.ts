@@ -18,6 +18,18 @@ export class EngineWorld {
       world.start.y,
       world.start.theta,
     );
+    for (const obstacle of world.obstacles) {
+      module._world_add_obstacle(
+        this.handle,
+        obstacle.x,
+        obstacle.y,
+        obstacle.width,
+        obstacle.height,
+        obstacle.color[0],
+        obstacle.color[1],
+        obstacle.color[2],
+      );
+    }
   }
 
   apply(command: Command): void {
@@ -41,6 +53,22 @@ export class EngineWorld {
   /** Distance to the wall along heading+offset radians (v1 lidar primitive). */
   ray(offset: number): number {
     return this.module._world_ray(this.handle, offset);
+  }
+
+  /**
+   * Render a camera frame (contract v2). Returns RGB bytes, row-major from the
+   * top. The buffer is copied out of the WASM heap because the engine reuses
+   * it for the next frame.
+   */
+  camera(width = 64, height = 48): { width: number; height: number; pixels: Uint8Array } | null {
+    const written = this.module._world_render_camera(this.handle, width, height);
+    if (written === 0) return null;
+    const address = this.module._world_camera_buffer();
+    return {
+      width,
+      height,
+      pixels: this.module.HEAPU8.slice(address, address + written),
+    };
   }
 
   state(): State {

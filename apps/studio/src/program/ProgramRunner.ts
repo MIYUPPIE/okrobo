@@ -34,6 +34,8 @@ export interface RobotApi {
   wait(seconds: number): Promise<void>;
   distance(): number;
   lidar(rays?: number, fovDegrees?: number): number[];
+  /** RGB frame from the robot's camera (contract v2). */
+  camera(width?: number, height?: number): { width: number; height: number; pixels: number[] };
   heading(): number;
   position(): [number, number];
   stop(): void;
@@ -84,6 +86,12 @@ export class ProgramRunner {
         const half = (fovDegrees * Math.PI) / 360;
         const step = (fovDegrees * Math.PI) / 180 / (rays - 1);
         return Array.from({ length: rays }, (_, i) => this.engine.ray(half - i * step));
+      },
+      camera: (width = 64, height = 48) => {
+        const frame = this.engine.camera(width, height);
+        if (!frame) throw new Error(`camera size ${width}x${height} is out of range`);
+        // Plain numbers so the frame survives JSON on the way to Python.
+        return { width: frame.width, height: frame.height, pixels: Array.from(frame.pixels) };
       },
       heading: () => (this.engine.state().pose.theta * 180) / Math.PI,
       position: () => {

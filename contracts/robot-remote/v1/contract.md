@@ -26,6 +26,7 @@ message shape is unchanged, so a v0 student program runs untouched.
 | method | args | result |
 |---|---|---|
 | `lidar` | `rays` (int), `fov_degrees` (number) | `number[]`, left to right |
+| `camera` | `width` (int), `height` (int) | `{width, height, pixels}`, RGB bytes as numbers, row-major from the top |
 | `arm_move` | `joint` (name or index), `degrees` | `null` (blocks until arrival) |
 | `arm_move_all` | `angles` (4 numbers, degrees) | `null` (blocks until arrival) |
 | `arm_angles` | — | `number[4]` degrees |

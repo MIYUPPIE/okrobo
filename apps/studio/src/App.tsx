@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import arenaJson from "@packs/core/worlds/arena.json";
 import { AssetStore } from "./AssetStore";
+import { CameraView } from "./CameraView";
 import type { RobotKind } from "./blocks/okroboBlocks";
 import { BlocksPanel, type BlocksPanelHandle } from "./BlocksPanel";
 import { EngineArm } from "./engine/EngineArm";
@@ -571,6 +572,8 @@ export default function App() {
               : "Run executes your blocks; the arm moves joint by joint."}
           </p>
         </div>
+
+        {robot === "car" && engine && <CameraView engine={engine} />}
 
         <div className="hardware-panel">
           <h2>Hardware</h2>

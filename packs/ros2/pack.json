@@ -1,0 +1,12 @@
+{
+  "id": "ros2",
+  "name": "ROS 2 Pack",
+  "description": "Put the robot on the ROS 2 graph: odometry and laser scans out, cmd_vel in.",
+  "version": "1.0.0",
+  "requires": { "studio": "0.1.0", "packs": ["core"] },
+  "contents": {
+    "worlds": [],
+    "robots": [],
+    "lessons": ["lessons/01-drive-from-ros.md"]
+  }
+}

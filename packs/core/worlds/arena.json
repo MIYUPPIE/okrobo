@@ -1,9 +1,27 @@
 {
   "name": "Arena",
-  "description": "Default 2x2 m walled arena with the Car robot at the center.",
+  "description": "Default 2x2 m walled arena with the Car robot at the centre and two coloured boxes to find with the camera.",
   "arena_width": 2.0,
   "arena_height": 2.0,
   "robot_radius": 0.1,
   "wheel_base": 0.12,
-  "start": { "x": 1.0, "y": 1.0, "theta": 0.0 }
+  "start": { "x": 1.0, "y": 1.0, "theta": 0.0 },
+  "obstacles": [
+    {
+      "x": 1.7,
+      "y": 1.0,
+      "width": 0.2,
+      "height": 0.2,
+      "color": [220, 40, 40],
+      "label": "red box"
+    },
+    {
+      "x": 0.6,
+      "y": 1.6,
+      "width": 0.2,
+      "height": 0.2,
+      "color": [60, 110, 230],
+      "label": "blue box"
+    }
+  ]
 }

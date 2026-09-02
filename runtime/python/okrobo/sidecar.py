@@ -131,6 +131,10 @@ class Session:
         if method == "stop":
             await asyncio.to_thread(self.hardware.stop)
             return None
+        if method == "camera":
+            # A physical robot has no camera in v0 of the serial contract;
+            # say so plainly rather than returning a misleading blank frame.
+            raise ValueError("this robot has no camera (serial contract v0)")
         raise ValueError(f"{method} is not available on hardware")
 
     async def start_program(self, code: str) -> None:

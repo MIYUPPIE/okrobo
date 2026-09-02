@@ -30,6 +30,20 @@ export interface EngineModule {
   _world_distance(world: number): number;
   _world_collided(world: number): number;
   _world_ray(world: number, offset: number): number;
+  _world_add_obstacle(
+    world: number,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    r: number,
+    g: number,
+    b: number,
+  ): void;
+  _world_obstacle_count(world: number): number;
+  _world_render_camera(world: number, width: number, height: number): number;
+  _world_camera_buffer(): number;
+  HEAPU8: Uint8Array;
   _arm_create(): number;
   _arm_destroy(arm: number): void;
   _arm_set_target(arm: number, joint: number, angle: number): void;

@@ -118,6 +118,44 @@ def test_lidar_returns_floats():
     assert "2.0" in stdout
 
 
+def test_student_code_can_import_okrobo_submodules():
+    """The injected okrobo must be a real package.
+
+    Without __path__ the stand-in is a plain module and every
+    `from okrobo.vision import ...` in a lesson fails at import time.
+    """
+    code = (
+        "from okrobo import Robot\n"
+        "from okrobo.vision import find_color, COLORS\n"
+        "from okrobo.camera import Frame\n"
+        "print('colors:', len(COLORS))\n"
+        "frame = Frame(width=1, height=1, pixels=bytes([220, 40, 40]))\n"
+        "print('found:', find_color(frame, 'red') is not None)\n"
+    )
+    _, stdout, stderr, exit_code = run_worker(code, lambda r: {"ok": True, "result": None})
+    assert exit_code == 0, stderr
+    assert "colors: 4" in stdout
+    assert "found: True" in stdout
+
+
+def test_camera_frames_cross_the_rpc_boundary():
+    code = (
+        "from okrobo import Robot\n"
+        "frame = Robot().camera(2, 2)\n"
+        "print('size:', frame.width, frame.height, len(frame.pixels))\n"
+        "print('pixel:', frame.pixel(0, 0))\n"
+    )
+    pixels = [10, 20, 30] * 4
+    requests, stdout, stderr, exit_code = run_worker(
+        code, lambda r: {"ok": True, "result": {"width": 2, "height": 2, "pixels": pixels}}
+    )
+    assert exit_code == 0, stderr
+    assert requests[0]["method"] == "camera"
+    assert requests[0]["args"] == {"width": 2, "height": 2}
+    assert "size: 2 2 12" in stdout
+    assert "pixel: (10, 20, 30)" in stdout
+
+
 def test_position_tuple():
     code = "from okrobo import Robot\nx, y = Robot().position()\nprint(x + y)\n"
     _, stdout, stderr, exit_code = run_worker(code, lambda r: {"ok": True, "result": [1.0, 0.5]})

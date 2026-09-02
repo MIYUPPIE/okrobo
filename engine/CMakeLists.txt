@@ -27,3 +27,6 @@ add_test(NAME arm COMMAND test_arm)
 
 # Phase 1 adds an Emscripten target here exporting the contract v0 surface
 # (create_world / send_command / step / get_state) to apps/studio.
+
+okrobo_add_test(test_camera tests/test_camera.cpp)
+add_test(NAME camera COMMAND test_camera)

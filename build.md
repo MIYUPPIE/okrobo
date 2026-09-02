@@ -47,8 +47,8 @@ These are settled. Do not re-litigate them in future sessions unless something b
 │ Tauri                                        │
 ├──────────────────────────────────────────────┤
 │ ENGINE  engine/                              │
-│ C++ core: kinematics, world, sensors         │
-│ Targets: WASM (in webview) + native sidecar  │
+│ C++ core: kinematics, arm, sensors, camera   │
+│ Targets: WASM (in webview) + host build      │
 ├──────────────────────────────────────────────┤
 │ PYTHON  runtime/python                       │
 │ okrobo package: student Robot API            │
@@ -75,16 +75,16 @@ okrobo/
 │   └── robot-api/v0/     # schema.json, examples/, contract doc
 ├── apps/
 │   └── studio/           # React + TS + Vite UI shell
-├── engine/               # C++ core, CMake, ctest
+├── engine/               # C++ core (kinematics, arm, camera), CMake, ctest
 │   ├── src/
-│   └── tests/
+│   └── tests/            # incl. parity/: locks WASM to the Python reference
 ├── firmware/             # ESP32/Arduino robot, protocol gate-tested on host
 ├── runtime/
-│   └── python/           # okrobo package + tests
-├── packs/
-│   └── core/             # basic robot + world definitions (grows in Phase 1)
+│   └── python/           # okrobo package (Robot, Arm, vision, ros_bridge) + tests
+├── packs/                # core, robotics, ai, ros2: worlds, robots, lessons
 ├── docs/
-│   └── vision.md         # original vision notes, kept verbatim
+│   ├── vision.md         # original vision notes, kept verbatim
+│   └── decisions/        # why physics/serial/signing went the way they did
 └── scripts/
     └── test-all.sh       # runs every gate suite
 ```
@@ -220,11 +220,23 @@ Also fixed before shipping: the first draft of `sign-pack.mjs` derived the key i
 
 Not done: flashing firmware from inside the studio (arduino-cli integration) and testing against a physical board, which needs hardware on the desk.
 
-### Phase 8: ROS 2 and AI packs
+### Phase 8: ROS 2 and AI packs ✅
 
-- [ ] ROS 2 pack: optional local install, topic bridge from the engine
-- [ ] AI pack: local OpenCV/YOLO models callable from student Python
-- [ ] Camera sensor in sim feeds student CV code
+- [x] **Coloured obstacles** (`contracts/world/v1`): vision needs something to look at, so the world gained axis-aligned coloured boxes that the distance sensor, lidar and camera all see. The shipped arena has a red and a blue box. A v0 world is a valid v1 world with no obstacles
+- [x] **Camera in the engine**, not the viewport (`engine/src/camera.hpp`): a raycast renderer, so a camera frame exists everywhere the simulator does — headless in the sidecar, in the browser, and in the parity gate — and is deterministic, which a GPU render is not. That determinism is what lets a vision lesson have a reliable answer. **Third parity gate: 8 frames match the Python reference byte for byte**
+- [x] **Vision** (`okrobo/vision.py`): `find_color` returns bearing, coverage and area, and works with **no dependencies installed**, so a school with no internet still gets working vision lessons. OpenCV accelerates the same operation when the AI pack is present, and a parity test asserts both give identical answers — a lesson's expected result never depends on which packs a machine has
+- [x] **ROS 2 bridge** (`okrobo/ros_bridge.py`): publishes `/okrobo/odom` and `/okrobo/scan`, subscribes to `/okrobo/cmd_vel`, driving the simulator or a serial robot. rclpy is imported lazily and nothing else depends on it, so machines without ROS are unaffected. Tested against the real rclpy on this machine
+- [x] Camera preview in the studio sidebar showing exactly the frame `robot.camera()` returns, so what a student debugs by eye is what their program gets
+- [x] `ai` and `ros2` packs with lessons; the pack gate now checks **every** pack's lessons only call APIs the runtime actually exposes
+
+**Three bugs found by the new tests, all real:**
+1. Student code could not `from okrobo.vision import ...` through the sidecar at all: the worker's injected `okrobo` stand-in was a plain module, not a package. It now carries `__path__` pointing at the real package, so genuine submodules load while `Robot` stays the remote proxy.
+2. `robot.camera()` had no route over the remote contract, so the AI lesson would have failed in the studio. Added to the worker proxy, the bridge dispatch and `contracts/robot-remote/v1`.
+3. The taller sidebar stretched the CSS grid row instead of scrolling, pushing the 3D viewport off-screen on short displays — exactly the hardware schools have. Caught by measuring the layout in a 437 px window, fixed with `min-height: 0` plus internal scrolling.
+
+**Acceptance: verified in headless Chrome** — the status bar reads 0.50 m (the red box, not the 0.9 m wall), the camera preview draws live engine frames with 940 red pixels and a red centre pixel, and the arena renders both boxes. A student vision program (`find_color` → bearing → drive) runs end to end through the real sidecar in the automated gate.
+
+Not done: YOLO/torch models. They are a large download that cannot ship offline; the pack format and vision API are ready for them, and colour detection covers the teaching goal without a 500 MB dependency.
 
 ---
 
@@ -257,4 +269,4 @@ node scripts/build-pack-index.mjs     # archives + index.json in dist/packs
 node scripts/school-server.mjs        # serve them to the LAN (File → Asset Store…)
 ```
 
-Then open Phase 8, take the first unchecked box, build it with its test, check it off here, commit.
+All eight phases are done. Next work comes from the "Not done" notes in each phase (physics integration, firmware flashing from the studio, YOLO models) or from what students and teachers ask for once it is in their hands.

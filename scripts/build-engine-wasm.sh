@@ -37,6 +37,7 @@ em++ -O2 -std=c++17 --no-entry \
   -sSINGLE_FILE=1 \
   -sENVIRONMENT=web,node \
   -sFILESYSTEM=0 \
-  -sALLOW_MEMORY_GROWTH=0
+  -sALLOW_MEMORY_GROWTH=0 \
+  -sEXPORTED_RUNTIME_METHODS=HEAPU8
 
 echo "built $(du -h "$OUT_DIR/okrobo_engine.js" | cut -f1) -> apps/studio/src/generated/okrobo_engine.js"

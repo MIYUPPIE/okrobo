@@ -76,8 +76,21 @@ def test_world_config_from_dict():
     assert config.arena_width == 2.0
     assert config.wheel_base == 0.12
     assert config.start.x == 1.0
+
+    # The shipped arena carries coloured boxes for the camera lessons.
+    assert len(config.obstacles) == 2
+    red = config.obstacles[0]
+    assert red.color == (220, 40, 40)
+
+    # The red box sits at x = 1.7, so its near face is 0.6 m from the robot
+    # centre and 0.5 m from its front edge — nearer than the 0.9 m wall.
     state = World(config).state()
-    assert math.isclose(state.distance, 0.9, abs_tol=TOL)
+    assert math.isclose(state.distance, 0.5, abs_tol=1e-9)
+
+
+def test_empty_world_still_sees_the_wall():
+    # Without obstacles the sensor reaches the arena wall, as in v0.
+    assert math.isclose(World().state().distance, 0.9, abs_tol=TOL)
 
 
 def test_arc_returns_to_start():

@@ -103,20 +103,35 @@ describe("core pack", () => {
     }
   });
 
-  it("uses only APIs the runtime actually exposes in lesson code", () => {
+  it("every pack's lessons use only APIs the runtime exposes", () => {
+    // A lesson that calls a method the runtime does not have is a broken
+    // lesson for a student, and nothing else would catch it.
     const known = [
-      /robot\.(forward|backward|turn_left|turn_right|wait|distance|lidar|heading|position|stop)\(/,
+      /robot\.(forward|backward|turn_left|turn_right|wait|distance|lidar|camera|heading|position|stop)\(/,
       /arm\.(move|move_all|angles|tip|wait|stop)\(/,
-      /^(from okrobo import|robot = Robot\(\)|arm = Arm\(\)|print\(|while |if |for |x, y, z =|$)/,
+      /(find_color|find_color_opencv)\(/,
+      /(frame|picture)\.(pixel|width|height|pixels)/,
+      /target\.(bearing|coverage|area|color|x|y)/,
+      /^(from okrobo|import |robot = Robot\(\)|arm = Arm\(\)|frame = |target = |print\(|while |if |elif |else:|for |x, y, z =|x, y =|$)/,
     ];
-    for (const file of manifest.contents.lessons) {
-      for (const step of parseLesson(read(file)).steps) {
-        if (!step.code) continue;
-        for (const line of step.code.split("\n")) {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith("#")) continue;
-          const recognised = known.some((pattern) => pattern.test(trimmed));
-          expect(recognised, `unknown API in ${file}: ${trimmed}`).toBe(true);
+
+    const packsDir = join(process.cwd(), "..", "..", "packs");
+    for (const packId of readdirSync(packsDir).filter((e) =>
+      statSync(join(packsDir, e)).isDirectory(),
+    )) {
+      const packDir = join(packsDir, packId);
+      const packManifest = validateManifest(
+        JSON.parse(readFileSync(join(packDir, "pack.json"), "utf8")),
+      );
+      for (const file of packManifest.contents.lessons) {
+        for (const step of parseLesson(readFileSync(join(packDir, file), "utf8")).steps) {
+          if (!step.code) continue;
+          for (const line of step.code.split("\n")) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith("#")) continue;
+            const recognised = known.some((pattern) => pattern.test(trimmed));
+            expect(recognised, `unknown API in ${packId}/${file}: ${trimmed}`).toBe(true);
+          }
         }
       }
     }

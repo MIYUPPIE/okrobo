@@ -3,9 +3,14 @@
 // needed. The TS side (apps/studio/src/engine/) assembles contract v0 messages.
 
 #include "arm.hpp"
+#include "camera.hpp"
 #include "world.hpp"
 
 #include <emscripten/emscripten.h>
+
+// Scratch buffer for camera frames: the JS side reads it straight out of the
+// heap, so no allocation crosses the boundary per frame.
+static unsigned char g_camera_frame[okrobo::kCameraMaxWidth * okrobo::kCameraMaxHeight * 3];
 
 extern "C" {
 
@@ -65,6 +70,33 @@ EMSCRIPTEN_KEEPALIVE
 double world_ray(const okrobo::World* world, double offset) {
     return world->ray(offset);
 }
+
+EMSCRIPTEN_KEEPALIVE
+void world_add_obstacle(okrobo::World* world, double x, double y, double width, double height,
+                        int r, int g, int b) {
+    okrobo::Obstacle obstacle;
+    obstacle.x = x;
+    obstacle.y = y;
+    obstacle.width = width;
+    obstacle.height = height;
+    obstacle.r = static_cast<unsigned char>(r);
+    obstacle.g = static_cast<unsigned char>(g);
+    obstacle.b = static_cast<unsigned char>(b);
+    world->add_obstacle(obstacle);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int world_obstacle_count(const okrobo::World* world) { return world->obstacle_count(); }
+
+/// Render a camera frame into the shared buffer; returns bytes written.
+EMSCRIPTEN_KEEPALIVE
+int world_render_camera(const okrobo::World* world, int width, int height) {
+    return okrobo::render_camera(*world, width, height, g_camera_frame);
+}
+
+/// Address of the frame buffer, so JS can read it from the heap.
+EMSCRIPTEN_KEEPALIVE
+unsigned char* world_camera_buffer() { return g_camera_frame; }
 
 // ---- arm (contract v1) ----
 

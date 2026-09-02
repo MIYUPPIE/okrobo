@@ -59,6 +59,8 @@ export async function executeRemoteRequest(
         Math.trunc(num(args.rays, 9)),
         num(args.fov_degrees, 180),
       );
+    case "camera":
+      return robot.camera(Math.trunc(num(args.width, 64)), Math.trunc(num(args.height, 48)));
     case "heading":
       return robot.heading();
     case "position":

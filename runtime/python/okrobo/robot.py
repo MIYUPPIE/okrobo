@@ -52,6 +52,12 @@ class Robot:
         """Meters from the robot's front edge to the wall it is facing."""
         return self.world.state().distance
 
+    def camera(self, width: int = 64, height: int = 48):
+        """A picture from the robot's point of view (okrobo.camera.Frame)."""
+        from .camera import render
+
+        return render(self.world, width, height)
+
     def lidar(self, rays: int = 9, fov: float = 180.0) -> list:
         """Distances (m) along `rays` directions spread over `fov` degrees,
         centered on the heading, left to right."""

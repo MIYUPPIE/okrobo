@@ -13,6 +13,7 @@ real okrobo package is never loaded here.
 """
 
 import json
+import os
 import socket
 import sys
 import traceback
@@ -62,6 +63,18 @@ def make_okrobo_module(rpc) -> types.ModuleType:
         def lidar(self, rays: int = 9, fov: float = 180.0) -> list:
             return [float(d) for d in rpc("lidar", rays=rays, fov_degrees=fov)]
 
+        def camera(self, width: int = 64, height: int = 48):
+            """Rebuild a real Frame from the pixels the backend sends, so
+            okrobo.vision works identically here and on the local sim."""
+            from okrobo.camera import Frame
+
+            result = rpc("camera", width=width, height=height)
+            return Frame(
+                width=int(result["width"]),
+                height=int(result["height"]),
+                pixels=bytes(result["pixels"]),
+            )
+
         def heading(self) -> float:
             return float(rpc("heading"))
 
@@ -97,6 +110,11 @@ def make_okrobo_module(rpc) -> types.ModuleType:
     module = types.ModuleType("okrobo")
     module.Robot = Robot
     module.Arm = Arm
+    # Make the stand-in a real package pointing at the installed okrobo
+    # directory, so `from okrobo.vision import find_color` and friends load the
+    # genuine submodules while `okrobo.Robot` stays the remote proxy. Without
+    # __path__ the module is not a package and every submodule import fails.
+    module.__path__ = [os.path.dirname(os.path.abspath(__file__))]
     return module
 
 

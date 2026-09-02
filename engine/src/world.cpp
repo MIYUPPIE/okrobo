@@ -67,23 +67,75 @@ void World::step(double dt) {
     ++tick_;
 }
 
+void World::add_obstacle(const Obstacle& obstacle) {
+    if (config_.obstacle_count >= kMaxObstacles) return;
+    config_.obstacles[config_.obstacle_count++] = obstacle;
+}
+
 double World::sensor_distance() const {
     return ray(0.0);
 }
 
 double World::ray(double offset) const {
-    // Slab method: distance from robot center to the arena wall along the
-    // given direction, minus the robot radius, floored at 0.
+    return ray_hit(offset).distance;
+}
+
+RayHit World::ray_hit(double offset) const {
+    // Slab method against the arena, then against every obstacle box; the
+    // nearest hit wins and carries its colour.
     const double dx = std::cos(pose_.theta + offset);
     const double dy = std::sin(pose_.theta + offset);
-    double t = std::numeric_limits<double>::infinity();
 
+    double t = std::numeric_limits<double>::infinity();
     if (dx > kOmegaEpsilon) t = std::min(t, (config_.arena_width - pose_.x) / dx);
     if (dx < -kOmegaEpsilon) t = std::min(t, -pose_.x / dx);
     if (dy > kOmegaEpsilon) t = std::min(t, (config_.arena_height - pose_.y) / dy);
     if (dy < -kOmegaEpsilon) t = std::min(t, -pose_.y / dy);
 
-    return std::max(0.0, t - config_.robot_radius);
+    RayHit hit;
+    // Walls are grey; obstacles override with their own colour when nearer.
+    hit.r = hit.g = hit.b = 90;
+
+    for (int i = 0; i < config_.obstacle_count; ++i) {
+        const Obstacle& box = config_.obstacles[i];
+        const double min_x = box.x - box.width / 2.0;
+        const double max_x = box.x + box.width / 2.0;
+        const double min_y = box.y - box.height / 2.0;
+        const double max_y = box.y + box.height / 2.0;
+
+        // Ray/AABB slab intersection.
+        double near = 0.0;
+        double far = t;
+        bool miss = false;
+
+        for (int axis = 0; axis < 2 && !miss; ++axis) {
+            const double origin = axis == 0 ? pose_.x : pose_.y;
+            const double direction = axis == 0 ? dx : dy;
+            const double lo = axis == 0 ? min_x : min_y;
+            const double hi = axis == 0 ? max_x : max_y;
+
+            if (std::abs(direction) < kOmegaEpsilon) {
+                if (origin < lo || origin > hi) miss = true;
+                continue;
+            }
+            double t1 = (lo - origin) / direction;
+            double t2 = (hi - origin) / direction;
+            if (t1 > t2) std::swap(t1, t2);
+            near = std::max(near, t1);
+            far = std::min(far, t2);
+            if (near > far) miss = true;
+        }
+
+        if (!miss && near < t) {
+            t = near;
+            hit.r = box.r;
+            hit.g = box.g;
+            hit.b = box.b;
+        }
+    }
+
+    hit.distance = std::max(0.0, t - config_.robot_radius);
+    return hit;
 }
 
 State World::state() const {

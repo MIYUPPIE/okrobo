@@ -58,8 +58,9 @@ describe("ProgramRunner arm methods (real WASM engine)", () => {
     const { engine, arm, runner } = await makeRunner();
     const distances = runner.api.lidar(5, 180);
     expect(distances).toHaveLength(5);
-    expect(distances[2]).toBeCloseTo(0.9, 9); // center ray at arena center
-    expect(distances[0]).toBeCloseTo(0.9, 9); // +90deg
+    // The shipped arena has a red box 0.5 m ahead (contracts/world/v1).
+    expect(distances[2]).toBeCloseTo(0.5, 9); // centre ray hits the box
+    expect(distances[0]).toBeCloseTo(0.9, 9); // +90deg still sees the wall
     expect(distances[1]).toBeGreaterThan(distances[2]); // diagonal is longer
     arm.destroy();
     engine.destroy();

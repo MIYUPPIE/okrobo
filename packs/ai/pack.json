@@ -1,0 +1,12 @@
+{
+  "id": "ai",
+  "name": "AI Pack",
+  "description": "Computer vision lessons for the robot camera. Vision works without this pack; installing it adds OpenCV acceleration and the lessons.",
+  "version": "1.0.0",
+  "requires": { "studio": "0.1.0", "packs": ["core"] },
+  "contents": {
+    "worlds": [],
+    "robots": [],
+    "lessons": ["lessons/01-find-the-red-box.md"]
+  }
+}
