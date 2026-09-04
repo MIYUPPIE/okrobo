@@ -6,6 +6,12 @@ export interface PackContents {
   worlds: string[];
   robots: string[];
   lessons: string[];
+  /** contracts/robot-def/v0 documents (Robot Builder Phase 8) -- distinct
+   * from `robots` (URDF, the older Car/Arm/Drone kinematic import path). */
+  robot_defs: string[];
+  /** contracts/world-def/v0 documents (Robot Builder Phase 8) -- distinct
+   * from `worlds` (contracts/world/v0, the Car/Drone arena). */
+  world_defs: string[];
 }
 
 export interface PackManifest {
@@ -98,6 +104,8 @@ export function validateManifest(data: unknown): PackManifest {
       worlds: stringArray(contents.worlds, "contents.worlds", id),
       robots: stringArray(contents.robots, "contents.robots", id),
       lessons: stringArray(contents.lessons, "contents.lessons", id),
+      robot_defs: stringArray(contents.robot_defs, "contents.robot_defs", id),
+      world_defs: stringArray(contents.world_defs, "contents.world_defs", id),
     },
     url: typeof d.url === "string" ? d.url : undefined,
     signature: d.signature as string | undefined,

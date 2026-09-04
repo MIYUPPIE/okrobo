@@ -6,7 +6,9 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { parseRobotDef } from "../contracts/robotDef";
 import { DEFAULT_ARM } from "../contracts/robotApi";
+import { parseWorldDef } from "../contracts/worldDef";
 import { validateWorld } from "../lib/validateWorld";
 import { parseLesson } from "./lesson";
 import { validateManifest } from "./manifest";
@@ -99,6 +101,17 @@ describe("core pack", () => {
       }
       for (const lesson of packManifest.contents.lessons) {
         expect(parseLesson(readFileSync(join(packDir, lesson), "utf8")).steps.length).toBeGreaterThan(0);
+      }
+      // Robot Builder Phase 8: no pack in this repo ships either yet, but a
+      // future one that does gets the exact same load-bearing check as
+      // every other content type here, not a silent gap.
+      for (const robotDef of packManifest.contents.robot_defs) {
+        const parsed = parseRobotDef(JSON.parse(readFileSync(join(packDir, robotDef), "utf8")));
+        expect(parsed.id.length).toBeGreaterThan(0);
+      }
+      for (const worldDef of packManifest.contents.world_defs) {
+        const parsed = parseWorldDef(JSON.parse(readFileSync(join(packDir, worldDef), "utf8")));
+        expect(parsed.id.length).toBeGreaterThan(0);
       }
     }
   });

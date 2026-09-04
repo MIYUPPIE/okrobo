@@ -153,6 +153,16 @@ impl PackStore {
         self.list().ok()?.into_iter().find(|p| p.id == id)
     }
 
+    /// Reads a single file's raw bytes out of an installed pack, e.g.
+    /// `pack.json` itself or one of the paths its own `contents.robot_defs`
+    /// array names (Robot Builder Phase 8). Reuses `safe_entry_path`'s
+    /// existing traversal guard -- this is the same untrusted-content
+    /// posture as `install`, just for a read instead of an unpack.
+    pub fn read_file(&self, id: &str, rel_path: &str) -> Result<Vec<u8>, String> {
+        let path = safe_entry_path(&self.dir(id), rel_path)?;
+        fs::read(&path).map_err(|e| e.to_string())
+    }
+
     /// Verify a downloaded archive against the manifest before it is unpacked.
     pub fn verify(&self, archive: &[u8], expected_sha256: &str) -> Result<(), String> {
         let actual = sha256_hex(archive);
@@ -436,5 +446,42 @@ mod tests {
             std::cmp::Ordering::Greater
         );
         assert_eq!(compare_versions("1.2.3", "1.2.3"), std::cmp::Ordering::Equal);
+    }
+
+    #[test]
+    fn read_file_returns_real_content_from_an_installed_pack() {
+        let build = tempfile::tempdir().unwrap();
+        let archive = make_archive(build.path(), "robotics", "1.0.0");
+        let digest = sha256_hex(&archive);
+
+        let home = tempfile::tempdir().unwrap();
+        let store = PackStore::new(home.path().to_path_buf()).unwrap();
+        store.install("robotics", "1.0.0", &archive, &digest).unwrap();
+
+        let manifest = store.read_file("robotics", "pack.json").unwrap();
+        assert!(String::from_utf8(manifest).unwrap().contains("\"id\":\"robotics\""));
+        let world = store.read_file("robotics", "worlds/arena.json").unwrap();
+        assert_eq!(world, b"{}");
+    }
+
+    #[test]
+    fn read_file_rejects_a_path_that_escapes_the_pack() {
+        let home = tempfile::tempdir().unwrap();
+        let store = PackStore::new(home.path().to_path_buf()).unwrap();
+        let error = store.read_file("robotics", "../../etc/passwd").unwrap_err();
+        assert!(error.contains("unsafe entry"), "{error}");
+    }
+
+    #[test]
+    fn read_file_reports_a_missing_pack_or_file_as_an_error_not_a_panic() {
+        let home = tempfile::tempdir().unwrap();
+        let store = PackStore::new(home.path().to_path_buf()).unwrap();
+        assert!(store.read_file("no-such-pack", "pack.json").is_err());
+
+        let build = tempfile::tempdir().unwrap();
+        let archive = make_archive(build.path(), "robotics", "1.0.0");
+        let digest = sha256_hex(&archive);
+        store.install("robotics", "1.0.0", &archive, &digest).unwrap();
+        assert!(store.read_file("robotics", "robots/no-such-robot.json").is_err());
     }
 }

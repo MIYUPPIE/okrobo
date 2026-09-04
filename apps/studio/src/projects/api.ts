@@ -108,3 +108,14 @@ export const installPack = (
   });
 
 export const uninstallPack = (id: string) => invoke<void>("uninstall_pack", { id });
+
+/** Reads a single file's raw bytes out of an installed pack by its own
+ * relative path (Robot Builder Phase 8) -- e.g. "pack.json" itself, or one
+ * of the paths its own contents.robot_defs array names. */
+export const readPackFile = (id: string, path: string) => invoke<number[]>("read_pack_file", { id, path });
+
+/** Writes exported text to a path the student picked via a native save
+ * dialog (Robot Builder Phase 8) -- unlike every other command here, this
+ * one writes to an arbitrary path, not an app_data_dir()-managed one. */
+export const exportRobotFile = (path: string, contents: string) =>
+  invoke<void>("export_robot_file", { path, contents });

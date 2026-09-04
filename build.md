@@ -986,3 +986,74 @@ real template data, picking one creates the robot) without re-deriving
 template correctness already proven by the tests above — all passed on the
 first real-browser run, no flakiness. `npm run test` (363 passed across 41
 files), `npm run build`, and the full `test-all.sh` gate suite all green.
+
+## Robot Builder Phase 8: Packs (2026-09-04)
+
+A Build-mode robot can now be exported as a standalone
+`contracts/robot-def/v0` file, and an installed pack's `robot_defs`
+content can now actually be read back and loaded into the New Robot
+picker. Investigating this phase surfaced a bigger, pre-existing gap not
+specific to Robot Builder at all: `install_pack`/`list_packs` already
+worked (`apps/studio/src-tauri/src/packs.rs`), but nothing ever read an
+installed pack's content back out — only the bundled core pack is wired
+in, via Vite's `@packs/*` build-time alias statically importing its JSON
+straight into the bundle. A downloaded, non-core pack sitting in
+`app_data_dir()/packs/<id>/` was completely inert. New `read_file` on
+`PackStore` (wrapped as the `read_pack_file` Tauri command) closes this
+generically — a plain `(pack_id, relative_path) -> bytes` read reusing the
+existing, previously test-only `safe_entry_path` traversal guard — not
+something robot-def-specific, so any future pack content type gets the
+same read-back path for free. Deliberately does not build pack
+authoring/signing/publishing — turning an export into pack content stays
+a manual, teacher-side step through the existing, unchanged
+`scripts/build-pack-index.mjs`/`sign-pack.mjs`, the same way
+`packs/core/robots/arm.urdf` is hand-authored today, not exported by any
+UI. See `docs/decisions/robot-builder-packs.md`.
+
+`contracts/pack/v0` gained `contents.robot_defs`/`contents.world_defs`
+(optional arrays, mirroring `worlds`/`robots`/`lessons`'s shape) extended
+in place rather than forked to a `v1` — a deliberate divergence from
+`robot-api`/`robot-def`/`world-def`'s stricter "frozen once shipped"
+policy, recorded explicitly: pack.json's own hand-rolled validator
+(`apps/studio/src/packs/manifest.ts`) already treated unknown `contents`
+keys leniently before this phase touched it, so an old manifest stays
+valid and a new one degrades gracefully against old app code.
+
+Export has two mechanisms, since this app runs both as a plain web app and
+the Tauri desktop shell, and neither had any existing file-save code
+before this phase (zero `Blob(`/`download=` hits anywhere in
+`apps/studio/src/`; neither `tauri-plugin-dialog` nor `tauri-plugin-fs`
+was a dependency): browser mode uses a `Blob` + synthetic `<a download>`
+click (no new dependency); desktop mode adds `tauri-plugin-dialog`
+(checked crates.io/the official docs first, not guessed) for a native
+save picker, plus one new `export_robot_file` command doing a bare
+`std::fs::write` to the chosen path, mirroring `write_payload`'s existing
+pattern in `projects.rs`. The read-back picker reuses Phase 7's
+`TemplateDialog` rather than a new screen — a second, async-loaded
+section lists robot-def content found in installed packs
+(`apps/studio/src/builder/packRobots.ts`), skipping (and logging, not
+throwing on) any single pack or file that fails to parse so one corrupt
+pack can't blank the whole picker.
+
+A real, stated gap in this phase's own e2e coverage, not papered over:
+`studio-e2e-check.mjs` drives the app as a plain browser tab (the Vite dev
+server, not the Tauri desktop shell), so every Tauri IPC call this feature
+needs is unreachable from that harness — the new e2e checks prove only
+what they honestly can there (the pack picker settles to a clean empty
+state instead of hanging, Export doesn't crash and never mutates the
+document); the real read-back and desktop-save paths are proven instead by
+`packRobots.test.ts`/`exportRobot.test.ts` (mocked IPC) and the new Rust
+`read_file` tests in `packs.rs`.
+
+Tests: 3 new Rust tests in `packs.rs` (real content read from a real
+installed test pack, `../`-escape rejection, missing-pack/file error not a
+panic) — 32 Rust tests total, all green. `apps/studio/src/packs/manifest.test.ts`
+and `corePack.test.ts` extended for the new fields.
+`apps/studio/src/builder/exportRobot.test.ts` (4 cases, both branches),
+`packRobots.test.ts` (5 cases, including the skip-on-corrupt-content
+behavior), `TemplateDialog.test.tsx` (2 new cases), `BuilderPanel.test.tsx`
+(1 new case) — all against real parsing/serialization logic, mocked only
+at the Tauri IPC boundary. 3 new `studio-e2e-check.mjs` checks, all passed
+on the first real-browser run. `cargo test` (32 passed), `npm run test`
+(376 passed across 43 files), `npm run build`, and the full `test-all.sh`
+gate suite all green.

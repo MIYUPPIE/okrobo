@@ -10,8 +10,24 @@ robotics-pack/
 ├── pack.json            manifest (schema.json)
 ├── worlds/*.json        contracts/world/v0
 ├── robots/*.urdf        URDF subset (contracts/urdf below)
-└── lessons/*.md         lesson markdown with runnable steps
+├── lessons/*.md         lesson markdown with runnable steps
+├── robot_defs/*.json    contracts/robot-def/v0 (Robot Builder Phase 8)
+└── world_defs/*.json    contracts/world-def/v0 (Robot Builder Phase 8)
 ```
+
+## robot_defs / world_defs (Robot Builder Phase 8)
+
+Paths to `contracts/robot-def/v0`/`contracts/world-def/v0` documents -- an
+arbitrary, student-buildable robot or static test environment, not the
+fixed Car/Arm/Drone/arena content `robots`/`worlds` already cover. Added
+additively to this same v0 manifest rather than forking a `v1` (unlike
+`robot-api`/`robot-def`/`world-def`, this contract never stated a
+"frozen once shipped" policy, and its own hand-rolled validator already
+treats unknown `contents` keys leniently -- see
+`docs/decisions/robot-builder-packs.md`). Loaded via each document's own
+`parseRobotDef`/`parseWorldDef` (never through the URDF importer), and
+surfaced to a student through Build mode's "New Robot" picker, not a
+generic file browser.
 
 ## Index (asset store / school server)
 

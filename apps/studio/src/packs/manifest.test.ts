@@ -20,7 +20,20 @@ describe("pack manifest validation", () => {
 
   it("defaults missing content lists to empty", () => {
     const manifest = validateManifest({ ...valid(), contents: {} });
-    expect(manifest.contents).toEqual({ worlds: [], robots: [], lessons: [] });
+    expect(manifest.contents).toEqual({ worlds: [], robots: [], lessons: [], robot_defs: [], world_defs: [] });
+  });
+
+  // Robot Builder Phase 8: additive fields on the same v0 manifest (see
+  // docs/decisions/robot-builder-packs.md for why this isn't a v1 fork) --
+  // an old pack.json with neither field (the case above) must keep
+  // validating exactly as it always did.
+  it("parses robot_defs and world_defs when present", () => {
+    const manifest = validateManifest({
+      ...valid(),
+      contents: { ...valid().contents, robot_defs: ["robot_defs/rover.json"], world_defs: ["world_defs/arena.json"] },
+    });
+    expect(manifest.contents.robot_defs).toEqual(["robot_defs/rover.json"]);
+    expect(manifest.contents.world_defs).toEqual(["world_defs/arena.json"]);
   });
 
   it("rejects bad ids and versions", () => {

@@ -124,9 +124,31 @@ fn uninstall_pack(state: tauri::State<PackState>, id: String) -> Result<(), Stri
     state.0.lock().map_err(|e| e.to_string())?.uninstall(&id)
 }
 
+/// Reads a single file out of an installed pack by its own relative path
+/// (e.g. "pack.json", or one of the paths its own contents.robot_defs
+/// array names) -- Robot Builder Phase 8. Generic over content type; the
+/// frontend is what knows to parse the bytes as a robot-def document.
+#[tauri::command]
+fn read_pack_file(state: tauri::State<PackState>, id: String, path: String) -> Result<Vec<u8>, String> {
+    state.0.lock().map_err(|e| e.to_string())?.read_file(&id, &path)
+}
+
+/// Writes an exported robot-def (or, in the future, world-def) document to
+/// a path the student picked via the native save dialog
+/// (@tauri-apps/plugin-dialog's `save()`, frontend-side) -- Robot Builder
+/// Phase 8. A bare write to an arbitrary path, unlike every other
+/// filesystem command in this module, which are all confined to
+/// app_data_dir()-managed directories -- this one is exactly what a native
+/// "Save As" is for.
+#[tauri::command]
+fn export_robot_file(path: String, contents: String) -> Result<(), String> {
+    std::fs::write(path, contents).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             list_projects,
             create_project,
@@ -136,7 +158,9 @@ pub fn run() {
             list_packs,
             install_pack,
             uninstall_pack,
-            check_pack_signature
+            check_pack_signature,
+            read_pack_file,
+            export_robot_file
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

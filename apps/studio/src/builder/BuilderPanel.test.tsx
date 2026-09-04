@@ -27,6 +27,7 @@ vi.mock("./TestViewport", () => ({
 vi.mock("../BlocksPanel", () => ({
   BlocksPanel: (props: { robot: string }) => <div data-testid="blocks-panel-stub" data-robot={props.robot} />,
 }));
+vi.mock("./exportRobot", () => ({ exportRobotDef: vi.fn().mockResolvedValue(undefined) }));
 
 const identity = { position: [0, 0, 0] as [number, number, number], rotation_rpy: [0, 0, 0] as [number, number, number] };
 const inertia = { ixx: 0.01, iyy: 0.01, izz: 0.01 };
@@ -54,6 +55,17 @@ describe("BuilderPanel", () => {
   it("shows the issue count from validateRobotDef", () => {
     render(<BuilderPanel robot={makeRobot()} onChange={() => {}} />);
     expect(screen.getByText("0 issues")).toBeInTheDocument();
+  });
+
+  // Robot Builder Phase 8.
+  it("the Export button saves the current robot via exportRobotDef", async () => {
+    const { exportRobotDef } = await import("./exportRobot");
+    const user = userEvent.setup();
+    const robot = makeRobot();
+    render(<BuilderPanel robot={robot} onChange={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    expect(exportRobotDef).toHaveBeenCalledWith(robot);
   });
 
   it("Add body appends a new body, selects it, and passes the update to onChange", async () => {

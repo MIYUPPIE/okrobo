@@ -11,6 +11,7 @@ import { ProgramStoppedError } from "../program/ProgramRunner";
 import { ActuatorPanel } from "./ActuatorPanel";
 import { BodyInspector } from "./BodyInspector";
 import { BuilderViewport, type GizmoMode } from "./BuilderViewport";
+import { exportRobotDef } from "./exportRobot";
 import { HierarchyList } from "./HierarchyList";
 import { makeDefaultBody, nextBodyId, removeBody } from "./robotEdits";
 import { SensorPanel } from "./SensorPanel";
@@ -174,6 +175,14 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
           <span className={errorCount > 0 ? "builder-issue-count error" : "builder-issue-count"}>
             {issues.length} issue{issues.length === 1 ? "" : "s"}
           </span>
+          <button
+            type="button"
+            className="builder-export"
+            title="Save this robot as a standalone contracts/robot-def/v0 file"
+            onClick={() => void exportRobotDef(robot).catch((error: unknown) => console.error("failed to export robot:", error))}
+          >
+            Export
+          </button>
         </div>
         <div className="builder-mode-toggle">
           <button type="button" className={builderMode === "edit" ? "active" : ""} onClick={() => setBuilderMode("edit")}>

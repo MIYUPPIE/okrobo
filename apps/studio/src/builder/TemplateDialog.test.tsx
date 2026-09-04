@@ -1,11 +1,24 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { RobotDef } from "../contracts/robotDef";
+import { listPackRobots } from "./packRobots";
 import { TEMPLATE_OPTIONS } from "./robotTemplates";
 import { TemplateDialog } from "./TemplateDialog";
 
-afterEach(() => cleanup());
+vi.mock("./packRobots", () => ({ listPackRobots: vi.fn() }));
+
+beforeEach(() => {
+  // Default: no installed pack carries a robot -- the common case, and
+  // what every pre-Phase-8 test below assumes. Individual tests override.
+  vi.mocked(listPackRobots).mockResolvedValue([]);
+});
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 describe("TemplateDialog", () => {
   it("lists every template by label and description", () => {
@@ -49,5 +62,40 @@ describe("TemplateDialog", () => {
 
     await user.click(screen.getByText("New robot"));
     expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  // Robot Builder Phase 8: robots surfaced from installed packs.
+  it("shows an empty state when no installed pack carries a robot", async () => {
+    render(<TemplateDialog onPick={() => {}} onCancel={() => {}} />);
+    await waitFor(() => expect(screen.getByText(/no installed packs carry a built robot/i)).toBeInTheDocument());
+  });
+
+  it("lists a robot from an installed pack and picks it via make()", async () => {
+    const packRobot: RobotDef = {
+      id: "pack-rover",
+      name: "Pack Rover",
+      description: "",
+      root_placement: { position: [0, 0, 0], rotation_rpy: [0, 0, 0] },
+      bodies: [],
+      joints: [],
+      actuators: [],
+      sensors: [],
+    };
+    vi.mocked(listPackRobots).mockResolvedValue([
+      {
+        pack: { id: "robotics", name: "Robotics Pack", version: "1.0.0" },
+        robots: [{ label: "Rover", make: () => packRobot }],
+      },
+    ]);
+
+    const onPick = vi.fn();
+    const user = userEvent.setup();
+    render(<TemplateDialog onPick={onPick} onCancel={() => {}} />);
+
+    await waitFor(() => expect(screen.getByText("Rover")).toBeInTheDocument());
+    expect(screen.getByText(/from Robotics Pack/i)).toBeInTheDocument();
+
+    await user.click(screen.getByText("Rover"));
+    expect(onPick).toHaveBeenCalledWith(packRobot);
   });
 });

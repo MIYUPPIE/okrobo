@@ -505,6 +505,26 @@ try {
         "[...document.querySelectorAll('.template-description')].every(d => (d.textContent ?? '').length > 0)",
     ),
   );
+  // -- robot builder: pack-sourced robots (Phase 8) ------------------------
+  // This harness drives the app as a plain browser tab (scripts/check-dev-
+  // server.sh boots the Vite dev server, not the Tauri desktop shell), so
+  // isTauri() is false here and every Tauri IPC call (list_packs,
+  // read_pack_file) rejects -- there is no way to install a real pack and
+  // prove a robot from it appears, the same "can't drive the real path
+  // headlessly" limitation this suite already states plainly elsewhere
+  // (see the gizmo-drag note above). What this DOES prove: a browser-mode
+  // student with no desktop packs sees a clean, settled empty state, not a
+  // stuck "Loading…" or a crash -- the graceful-degradation path in
+  // TemplateDialog.tsx's listPackRobots().catch() really works. The pack
+  // read-back pipeline itself is proven directly (not re-derived here) by
+  // packRobots.test.ts and the Rust read_file tests in packs.rs. See
+  // docs/decisions/robot-builder-packs.md.
+  const packSectionSettled = await waitForCondition(
+    "document.querySelector('.template-section-header')?.textContent === 'From your packs' && " +
+      "[...document.querySelectorAll('.dialog-empty')].some(p => p.textContent?.includes('No installed packs carry a built robot'))",
+    5000,
+  );
+  check("Build mode: the New Robot dialog's pack section settles to a clean empty state (no packs installed)", packSectionSettled);
 
   await page.clickText(".template-row .project-name", "/^Blank$/");
   const builderInspectorReady = await waitForCondition(
@@ -520,6 +540,23 @@ try {
   );
   const builderCanvasReady = await waitForCondition("!!document.querySelector('.builder-stage canvas')", 5000);
   check("Build mode: 3D canvas renders", builderCanvasReady);
+
+  // Export (Phase 8): in this browser-mode harness, exportRobotDef's Blob +
+  // <a download> path runs -- this suite has no CDP download interception
+  // (cdp.mjs has no download-handling method), so it can't assert a file
+  // actually landed. What it does prove for real: clicking Export doesn't
+  // throw, and the document/hierarchy survive untouched afterward (Export
+  // never mutates the document it reads from). The desktop native-save-
+  // dialog path is a separate, real code path this harness cannot reach at
+  // all (no Tauri webview here) -- proven instead by exportRobot.test.ts's
+  // own desktop-branch tests. See docs/decisions/robot-builder-packs.md.
+  await page.evalClickText(".builder-export", "/Export/");
+  const survivedExport = await waitForCondition(
+    "document.querySelectorAll('.hierarchy-row').length === 1 && !!document.querySelector('[aria-label=\"body name\"]')",
+    5000,
+  );
+  check("Build mode: Export doesn't crash and doesn't mutate the document", survivedExport);
+
   check(
     "Build mode: hierarchy shows exactly the starter body",
     (await page.evaluate("document.querySelectorAll('.hierarchy-row').length")) === 1,

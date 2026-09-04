@@ -5,7 +5,7 @@ const manifest = (id: string, version: string) => ({
   id,
   name: id,
   version,
-  contents: { worlds: [], robots: [], lessons: [] },
+  contents: { worlds: [], robots: [], lessons: [], robot_defs: [], world_defs: [] },
   url: `${id}-${version}.tar.gz`,
 });
 

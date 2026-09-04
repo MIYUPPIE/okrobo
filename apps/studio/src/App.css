@@ -316,6 +316,16 @@ body {
   font-size: 11px;
 }
 
+/* Robot Builder Phase 8: the New Robot dialog's second, pack-sourced
+   section. */
+.template-section-header {
+  margin: 4px 0 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
 .delete-btn {
   background: none;
   border: 1px solid transparent;
@@ -1081,12 +1091,16 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   margin-bottom: 10px;
   font-size: 12px;
 }
 
 .builder-robot-name {
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .builder-issue-count {
@@ -1096,6 +1110,18 @@ body {
 
 .builder-issue-count.error {
   color: #ff7a7a;
+}
+
+/* Robot Builder Phase 8. */
+.builder-export {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 .hierarchy-list {

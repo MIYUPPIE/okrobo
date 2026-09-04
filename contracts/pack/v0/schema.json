@@ -41,7 +41,17 @@
       "properties": {
         "worlds": { "type": "array", "items": { "type": "string" } },
         "robots": { "type": "array", "items": { "type": "string" } },
-        "lessons": { "type": "array", "items": { "type": "string" } }
+        "lessons": { "type": "array", "items": { "type": "string" } },
+        "robot_defs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Paths to contracts/robot-def/v0 documents (Robot Builder Phase 8) -- distinct from `robots` (URDF, the older Car/Arm/Drone kinematic import path)."
+        },
+        "world_defs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Paths to contracts/world-def/v0 documents (Robot Builder Phase 8) -- distinct from `worlds` (contracts/world/v0, the Car/Drone arena)."
+        }
       }
     }
   }
