@@ -661,3 +661,180 @@ test` (294 passed), `npm run build`, `cargo test` (29 passed), and the full
 `test-all.sh` gate suite (engine, firmware, Python, WASM+parity ×5, vision
 parity, packs/signing, Rust, TypeScript, dev-server check, full CDP e2e)
 all green.
+
+## Robot Builder Phase 3: MuJoCo Physics (2026-09-04)
+
+Given an arbitrary `contracts/robot-def/v0` document, real physics:
+`GenerateMjcf` compiles it to MJCF and simulates it with the same vendored
+MuJoCo already driving the Arm's graspable object
+(`engine/src/physics_object.cpp`). New `engine/src/robot_tree.{hpp,cpp}`
+(kinematic tree from `joints[]` edges, cross-checked directly against
+`robotThree.ts`/`validateRobotDef`'s identical graph logic so the C++ port
+and the TypeScript original can't silently diverge) and
+`engine/src/built_robot.{hpp,cpp}` (`GenerateMjcf`, `class BuiltRobot`) —
+bodies, joints, collision, mass, and actuators; sensors are Phase 4.
+
+Build mode gets a top-level Edit/Test toggle. Test mode snapshots the
+current document once, builds an independent `EngineBuiltRobot` against it
+(never writing back — exiting Test just destroys the instance), and
+renders it live in a new `TestViewport.tsx` with a simple slider per
+actuator (`ActuatorPanel.tsx`).
+
+Crossing into WASM: reversed Phase 1's deliberate no-JSON-in-WASM stance —
+an arbitrary, variable-shaped document is exactly what JSON is for, and a
+scalar-call accumulation API would badly reinvent it. `robot_def.cpp`/
+`robot_tree.cpp`/`built_robot.cpp` joined the WASM build; `wasm_api.cpp`
+gained a `built_*` export family taking/returning JSON strings via the
+existing malloc/HEAPU8/free idiom. Recorded, alongside several other real
+interpretive calls a schema this general forces (every root body gets a
+synthesized `<freejoint/>`, a synthesized floor plane, `cone`→cylinder and
+`mesh`→placeholder-box fallbacks, why `plane` collision geometry and a
+non-root `free` joint can never compile, actuators targeting `ball`/`free`
+joints silently skipped, an open question about which frame `joint.axis`
+is really specified in), in `docs/decisions/robot-builder-physics.md`.
+
+A real, if small, naming collision the compiler caught: `physics_object.hpp`
+and the newly-included `robot_def.hpp` both declared
+`namespace okrobo { struct Vec3 }`, harmless until `wasm_api.cpp` needed
+both visible at once. Fixed by renaming `physics_object.hpp`'s to
+`PhysicsVec3` (5 call sites, `arm_world.{hpp,cpp}` included) rather than
+touching the newer, contract-governed one.
+
+Tests: `engine/tests/test_robot_tree.cpp` (5 new cases, including two that
+assert the port agrees with `validateRobotDef`'s own cycle/duplicate-child
+detection), `engine/tests/test_built_robot.cpp` (3 new cases — every
+fixture in `contracts/robot-def/v0/examples/` compiles, a dropped body
+settles at a measured rest height, an actuator moves its target joint by a
+measured amount), `apps/studio/src/engine/EngineBuiltRobot.test.ts` (new,
+against the real compiled WASM module, not a mock),
+`apps/studio/src/builder/ActuatorPanel.test.tsx` (new), plus 5 new
+`studio-e2e-check.mjs` checks. Verified in a real headless-Chrome run:
+entering Test mode requires the document to have zero error-severity
+issues (`BuilderPanel` disables the button otherwise) — confirming this
+needed reordering the e2e script's own checks to run Test mode after
+Delete body cleared an earlier two-body test fixture back down to one,
+single-root body. A first attempt at proving the render loop stays alive
+with a canvas-pixel-diff check between two snapshots a few seconds apart
+came back flaky — the tiny default starter body settles almost instantly
+under headless Chrome's unthrottled `requestAnimationFrame`, so both
+snapshots were identical (already-settled), not evidence of a frozen loop
+— replaced with a simpler, honest "the canvas still exists after a few
+seconds" check instead.
+
+## Robot Builder Phase 4: Sensors (2026-09-04)
+
+Gives runtime behavior to seven of `contracts/robot-def/v0`'s eight sensor
+types — `encoder`, `gps`, `distance`, `touch`, `force_torque`, `imu`,
+`lidar` (`camera` stays deferred, a genuinely different subsystem — see
+below). Six share one generic mechanism: `GenerateMjcf` mounts a `<site>`
+at each sensor's own `transform` and emits the matching native MJCF sensor
+element (`jointpos` for encoder — direct joint attach, no site —
+`framepos` for gps, `rangefinder` for distance, `touch`, `force`+`torque`,
+`accelerometer`+`gyro` for imu), read back through a generic
+`sensor_type`/`sensor_adr`/`sensor_dim` lookup mirroring the existing
+body/actuator id-resolution pattern. `gps` deliberately uses
+`objtype="site"` rather than `"body"` so a sensor's own mount offset is
+actually honored, not silently ignored. Lidar has no native MJCF multi-ray
+element and is computed directly via `mj_multiRay` at read time, fanning
+`params_json`'s `rays`/`fov_degrees` (defaulting `9`/`180.0`, matching —
+not inventing — the convention already set by `Robot.lidar()` elsewhere in
+this codebase) across the mounting site's local XZ plane. Encoders pointed
+at a non-scalar (`ball`/`free`/`fixed`) joint get the same defensive skip
+Phase 3 gave actuators in the same situation, rather than failing the
+whole robot's MJCF compile over one bad sensor.
+
+Test mode's inspector gains a second, live-polling `SensorPanel.tsx`
+alongside the existing actuators one.
+
+Every reading was measured against the real compiled engine, not assumed —
+two things only turned up by actually running it, both recorded in
+`docs/decisions/robot-builder-sensors.md`: `mj_multiRay`'s `cutoff`
+parameter is a search-radius hint, not a hard clamp (a ray whose true
+intersection was past the requested cutoff still returned its real, longer
+distance); and a box resting on a plane contacts near its four corners,
+not its center, so a touch sensor site placed at a box's center can read
+zero while genuinely resting on the floor —
+`test_built_robot.cpp`'s touch test uses a sphere instead, to get the
+single, centered contact point a touch zone can actually be aimed at (a
+real, documented gap for boxes, not silently worked around). Getting the
+lidar test to actually hit something also took two real fixes: the
+sensor's `rotation_rpy` was left at identity, so its local +Z pointed
+straight up instead of at the wall (fixed by rotating it to face +X), and
+the "open" case's first fov (90°) had its downward-tilted rays legitimately
+hitting the floor at a real, non-cutoff distance even with no obstacle in
+front — narrowed to a 10° near-horizontal fov so the test isolates
+wall-detection from floor-detection.
+
+Tests: `engine/tests/test_built_robot.cpp` (8 new cases, one per sensor
+type plus the encoder-skip case), `apps/studio/src/engine/EngineBuiltRobot.test.ts`
+(extended, against the real WASM module), `apps/studio/src/builder/SensorPanel.test.tsx`
+(new), 1 new `studio-e2e-check.mjs` check (the sensor panel's empty state).
+`docs/decisions/robot-builder-sensors.md` also records why camera is
+deferred: the Car's existing 2D raycaster (`engine/src/camera.hpp`) has no
+notion of arbitrary 3D MJCF geometry and can't be extended into one, and no
+offscreen-rendering mechanism exists anywhere in `TestViewport.tsx` yet —
+real refactoring work, not a drop-in addition. `camera` sensors still
+parse/validate fine; `SensorPanel.tsx` shows an explicit "not available
+yet" placeholder rather than silently omitting them.
+
+## Robot Builder Phase 5: World Builder Foundation (2026-09-04)
+
+A robot can now be tested against a real environment instead of an empty
+floor. New contract family `contracts/world-def/v0/` — deliberately
+separate from the existing 2D `contracts/world/v1` (the Car/Drone's
+arena), which requires differential-drive-specific fields (`robot_radius`/
+`wheel_base`) and whose "obstacles" are non-colliding raycast targets in a
+hand-rolled kinematic model, structurally incompatible with an arbitrary
+MuJoCo-simulated `BuiltRobot`. Unlike `robot-def`, a world has no kinematic
+tree at all: every object is independently placed and permanently static
+(no joints, no actuators, no sensors, no mass) — a flat
+`{id, name, transform?, geometry, material?}` list, deliberately reusing
+`robot-def`'s own `Vec3`/`Transform`/`Geometry`/`Material` types directly
+across all three language mirrors rather than reinventing an equivalent
+shape a second time (a position/rotation and a primitive shape are the
+same concept for a world object as for a robot body). `robotDef.ts`/
+`robot_def.py` each got a small, additive touch-up (four previously-private
+transform/geometry parse/serialize helpers made public) to make that reuse
+possible without duplicating the logic; C++ still needed one small,
+deliberate, documented duplication, since `robot_def.cpp`'s equivalent
+helpers have internal (anonymous-namespace) linkage and are genuinely
+unreachable from another translation unit.
+
+`GenerateMjcf`/`BuiltRobot`/`built_create` all gain an optional second
+`WorldDef`/JSON payload; world objects are emitted as bare
+`<geom name="world_{id}" .../>` with no `<body>` wrapper — confirmed by
+the existing synthesized floor geom already doing exactly this, since a
+geom with no enclosing body attaches to MuJoCo's own implicit world body.
+Verified as real collision, not just a rendered decoration: a robot body
+positioned above a world-def platform box settles resting on the
+platform's top surface (measured z=0.139892, platform top 0.1 + robot
+half-height 0.04, within a 5e-3 tolerance), reproduced identically through
+the WASM boundary.
+
+The studio's Test mode gets a minimal `<select>` world picker (new
+`worldThree.ts` for three.js materialization, `worldExamples.ts` for three
+hand-written starter worlds — Empty/Obstacle Course/Ramp, mirroring
+`robotEdits.ts`'s own precedent that `contracts/` fixtures are contract/
+test assets, not something the shipped app imports directly) — deliberately
+not a full drag-and-drop authoring UI, the same "schema and pipeline
+first, authoring later" scoping Phase 1→2 already established. Picking a
+world while already in Test mode rebuilds the physics instance live
+(`EngineBuiltRobot`'s effect now depends on the selected world, not only
+on entering Test mode); world objects themselves are materialized once
+into the three.js scene and never touched again per frame, since — unlike
+the robot's own bodies — nothing about them ever moves.
+
+Tests: `contracts/world-def/v0/` gets the same three-language round-trip +
+fixture treatment Phase 1 established for `robot-def` (Python 10 cases,
+TypeScript 7, C++ round-trip + fixture loop), `engine/tests/test_built_robot.cpp`
+and `EngineBuiltRobot.test.ts` each gain a world-collision case asserting
+the measured settle height above, and new `worldThree.test.ts`/
+`worldExamples.test.ts`/extended `BuilderPanel.test.tsx` cover the
+frontend pipeline and the picker itself. `scripts/lib/cdp.mjs` gained a
+`setSelectValue` helper (none of this repo's e2e checks had needed to
+drive a `<select>` before) backing 2 new `studio-e2e-check.mjs` checks —
+the picker lists every example world, and picking a non-empty one rebuilds
+physics without losing the canvas. `./scripts/test-all.sh` green end to
+end (engine ctest, firmware ctest, Python pytest, WASM+parity, vision
+parity, packs, Rust desktop shell, `apps/studio` typecheck + 332 vitest
+tests across 37 files + production build, dev-server check, full CDP e2e).
