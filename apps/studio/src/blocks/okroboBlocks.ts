@@ -555,7 +555,10 @@ export const STARTER_WORKSPACE = {
   },
 };
 
-/** A little wave: the arm sweeps its shoulder up and down three times. */
+/** A little wave (shoulder up and down three times), then reach down, grip
+ * the graspable object, carry it by swinging the base, and set it down --
+ * the same pick-and-place sequence as the "Pick and drop" lesson's Python,
+ * built from blocks instead. */
 export const ARM_STARTER_WORKSPACE = {
   blocks: {
     languageVersion: 0,
@@ -576,6 +579,49 @@ export const ARM_STARTER_WORKSPACE = {
                   fields: { JOINT: "shoulder", DEGREES: 35 },
                   next: {
                     block: { type: "okrobo_arm_move", fields: { JOINT: "base", DEGREES: 45 } },
+                  },
+                },
+              },
+            },
+          },
+        },
+        next: {
+          block: {
+            type: "okrobo_arm_move",
+            fields: { JOINT: "base", DEGREES: 0 },
+            next: {
+              block: {
+                type: "okrobo_arm_move",
+                fields: { JOINT: "shoulder", DEGREES: 50 },
+                next: {
+                  block: {
+                    type: "okrobo_arm_move",
+                    fields: { JOINT: "elbow", DEGREES: -104 },
+                    next: {
+                      block: {
+                        type: "okrobo_arm_move",
+                        fields: { JOINT: "wrist", DEGREES: -2 },
+                        next: {
+                          block: {
+                            type: "okrobo_arm_grip",
+                            next: {
+                              block: {
+                                type: "okrobo_arm_move",
+                                fields: { JOINT: "base", DEGREES: 90 },
+                                next: {
+                                  block: {
+                                    type: "okrobo_arm_release",
+                                    next: {
+                                      block: { type: "okrobo_wait", fields: { SECONDS: 1.5 } },
+                                    },
+                                  },
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
                   },
                 },
               },

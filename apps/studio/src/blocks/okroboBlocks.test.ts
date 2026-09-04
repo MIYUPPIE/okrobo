@@ -213,34 +213,40 @@ describe("block code generation", () => {
     20000,
   );
 
-  it("generates the arm wave in JavaScript against the runner API", () => {
+  it("generates the arm wave and pick-and-place in JavaScript against the runner API", () => {
     const js = generateJavaScript(load(ARM_STARTER_WORKSPACE));
     expect(js).toContain('await robot.armMove("shoulder", 85);');
     expect(js).toContain('await robot.armMove("base", 45);');
     expect(js).toContain("for (");
+    expect(js).toContain("robot.armGrip();");
+    expect(js).toContain("robot.armRelease();");
   });
 
-  it("generates the arm wave in Python against the okrobo Arm API", () => {
+  it("generates the arm wave and pick-and-place in Python against the okrobo Arm API", () => {
     const py = generatePython(load(ARM_STARTER_WORKSPACE), "arm");
     expect(py).toContain("from okrobo import Arm");
     expect(py).toContain("arm = Arm()");
     expect(py).toContain('arm.move("shoulder", 85)');
+    expect(py).toContain("arm.grip()");
+    expect(py).toContain("arm.release()");
     expect(py).not.toContain("robot.");
   });
 
-  it("generates the arm wave in C++ against engine/api/arm.hpp", () => {
+  it("generates the arm wave and pick-and-place in C++ against engine/api/arm.hpp", () => {
     const cpp = generateCpp(load(ARM_STARTER_WORKSPACE), "arm");
     expect(cpp).toContain('#include "arm.hpp"');
     expect(cpp).toContain("okrobo::Arm arm;");
     expect(cpp).toContain('arm.move("shoulder", 85);');
     expect(cpp).toContain('arm.move("base", 45);');
     expect(cpp).toContain("for (int count = 0; count < 3; count++) {");
+    expect(cpp).toContain("arm.grip();");
+    expect(cpp).toContain("arm.release();");
     expect(cpp).not.toContain("robot.");
     expect(cpp).not.toContain("var ");
   });
 
   it(
-    "the generated arm C++ actually compiles and runs, matching the sim",
+    "the generated arm C++ actually compiles and runs the wave AND the pick-and-place, matching the sim",
     () => {
       const cpp = generateCpp(load(ARM_STARTER_WORKSPACE), "arm");
       const dir = mkdtempSync(join(tmpdir(), "okrobo-cpp-"));
@@ -252,7 +258,8 @@ describe("block code generation", () => {
           .replace('#include "arm.hpp"', '#include <cstdio>\n#include "arm.hpp"')
           .replace(
             "return 0;",
-            'auto [x, y, z] = arm.tip(); std::printf("%.2f %.2f %.2f\\n", x, y, z); return 0;',
+            'auto [tx, ty, tz] = arm.tip(); auto [ox, oy, oz] = arm.object(); ' +
+              'std::printf("%.2f %.2f %.2f %.2f %.2f %.2f\\n", tx, ty, tz, ox, oy, oz); return 0;',
           ),
       );
       execFileSync("g++", [
@@ -274,7 +281,10 @@ describe("block code generation", () => {
         binary,
       ]);
       const output = execFileSync(binary, { encoding: "utf8", timeout: 5000 }).trim();
-      expect(output).toBe("0.32 0.32 0.22");
+      // Tip ends where the pick-and-place sequence left it (base swung to
+      // 90 after gripping); object ends where it was set down -- released
+      // from the tip's position, fell, and settled on the floor.
+      expect(output).toBe("0.00 0.30 0.06 0.00 0.30 0.03");
     },
     20000,
   );
