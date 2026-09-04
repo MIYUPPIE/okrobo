@@ -7,6 +7,7 @@ import { BodyInspector } from "./BodyInspector";
 import { BuilderViewport, type GizmoMode } from "./BuilderViewport";
 import { HierarchyList } from "./HierarchyList";
 import { makeDefaultBody, nextBodyId, removeBody } from "./robotEdits";
+import { SensorPanel } from "./SensorPanel";
 import { TestViewport } from "./TestViewport";
 
 // Composes the Build-mode UI: hierarchy (left), viewport + toolbar (center),
@@ -175,7 +176,10 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
             <p className="builder-empty-inspector">Select a body to edit it.</p>
           )
         ) : builtRobot ? (
-          <ActuatorPanel robot={robot} control={builtRobot} />
+          <>
+            <ActuatorPanel robot={robot} control={builtRobot} />
+            <SensorPanel robot={robot} source={builtRobot} />
+          </>
         ) : (
           <p className="builder-empty-inspector">Waiting for the physics engine…</p>
         )}

@@ -25,6 +25,13 @@ static unsigned char g_camera_frame[okrobo::kCameraMaxWidth * okrobo::kCameraMax
 constexpr int kBuiltMaxBodies = 64;
 static double g_body_pose_buffer[kBuiltMaxBodies * 7];
 
+// Robot Builder Phase 4: scratch buffer for a built robot's sensor
+// readings, same pattern as g_body_pose_buffer. Sized generously: six
+// generic sensors at up to 6 doubles each plus a couple of lidars at up to
+// kMaxLidarRays(64) doubles comfortably fits.
+constexpr int kBuiltMaxSensorDoubles = 512;
+static double g_sensor_data_buffer[kBuiltMaxSensorDoubles];
+
 extern "C" {
 
 EMSCRIPTEN_KEEPALIVE
@@ -302,5 +309,31 @@ int built_sync_body_poses(okrobo::BuiltRobot* robot) {
 /// Address of the pose buffer, so JS can read it from the heap.
 EMSCRIPTEN_KEEPALIVE
 double* built_body_pose_buffer() { return g_body_pose_buffer; }
+
+// ---- built robot sensors (Robot Builder Phase 4) ----
+// No `camera` readout. See docs/decisions/robot-builder-sensors.md.
+
+EMSCRIPTEN_KEEPALIVE
+int built_sensor_count(const okrobo::BuiltRobot* robot) { return robot->sensor_count(); }
+
+EMSCRIPTEN_KEEPALIVE
+int built_sensor_output_count(const okrobo::BuiltRobot* robot, int index) {
+    return robot->sensor_output_count(index);
+}
+
+/// Fills the shared sensor buffer; returns doubles actually written (0 if
+/// the robot's total sensor width exceeds kBuiltMaxSensorDoubles -- a
+/// documented no-sync rather than a heap overrun).
+EMSCRIPTEN_KEEPALIVE
+int built_sync_sensor_data(okrobo::BuiltRobot* robot) {
+    const int total = robot->sensor_data_count();
+    if (total <= 0 || total > kBuiltMaxSensorDoubles) return 0;
+    robot->sync_sensor_data(g_sensor_data_buffer);
+    return total;
+}
+
+/// Address of the sensor buffer, so JS can read it from the heap.
+EMSCRIPTEN_KEEPALIVE
+double* built_sensor_data_buffer() { return g_sensor_data_buffer; }
 
 }  // extern "C"

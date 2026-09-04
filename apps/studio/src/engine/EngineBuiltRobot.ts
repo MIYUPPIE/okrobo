@@ -1,4 +1,4 @@
-import { robotDefToJson, type RobotDef } from "../contracts/robotDef";
+import { robotDefToJson, type RobotDef, type Sensor, type SensorType } from "../contracts/robotDef";
 import type { EngineModule } from "./loader";
 
 export interface BodyPose {
@@ -13,20 +13,34 @@ export interface BodyPose {
   qz: number;
 }
 
+export interface SensorReading {
+  id: string;
+  type: SensorType;
+  /** Empty for `camera` (not implemented -- see
+   * docs/decisions/robot-builder-sensors.md). Otherwise a fixed width per
+   * type: 1 for encoder/distance/touch, 3 for gps, 6 for imu/force_torque,
+   * the sensor's own resolved ray count for lidar. */
+  values: number[];
+}
+
 /**
  * A simulated instance of an arbitrary built robot (contracts/robot-def/v0),
- * wrapping the WASM `built_*` exports. Bodies, joints, actuators only -- no
- * sensors (Phase 4). See docs/decisions/robot-builder-physics.md.
+ * wrapping the WASM `built_*` exports. Bodies, joints, actuators (Phase 3),
+ * and seven of the eight sensor types (Phase 4; no `camera`). See
+ * docs/decisions/robot-builder-physics.md and
+ * docs/decisions/robot-builder-sensors.md.
  */
 export class EngineBuiltRobot {
   private readonly module: EngineModule;
   private readonly handle: number;
+  private readonly sensors: Sensor[];
 
   /** Throws if `robot` can't be turned into a compilable physics model
    * (e.g. a `plane`-geometry body, or a non-root `free` joint -- see
    * docs/decisions/robot-builder-physics.md for why those can never work). */
   constructor(module: EngineModule, robot: RobotDef) {
     this.module = module;
+    this.sensors = robot.sensors;
     const bytes = new TextEncoder().encode(JSON.stringify(robotDefToJson(robot)));
     const ptr = module._malloc(bytes.length);
     module.HEAPU8.set(bytes, ptr);
@@ -79,6 +93,24 @@ export class EngineBuiltRobot {
       });
     }
     return poses;
+  }
+
+  /** One reading per robot.sensors entry, in declaration order. Copied out
+   * of the WASM heap, same not-a-live-view idiom as bodyPoses(). */
+  sensorReadings(): SensorReading[] {
+    const total = this.module._built_sync_sensor_data(this.handle);
+    const bufferPtr = this.module._built_sensor_data_buffer();
+    const start = bufferPtr / 8;
+    const doubles = this.module.HEAPF64.slice(start, start + total);
+    const readings: SensorReading[] = [];
+    let offset = 0;
+    for (let i = 0; i < this.sensors.length; i++) {
+      const sensor = this.sensors[i];
+      const width = this.module._built_sensor_output_count(this.handle, i);
+      readings.push({ id: sensor.id, type: sensor.type, values: Array.from(doubles.slice(offset, offset + width)) });
+      offset += width;
+    }
+    return readings;
   }
 
   destroy(): void {

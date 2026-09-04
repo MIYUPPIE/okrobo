@@ -87,8 +87,10 @@ export interface EngineModule {
   _drone_collided(drone: number): number;
   _drone_ray(drone: number, offset: number): number;
 
-  // Robot Builder Phase 3 (contracts/robot-def/v0): an arbitrary built
-  // robot, simulated with MuJoCo. No sensors (Phase 4).
+  // Robot Builder Phase 3/4 (contracts/robot-def/v0): an arbitrary built
+  // robot, simulated with MuJoCo -- bodies, joints, actuators (Phase 3),
+  // and seven of the eight sensor types (Phase 4; no `camera`, see
+  // docs/decisions/robot-builder-sensors.md).
   /** `json`/`jsonLen` describe a UTF-8-encoded robot-def document already
    * written into HEAPU8 at `json`. Returns 0 (falsy) on parse/MJCF-compile
    * failure. */
@@ -105,6 +107,15 @@ export interface EngineModule {
   /** Address of the pose buffer (7 float64s per body: x,y,z, then MuJoCo's
    * native w,x,y,z quaternion order) -- read via HEAPF64. */
   _built_body_pose_buffer(): number;
+  _built_sensor_count(robot: number): number;
+  /** robot.sensors[index]'s output width (0 for `camera`). */
+  _built_sensor_output_count(robot: number, index: number): number;
+  /** Fills the shared sensor buffer; returns doubles written (0 if the
+   * robot's total sensor width exceeded the engine's fixed buffer -- a
+   * documented no-sync, not a crash). */
+  _built_sync_sensor_data(robot: number): number;
+  /** Address of the sensor buffer -- read via HEAPF64. */
+  _built_sensor_data_buffer(): number;
   _malloc(size: number): number;
   _free(ptr: number): void;
   HEAPF64: Float64Array;

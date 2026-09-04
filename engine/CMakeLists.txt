@@ -66,10 +66,13 @@ target_compile_options(okrobo_robot_tree PRIVATE -Wall -Wextra -Werror)
 
 # Robot Builder Phase 3: MJCF generation + MuJoCo simulation for an
 # arbitrary robot-def document. See docs/decisions/robot-builder-physics.md.
+# nlohmann_json (Phase 4): ParseLidarParams parses a lidar sensor's
+# params_json -- see docs/decisions/robot-builder-sensors.md.
 add_library(okrobo_built_robot src/built_robot.cpp)
 target_include_directories(okrobo_built_robot PUBLIC src)
 target_link_libraries(okrobo_built_robot PUBLIC okrobo_robot_tree)
 target_link_libraries(okrobo_built_robot PRIVATE mujoco::mujoco)
+target_link_libraries(okrobo_built_robot PRIVATE nlohmann_json::nlohmann_json)
 target_compile_options(okrobo_built_robot PRIVATE -Wall -Wextra -Werror)
 
 enable_testing()

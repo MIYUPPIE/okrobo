@@ -560,6 +560,16 @@ try {
     "Test mode: a robot with no joints shows the actuator panel's empty state",
     await waitForCondition("document.querySelector('.actuator-empty')?.textContent?.includes('no actuators')", 5000),
   );
+  // Symmetric with the actuator-empty-state check above: Build mode has no
+  // sensor-authoring UI either (Phase 4's own non-goal, same limitation
+  // Phase 3 already documented for actuators), so the one remaining body
+  // has no sensors and the panel's documented empty state is exactly what
+  // should render. Real sensor readings are proven numerically by
+  // engine/tests/test_built_robot.cpp and EngineBuiltRobot.test.ts.
+  check(
+    "Test mode: a robot with no sensors shows the sensor panel's empty state",
+    await waitForCondition("document.querySelector('.sensor-empty')?.textContent?.includes('no sensors')", 5000),
+  );
   check(
     "Test mode: explains that nothing here is saved back to the document",
     await page.evaluate("!!document.querySelector('.test-mode-note')"),

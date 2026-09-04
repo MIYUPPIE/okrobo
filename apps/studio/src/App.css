@@ -1420,3 +1420,40 @@ body {
   font-size: 12px;
   color: var(--text-dim);
 }
+
+.sensor-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.sensor-panel h4 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.sensor-reading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.sensor-reading-name {
+  color: var(--text-dim);
+}
+
+.sensor-reading-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.sensor-empty {
+  font-size: 12px;
+  color: var(--text-dim);
+}
