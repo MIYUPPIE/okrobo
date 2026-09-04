@@ -610,9 +610,70 @@ try {
   );
   check("Test mode: picking a world rebuilds physics and keeps the canvas alive", worldRebuilt);
 
+  // -- robot builder: program drawer (Phase 6 programming) -----------------
+  // Real actuator/sensor set()/read() behavior against a real actuator is
+  // proven numerically by BuiltProgramRunner.test.ts against the real
+  // compiled WASM module -- this check only confirms the drawer itself is
+  // wired end to end in a real browser: it exists in Test mode, its three
+  // tabs switch, and Run/Stop actually drive a real BuiltProgramRunner (the
+  // default starter is a single 1s wait block). Build mode still has no
+  // joint/actuator-authoring UI, so this e2e robot always has zero
+  // actuators/sensors -- that also exercises the built-in blocks' own
+  // empty-document dropdown placeholder fallback for free. See
+  // docs/decisions/robot-builder-programming.md.
+  check(
+    "Test mode: the program drawer is present with Run/Stop and three code tabs",
+    await page.evaluate(
+      "!!document.querySelector('.builder-program-drawer') && " +
+        "[...document.querySelectorAll('.builder-program-drawer .code-tab')].map(t => t.textContent).join(',') === 'Blocks,Python,C++'",
+    ),
+  );
+
+  await page.clickText(".builder-program-drawer .code-tab", "/^Python$/");
+  const pythonPreviewShown = await waitForCondition(
+    "document.querySelector('.builder-program-drawer .tab-panel.active .placeholder-note')?.textContent?.includes('no real Python API')",
+    5000,
+  );
+  check("Test mode: the Python tab shows an illustrative-only preview, not a real API", pythonPreviewShown);
+
+  await page.clickText(".builder-program-drawer .code-tab", "/^C\\+\\+$/");
+  const cppPreviewShown = await waitForCondition(
+    "document.querySelector('.builder-program-drawer .tab-panel.active .placeholder-note')?.textContent?.includes('no real C++ SDK')",
+    5000,
+  );
+  check("Test mode: the C++ tab shows an illustrative-only preview, not a real SDK", cppPreviewShown);
+
+  await page.clickText(".builder-program-drawer .code-tab", "/^Blocks$/");
+  await page.evalClickText(".builder-program-actions button", "/Run/");
+  const programRunning = await waitForCondition(
+    "document.querySelector('.builder-program-status')?.textContent === 'running…'",
+    2000,
+  );
+  check("Test mode: Run starts the default wait(1) program", programRunning);
+
+  await page.evalClickText(".builder-program-actions button", "/Stop/");
+  const programStoppedEarly = await waitForCondition(
+    "document.querySelector('.builder-program-status')?.textContent === 'idle'",
+    2000,
+  );
+  check("Test mode: Stop interrupts a running program back to idle", programStoppedEarly);
+
+  // Run again and let it finish naturally this time (no Stop), proving a
+  // completed program also returns to idle on its own.
+  await page.evalClickText(".builder-program-actions button", "/Run/");
+  const programFinished = await waitForCondition(
+    "document.querySelector('.builder-program-status')?.textContent === 'idle'",
+    5000,
+  );
+  check("Test mode: a finished program returns to idle on its own", programFinished);
+
   await page.clickText(".builder-mode-toggle button", "/^Edit$/");
   const backToEdit = await waitForCondition("!!document.querySelector('.builder-toolbar')", 5000);
   check("Test mode: switching back to Edit restores the gizmo viewport", backToEdit);
+  check(
+    "Test mode: the program drawer disappears back in Edit mode",
+    await page.evaluate("!document.querySelector('.builder-program-drawer')"),
+  );
 
   await page.clickText(".mode-toggle button", "/^Simulate$/");
   const backToSimulate = await waitForCondition(

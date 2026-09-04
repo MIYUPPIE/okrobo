@@ -838,3 +838,91 @@ physics without losing the canvas. `./scripts/test-all.sh` green end to
 end (engine ctest, firmware ctest, Python pytest, WASM+parity, vision
 parity, packs, Rust desktop shell, `apps/studio` typecheck + 332 vitest
 tests across 37 files + production build, dev-server check, full CDP e2e).
+
+## Robot Builder Phase 6: Programming (2026-09-04)
+
+A built robot can now be driven by a written program in Test mode, not just
+nudged with `ActuatorPanel`'s sliders — addressed by the student's own
+actuator/sensor string ids, not a fixed, hardcoded vocabulary the way
+Car/Arm/Drone's own `RobotApi` is. New `apps/studio/src/program/BuiltProgramRunner.ts`
+(`BuiltRobotApi`/`class BuiltProgramRunner`) is deliberately much simpler
+than the existing `ProgramRunner`: MuJoCo actuators are continuous control
+(set-and-forget), not the Car's discrete, step-and-resolve kinematic
+movements, so only `wait(seconds)` needs real tick coordination — `set()`/
+`read()`/`stop()` are synchronous passthroughs to `EngineBuiltRobot`,
+resolving a student-chosen id to the underlying array index (throwing on an
+unknown one, guarding the WASM boundary since `setActuatorCtrl` takes a raw
+index with no validation of its own). `execute.ts`'s `runProgram` became
+generic (`runProgram<Api>`) so the same AsyncFunction compiler now serves
+both `RobotApi` and `BuiltRobotApi` unchanged.
+
+`contracts/robot-api/` was deliberately not extended for this — it's
+fundamentally robot-kind-specific (`v3/schema.json` hardcodes
+`joint: integer 0..3`) and isn't even the live transport for anything today
+(`ProgramRunner` calls WASM directly; the real Python path goes through an
+ad hoc sidecar RPC). See `docs/decisions/robot-builder-programming.md`.
+
+Two new Blockly blocks give this a Blocks UI: `okrobo_built_set_actuator`
+and `okrobo_built_read_sensor`, each with a dropdown populated from the
+*current* built robot's own actuators/sensors. Checked against the
+installed `blockly@13.2.1` package first, not assumed: a JSON-defined
+block's dropdown (`defineBlocksWithJsonArray`, what every other block in
+`okroboBlocks.ts` uses) only accepts a literal options array — there is no
+JSON path to a dynamic one. These two blocks are the first in this codebase
+defined imperatively instead, passing a `MenuGeneratorFunction` straight
+into `new Blockly.FieldDropdown(fn)`, re-invoked fresh every time the
+dropdown opens, sourced from a small module-level list
+(`setBuiltRobotFields`, called synchronously in `BuilderPanel.tsx`'s render
+body — before `BlocksPanel`'s own mount effect calls `Blockly.inject`, the
+same ordering hazard its `initialWorkspace` doc comment already flags for a
+related reason). `validateOptions` throws on an empty array and Build mode
+still has no joint/actuator-authoring UI, so both dropdowns fall back to a
+placeholder tuple when the document has none — a real, expected v0 case,
+not an edge case. A new `BlocksRobotKind = RobotKind | "built"` widens only
+the Blockly-facing signatures (`BlocksPanel`'s prop,
+`toolboxFor`/`starterWorkspace`/`generatePython`/`generateCpp`); `RobotKind`
+itself stays untouched since `App.tsx`'s Simulate-mode robot picker,
+`LessonsPanel.tsx`, and `packs/lesson.ts`'s `Lesson.robot` can never target
+a built robot.
+
+Test mode's stage gained a fixed-height Program drawer (Run/Stop + a status
+span, then Blocks/Python/C++ tabs reusing Simulate mode's own
+`.code-tabs`/`.code-content`/`.tab-panel` classes) docked under a new
+`.builder-test-main` wrapper — `.builder-stage` became a column flexbox
+(harmless for Edit mode, since `BuilderViewport`'s canvas and
+`.builder-toolbar` are both `position: absolute` and ignore it).
+Python/C++ are read-only, explicitly-labeled illustrative previews only —
+no `okrobo.BuiltRobot` package, no `engine/api/built_robot.hpp`, no sidecar
+wiring; that's real, separate infrastructure and a future phase's work, not
+a silent scope cut.
+
+A real, non-obvious physics discovery, not assumed: `abort()`/`stop()`
+zero every actuator's control value, but what "zero" *means* depends on the
+actuator's own MJCF mapping (Phase 3's `built_robot.cpp`) — `motor`/
+`force`/`torque` map to `<motor>` (ctrl is a force, zero is genuinely
+passive), `velocity` maps to `<velocity>` (zero is genuinely "stop"), but
+`servo` maps to `<position>` (ctrl is a *target angle* — zero drives the
+joint toward 0 rad, which is real, visible motion if it wasn't already
+there). Found by a failing `BuiltProgramRunner.test.ts` assertion that
+first assumed "stop" meant "freeze in place" for every actuator type — not
+true for `servo`, fixed by asserting the physically correct behavior
+instead (the joint settles back near 0 rad) and recorded in the decision
+doc so it isn't mistaken for a bug later.
+
+Tests: `apps/studio/src/program/BuiltProgramRunner.test.ts` (new, 7 cases
+against the real compiled WASM module — set/read by id, unknown-id
+rejection, `wait()` timing, `abort()`'s zero-every-actuator semantics,
+`arm()` re-enabling a new run), `apps/studio/src/blocks/okroboBlocks.test.ts`
+(6 new cases — empty-document dropdown fallback, JS codegen for both new
+blocks, illustrative-only Python/C++ previews, toolbox/starter-workspace
+resolution), `apps/studio/src/builder/BuilderPanel.test.tsx` (3 new cases,
+mocking `../BlocksPanel` for the same jsdom-can't-lay-out-real-SVG reason
+`BuilderViewport`/`TestViewport` are already mocked — the drawer only
+renders in Test mode, Run/Stop enablement tracks the real physics
+lifecycle, clicking Run drives a real `BuiltProgramRunner` end to end and
+never mutates the document), 7 new `studio-e2e-check.mjs` checks (the
+drawer and its three tabs, Run/Stop against the real default `wait(1)`
+starter both interrupted and left to finish naturally, the drawer's absence
+back in Edit mode) — all passed on the first real-browser run, no
+flakiness. `npm run test` (348 passed across 38 files), `npm run build`,
+and the full `test-all.sh` gate suite all green.

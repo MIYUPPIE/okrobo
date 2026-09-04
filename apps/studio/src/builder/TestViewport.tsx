@@ -4,6 +4,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { RobotDef } from "../contracts/robotDef";
 import type { WorldDef } from "../contracts/worldDef";
 import type { EngineBuiltRobot } from "../engine/EngineBuiltRobot";
+import type { BuiltProgramRunner } from "../program/BuiltProgramRunner";
 import { materializeRobotScene } from "./robotThree";
 import { materializeWorldScene } from "./worldThree";
 
@@ -30,11 +31,17 @@ export interface TestViewportProps {
    * colliders (see EngineBuiltRobot's own `world` parameter); this prop
    * only controls whether they're *rendered* here. */
   world?: WorldDef;
+  /** Robot Builder Phase 6 -- steps physics and drives any running program.
+   * Always provided (BuilderPanel constructs one alongside builtRobot); the
+   * animate loop below delegates stepping to it instead of calling
+   * builtRobot.step() directly, so a program's wait() sees the same frames
+   * the viewport renders. */
+  runner: BuiltProgramRunner;
 }
 
 const STEP_DT = 0.01;
 
-export function TestViewport({ robot, builtRobot, world }: TestViewportProps) {
+export function TestViewport({ robot, builtRobot, world, runner }: TestViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -106,7 +113,7 @@ export function TestViewport({ robot, builtRobot, world }: TestViewportProps) {
     let raf = 0;
     const animate = () => {
       raf = requestAnimationFrame(animate);
-      builtRobot.step(STEP_DT);
+      runner.tick(STEP_DT);
       const poses = builtRobot.bodyPoses();
       for (let i = 0; i < poses.length && i < physicsFrames.length; i++) {
         const pose = poses[i];
@@ -127,7 +134,7 @@ export function TestViewport({ robot, builtRobot, world }: TestViewportProps) {
       renderer.dispose();
       container.removeChild(renderer.domElement);
     };
-  }, [robot, builtRobot, world]);
+  }, [robot, builtRobot, world, runner]);
 
   return <div ref={containerRef} className="viewport-3d test-viewport" />;
 }

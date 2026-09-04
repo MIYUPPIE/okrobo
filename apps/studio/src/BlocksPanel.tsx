@@ -1,10 +1,10 @@
 import { useEffect, useImperativeHandle, useRef } from "react";
 import * as Blockly from "blockly";
 import {
+  type BlocksRobotKind,
   generateCpp,
   generateJavaScript,
   generatePython,
-  type RobotKind,
   starterWorkspace,
   toolboxFor,
 } from "./blocks/okroboBlocks";
@@ -36,7 +36,7 @@ const darkTheme = Blockly.Theme.defineTheme("okrobo-dark", {
 
 export interface BlocksPanelProps {
   /** Which robot's blocks and starter program to use. Remount (key) to switch. */
-  robot: RobotKind;
+  robot: BlocksRobotKind;
   /** Called with regenerated (javascript, python, cpp) after every real edit. */
   onCode: (js: string, python: string, cpp: string) => void;
   /**

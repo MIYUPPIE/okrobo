@@ -1,8 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { BlocksPanel } from "../BlocksPanel";
+import { setBuiltRobotFields } from "../blocks/okroboBlocks";
 import { validateRobotDef, type RobotDef, type Transform } from "../contracts/robotDef";
 import type { WorldDef } from "../contracts/worldDef";
 import { EngineBuiltRobot } from "../engine/EngineBuiltRobot";
 import { ENGINE_MISSING_MESSAGE, loadEngine } from "../engine/loader";
+import { BuiltProgramRunner } from "../program/BuiltProgramRunner";
+import { runProgram } from "../program/execute";
+import { ProgramStoppedError } from "../program/ProgramRunner";
 import { ActuatorPanel } from "./ActuatorPanel";
 import { BodyInspector } from "./BodyInspector";
 import { BuilderViewport, type GizmoMode } from "./BuilderViewport";
@@ -34,6 +39,8 @@ export interface BuilderPanelProps {
 
 type BuilderMode = "edit" | "test";
 type TestStatus = "loading" | "ready" | "missing" | "error";
+type ProgramTab = "Blocks" | "Python" | "C++";
+type ProgramStatus = "idle" | "running" | "error";
 
 export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   const [selectedBodyId, setSelectedBodyId] = useState<string | null>(robot.bodies[0]?.id ?? null);
@@ -52,6 +59,14 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   const [worldOptionId, setWorldOptionId] = useState("");
   const [worldDef, setWorldDef] = useState<WorldDef | null>(null);
 
+  // Robot Builder Phase 6 (Programming).
+  const [builtRunner, setBuiltRunner] = useState<BuiltProgramRunner | null>(null);
+  const [programTab, setProgramTab] = useState<ProgramTab>("Blocks");
+  const [programCode, setProgramCode] = useState({ js: "", python: "", cpp: "" });
+  const [programStatus, setProgramStatus] = useState<ProgramStatus>("idle");
+  const [programError, setProgramError] = useState("");
+  const programActiveRef = useRef(false);
+
   const issues = useMemo(() => validateRobotDef(robot), [robot]);
   const errorCount = issues.filter((i) => i.severity === "error").length;
   const selectedBody = selectedBodyId ? (robot.bodies.find((b) => b.id === selectedBodyId) ?? null) : null;
@@ -67,6 +82,13 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
         if (cancelled) return;
         created = new EngineBuiltRobot(module, robot, worldDef ?? undefined);
         setBuiltRobot(created);
+        // Robot Builder Phase 6: a fresh runner per built instance -- picking
+        // a different world rebuilds both together, so a program never holds
+        // a stale reference to a destroyed EngineBuiltRobot.
+        setBuiltRunner(new BuiltProgramRunner(created, robot));
+        setProgramStatus("idle");
+        setProgramError("");
+        programActiveRef.current = false;
         setTestStatus("ready");
       })
       .catch((error: unknown) => {
@@ -79,6 +101,7 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
       cancelled = true;
       created?.destroy();
       setBuiltRobot(null);
+      setBuiltRunner(null);
     };
     // Deliberately omits `robot`: entering Test mode snapshots `robot` at
     // that moment and never rebuilds mid-test even if `robot` changes --
@@ -105,6 +128,43 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
     onChange({ ...robot, bodies: robot.bodies.map((b) => (b.id === bodyId ? { ...b, transform } : b)) });
     setTransformEpoch((n) => n + 1);
   };
+
+  // Robot Builder Phase 6: mirrors App.tsx's own run()/stop() shape for the
+  // Car/Arm/Drone pipeline -- abort-if-already-running, arm(), set status,
+  // runProgram().then/.catch/.finally, zero every actuator on the way out
+  // so a finished (or stopped) program leaves the robot at rest.
+  const runProgramCode = () => {
+    if (!builtRunner) return;
+    if (programActiveRef.current) builtRunner.abort();
+    builtRunner.arm();
+    programActiveRef.current = true;
+    setProgramStatus("running");
+    setProgramError("");
+    runProgram(programCode.js, builtRunner.api)
+      .then(() => setProgramStatus("idle"))
+      .catch((error: unknown) => {
+        if (error instanceof ProgramStoppedError) {
+          setProgramStatus("idle");
+        } else {
+          setProgramStatus("error");
+          setProgramError(error instanceof Error ? error.message : String(error));
+        }
+      })
+      .finally(() => {
+        programActiveRef.current = false;
+        builtRunner.abort();
+      });
+  };
+
+  const stopProgram = () => builtRunner?.abort();
+
+  // Robot Builder Phase 6: must run before BlocksPanel's own mount effect
+  // calls Blockly.inject below (which renders the flyout's block previews
+  // immediately) -- a useEffect here would run after the child's mount
+  // effect and lose that race, the same ordering hazard BlocksPanel.tsx's
+  // own initialWorkspace doc comment flags. An idempotent module-variable
+  // write, safe to repeat under StrictMode's double-render.
+  if (builderMode === "test") setBuiltRobotFields(robot.actuators, robot.sensors);
 
   return (
     <>
@@ -178,16 +238,69 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
               </select>
             </label>
           </div>
-          {testStatus === "ready" && builtRobot ? (
-            <TestViewport robot={robot} builtRobot={builtRobot} world={worldDef ?? undefined} />
-          ) : (
-            <div className="test-status-note">
-              {testStatus === "loading" && "Loading physics engine…"}
-              {testStatus === "missing" && "Engine not built: run ./scripts/build-engine-wasm.sh, then reload"}
-              {testStatus === "error" && `Couldn't simulate this robot: ${testError}`}
+          <div className="builder-test-main">
+            {testStatus === "ready" && builtRobot && builtRunner ? (
+              <TestViewport robot={robot} builtRobot={builtRobot} world={worldDef ?? undefined} runner={builtRunner} />
+            ) : (
+              <div className="test-status-note">
+                {testStatus === "loading" && "Loading physics engine…"}
+                {testStatus === "missing" && "Engine not built: run ./scripts/build-engine-wasm.sh, then reload"}
+                {testStatus === "error" && `Couldn't simulate this robot: ${testError}`}
+              </div>
+            )}
+            <p className="test-mode-note">Physics here doesn't affect your document -- exiting Test resets it.</p>
+          </div>
+          <div className="builder-program-drawer">
+            <div className="builder-program-header">
+              <div className="builder-program-actions">
+                <button type="button" onClick={runProgramCode} disabled={!builtRunner || programStatus === "running"}>
+                  ▶ Run
+                </button>
+                <button type="button" onClick={stopProgram} disabled={programStatus !== "running"}>
+                  ⏹ Stop
+                </button>
+              </div>
+              <span className="builder-program-status">
+                {programStatus === "running" && "running…"}
+                {programStatus === "error" && `error: ${programError}`}
+                {programStatus === "idle" && "idle"}
+              </span>
             </div>
-          )}
-          <p className="test-mode-note">Physics here doesn't affect your document -- exiting Test resets it.</p>
+            <div className="code-tabs">
+              {(["Blocks", "Python", "C++"] as ProgramTab[]).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  className={t === programTab ? "code-tab active" : "code-tab"}
+                  onClick={() => setProgramTab(t)}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+            <div className="code-content">
+              <div className={programTab === "Blocks" ? "tab-panel active" : "tab-panel"}>
+                <BlocksPanel
+                  robot="built"
+                  onCode={(js, python, cpp) => setProgramCode({ js, python, cpp })}
+                />
+              </div>
+              <div className={programTab === "Python" ? "tab-panel active padded" : "tab-panel padded"}>
+                <pre className="cpp-preview">{programCode.python}</pre>
+                <p className="placeholder-note">
+                  Illustrative preview only -- there is no real Python API for a built robot yet
+                  (a future phase). This isn't runnable here.
+                </p>
+              </div>
+              <div className={programTab === "C++" ? "tab-panel active padded" : "tab-panel padded"}>
+                <pre className="cpp-preview">{programCode.cpp}</pre>
+                <p className="placeholder-note">
+                  Illustrative preview only -- there is no real C++ SDK for a built robot yet
+                  (a future phase). This isn't runnable here.
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

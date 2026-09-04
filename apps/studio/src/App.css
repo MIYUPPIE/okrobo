@@ -1142,6 +1142,8 @@ body {
 .builder-stage {
   grid-area: stage;
   position: relative;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
@@ -1212,6 +1214,63 @@ body {
   border-radius: 4px;
   font-size: 12px;
   padding: 3px 6px;
+}
+
+/* Test-mode program drawer (Robot Builder Phase 6). .builder-stage is now a
+   column flexbox (harmless for Edit mode: BuilderViewport's .viewport-3d
+   and .builder-toolbar are both position:absolute, so they ignore it) with
+   two children in Test mode: .builder-test-main (flex:1, everything
+   .builder-toolbar/.test-viewport/.test-mode-note used to anchor straight
+   to .builder-stage now anchors to instead) and this fixed-height drawer,
+   reusing App.tsx's own .code-tabs/.code-content/.tab-panel classes. */
+.builder-test-main {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+}
+
+.builder-program-drawer {
+  flex: 0 0 240px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.builder-program-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.builder-program-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.builder-program-actions button {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.builder-program-actions button:disabled {
+  color: var(--text-dim);
+  opacity: 0.5;
+  cursor: default;
+}
+
+.builder-program-status {
+  font-size: 11px;
+  color: var(--text-dim);
 }
 
 .builder-inspector {

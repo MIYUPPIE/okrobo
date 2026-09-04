@@ -6,11 +6,16 @@ import * as Blockly from "blockly/core";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   ARM_STARTER_WORKSPACE,
+  BUILT_STARTER_WORKSPACE,
+  BUILT_TOOLBOX,
   DRONE_STARTER_WORKSPACE,
   generateCpp,
   generateJavaScript,
   generatePython,
+  setBuiltRobotFields,
   STARTER_WORKSPACE,
+  starterWorkspace,
+  toolboxFor,
 } from "./okroboBlocks";
 
 const ENGINE_DIR = join(process.cwd(), "..", "..", "engine");
@@ -527,5 +532,88 @@ describe("block code generation", () => {
     expect(generateCpp(load(waitOnly), "arm")).toContain("arm.wait(2);");
     workspace.dispose();
     expect(generateCpp(load(waitOnly), "car")).toContain("robot.wait(2);");
+  });
+});
+
+describe("built-robot blocks (Robot Builder Phase 6)", () => {
+  afterEach(() => setBuiltRobotFields([], []));
+
+  it("falls back to a placeholder, empty-id option when the document has no actuators/sensors", () => {
+    setBuiltRobotFields([], []);
+    const js = generateJavaScript(
+      load({
+        blocks: {
+          languageVersion: 0,
+          blocks: [
+            { type: "okrobo_built_set_actuator", x: 0, y: 0, fields: { VALUE: 5 } },
+            { type: "okrobo_built_read_sensor", x: 0, y: 40 },
+          ],
+        },
+      }),
+    );
+    // An empty id (nothing to choose from) is a documented no-op/0, not a
+    // runtime error -- see okroboBlocks.ts's forBlock comment.
+    expect(js).not.toContain("robot.set(");
+    expect(js).toContain("0");
+  });
+
+  it("generates JS that calls robot.set(id, value) for a resolved actuator id", () => {
+    setBuiltRobotFields([{ id: "wheel_motor", name: "Wheel Motor" }], []);
+    const js = generateJavaScript(
+      load({
+        blocks: {
+          languageVersion: 0,
+          blocks: [{ type: "okrobo_built_set_actuator", x: 0, y: 0, fields: { ACTUATOR: "wheel_motor", VALUE: 0.5 } }],
+        },
+      }),
+    );
+    expect(js).toContain('robot.set("wheel_motor", 0.5);');
+  });
+
+  it("generates JS that calls robot.read(id)[0] for a resolved sensor id", () => {
+    setBuiltRobotFields([], [{ id: "front_lidar", name: "Front Lidar" }]);
+    const js = generateJavaScript(
+      load({
+        blocks: {
+          languageVersion: 0,
+          blocks: [{ type: "okrobo_built_read_sensor", x: 0, y: 0, fields: { SENSOR: "front_lidar" } }],
+        },
+      }),
+    );
+    expect(js).toContain('robot.read("front_lidar")[0]');
+  });
+
+  it("Python/C++ previews are illustrative-only, not claiming a real package/SDK exists", () => {
+    setBuiltRobotFields([{ id: "wheel_motor", name: "Wheel Motor" }], [{ id: "front_lidar", name: "Front Lidar" }]);
+    const ws = () =>
+      load({
+        blocks: {
+          languageVersion: 0,
+          blocks: [{ type: "okrobo_built_set_actuator", x: 0, y: 0, fields: { ACTUATOR: "wheel_motor", VALUE: 1 } }],
+        },
+      });
+
+    const py = generatePython(ws(), "built");
+    expect(py).toContain("Illustrative only");
+    expect(py).toContain('robot.set("wheel_motor", 1)');
+    expect(py).not.toContain("from okrobo");
+    workspace.dispose();
+
+    const cpp = generateCpp(ws(), "built");
+    expect(cpp).toContain("Illustrative only");
+    expect(cpp).toContain('robot.set("wheel_motor", 1);');
+    expect(cpp).not.toContain("#include");
+  });
+
+  it("toolboxFor/starterWorkspace resolve the built-robot variants", () => {
+    expect(toolboxFor("built")).toBe(BUILT_TOOLBOX);
+    expect(starterWorkspace("built")).toBe(BUILT_STARTER_WORKSPACE);
+  });
+
+  it("the built starter workspace is a single wait block, not seeded with any actuator/sensor id", () => {
+    const js = generateJavaScript(load(BUILT_STARTER_WORKSPACE));
+    expect(js).toContain("await robot.wait(1);");
+    expect(js).not.toContain("robot.set(");
+    expect(js).not.toContain("robot.read(");
   });
 });

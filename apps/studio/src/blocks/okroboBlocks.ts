@@ -241,6 +241,79 @@ if (!Blockly.Blocks["okrobo_forward"]) {
   ]);
 }
 
+// ---- Robot Builder Phase 6: built-robot blocks (dynamic dropdowns) ------
+//
+// Every block above is defined via defineBlocksWithJsonArray, whose dropdown
+// `options` field only accepts a literal array
+// (FieldDropdownFromJsonConfig.options: MenuOption[], checked against
+// node_modules/blockly/core/field_dropdown.d.ts) -- there is no JSON path
+// for a dynamic dropdown. These two blocks are defined imperatively instead,
+// passing a MenuGeneratorFunction straight into `new Blockly.FieldDropdown(fn)`
+// (its constructor accepts either a literal array or a generator function) --
+// the function is re-invoked fresh every time the dropdown opens, so it
+// always reflects the current built robot's document. See
+// docs/decisions/robot-builder-programming.md.
+
+let builtActuatorFields: Array<{ id: string; name: string }> = [];
+let builtSensorFields: Array<{ id: string; name: string }> = [];
+
+/** Called once before a "built" BlocksPanel mounts (BuilderPanel.tsx), so
+ * the dropdowns below reflect the current document's own actuators/sensors.
+ * Test mode only ever has one Blockly workspace live at a time, so a
+ * module-level list -- not a per-workspace closure, which Blockly's JSON
+ * block style has no mechanism for anyway -- is the simplest correct
+ * mechanism here. */
+export function setBuiltRobotFields(
+  actuators: Array<{ id: string; name: string }>,
+  sensors: Array<{ id: string; name: string }>,
+): void {
+  builtActuatorFields = actuators;
+  builtSensorFields = sensors;
+}
+
+// validateOptions (called synchronously at field construction) throws on an
+// empty array -- Build mode has no joint/actuator-authoring UI yet, so a
+// freshly-built robot with zero actuators/sensors is the common case, not
+// an edge case.
+function builtActuatorOptions(): Blockly.MenuOption[] {
+  if (builtActuatorFields.length === 0) return [["(no actuators)", ""]];
+  return builtActuatorFields.map((a): Blockly.MenuOption => [a.name, a.id]);
+}
+
+function builtSensorOptions(): Blockly.MenuOption[] {
+  if (builtSensorFields.length === 0) return [["(no sensors)", ""]];
+  return builtSensorFields.map((s): Blockly.MenuOption => [s.name, s.id]);
+}
+
+if (!Blockly.Blocks["okrobo_built_set_actuator"]) {
+  Blockly.Blocks["okrobo_built_set_actuator"] = {
+    init(this: Blockly.Block) {
+      this.appendDummyInput()
+        .appendField("set")
+        .appendField(new Blockly.FieldDropdown(builtActuatorOptions), "ACTUATOR")
+        .appendField("to")
+        .appendField(new Blockly.FieldNumber(0), "VALUE");
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour(290);
+      this.setTooltip("Set an actuator's control value immediately");
+    },
+  };
+}
+
+if (!Blockly.Blocks["okrobo_built_read_sensor"]) {
+  Blockly.Blocks["okrobo_built_read_sensor"] = {
+    init(this: Blockly.Block) {
+      this.appendDummyInput()
+        .appendField("read")
+        .appendField(new Blockly.FieldDropdown(builtSensorOptions), "SENSOR");
+      this.setOutput(true, "Number");
+      this.setColour(25);
+      this.setTooltip("The named sensor's first numeric reading");
+    },
+  };
+}
+
 javascriptGenerator.forBlock["okrobo_forward"] = (block) =>
   `await robot.forward(${block.getFieldValue("METERS")});\n`;
 javascriptGenerator.forBlock["okrobo_backward"] = (block) =>
@@ -291,6 +364,20 @@ javascriptGenerator.forBlock["okrobo_drone_turn_right"] = (block) =>
   `await robot.droneTurnRight(${block.getFieldValue("DEGREES")});\n`;
 javascriptGenerator.forBlock["okrobo_drone_altitude"] = () => ["robot.droneAltitude()", JsOrder.FUNCTION_CALL];
 javascriptGenerator.forBlock["okrobo_drone_distance"] = () => ["robot.droneDistance()", JsOrder.FUNCTION_CALL];
+// An empty-string id means the dropdown fell back to its "(no actuators/
+// sensors)" placeholder (an empty document) -- a no-op/0 rather than a
+// runtime error, since the student didn't choose an invalid id, there was
+// simply nothing to choose.
+javascriptGenerator.forBlock["okrobo_built_set_actuator"] = (block) => {
+  const id = block.getFieldValue("ACTUATOR");
+  if (!id) return "\n";
+  return `robot.set(${JSON.stringify(id)}, ${block.getFieldValue("VALUE")});\n`;
+};
+javascriptGenerator.forBlock["okrobo_built_read_sensor"] = (block) => {
+  const id = block.getFieldValue("SENSOR");
+  if (!id) return ["0", JsOrder.ATOMIC];
+  return [`(robot.read(${JSON.stringify(id)})[0] ?? 0)`, JsOrder.FUNCTION_CALL];
+};
 
 pythonGenerator.forBlock["okrobo_forward"] = (block) =>
   `robot.forward(${block.getFieldValue("METERS")})\n`;
@@ -341,6 +428,19 @@ pythonGenerator.forBlock["okrobo_drone_turn_right"] = (block) =>
   `drone.turn_right(${block.getFieldValue("DEGREES")})\n`;
 pythonGenerator.forBlock["okrobo_drone_altitude"] = () => ["drone.altitude()", PyOrder.FUNCTION_CALL];
 pythonGenerator.forBlock["okrobo_drone_distance"] = () => ["drone.distance()", PyOrder.FUNCTION_CALL];
+// Illustrative preview text only -- no real okrobo.BuiltRobot package exists
+// (see the "built" branch of generatePython below and
+// docs/decisions/robot-builder-programming.md).
+pythonGenerator.forBlock["okrobo_built_set_actuator"] = (block) => {
+  const id = block.getFieldValue("ACTUATOR");
+  if (!id) return "\n";
+  return `${pythonReceiver}.set("${id}", ${block.getFieldValue("VALUE")})\n`;
+};
+pythonGenerator.forBlock["okrobo_built_read_sensor"] = (block) => {
+  const id = block.getFieldValue("SENSOR");
+  if (!id) return ["0", PyOrder.ATOMIC];
+  return [`${pythonReceiver}.read("${id}")[0]`, PyOrder.MEMBER];
+};
 
 // ---- C++: real code against engine/api/{robot,arm,drone}.hpp ------------
 //
@@ -413,6 +513,18 @@ cppGenerator.forBlock["okrobo_drone_turn_right"] = (block) =>
   `drone.turn_right(${block.getFieldValue("DEGREES")});\n`;
 cppGenerator.forBlock["okrobo_drone_altitude"] = () => ["drone.altitude()", JsOrder.FUNCTION_CALL];
 cppGenerator.forBlock["okrobo_drone_distance"] = () => ["drone.distance()", JsOrder.FUNCTION_CALL];
+// Illustrative preview text only -- no real engine/api/built_robot.hpp
+// exists (see the "built" branch of generateCpp below).
+cppGenerator.forBlock["okrobo_built_set_actuator"] = (block) => {
+  const id = block.getFieldValue("ACTUATOR");
+  if (!id) return "\n";
+  return `${cppReceiver}.set("${id}", ${block.getFieldValue("VALUE")});\n`;
+};
+cppGenerator.forBlock["okrobo_built_read_sensor"] = (block) => {
+  const id = block.getFieldValue("SENSOR");
+  if (!id) return ["0", JsOrder.ATOMIC];
+  return [`${cppReceiver}.read("${id}")[0]`, JsOrder.MEMBER];
+};
 
 const CPP_INCLUDE_BY_ROBOT: Record<RobotKind, string> = {
   car: '#include "robot.hpp"\n',
@@ -426,8 +538,16 @@ const CPP_MAIN_BY_ROBOT: Record<RobotKind, string> = {
 };
 const LIDAR_BLOCK_TYPES = ["okrobo_lidar_min"];
 
-export function generateCpp(workspace: Blockly.Workspace, robot: RobotKind = "car"): string {
-  cppReceiver = RECEIVER_BY_ROBOT[robot];
+// Robot Builder Phase 6: no engine/api/built_robot.hpp exists (a future
+// phase's non-goal, see docs/decisions/robot-builder-programming.md) --
+// these two constants are the "built" branch's illustrative-only substitute
+// for CPP_INCLUDE_BY_ROBOT/CPP_MAIN_BY_ROBOT below, not a real SDK header.
+const BUILT_CPP_INCLUDE = "// Illustrative only -- no engine/api/built_robot.hpp exists yet.\n";
+const BUILT_CPP_MAIN =
+  "int main() {\n  // A real built-robot C++ SDK is future work; this previews the\n  // same shape Blocks/Python already use.\n\n";
+
+export function generateCpp(workspace: Blockly.Workspace, robot: BlocksRobotKind = "car"): string {
+  cppReceiver = robot === "built" ? "robot" : RECEIVER_BY_ROBOT[robot];
   const body = cppGenerator.workspaceToCode(workspace);
   cppReceiver = "robot";
   // 2 spaces, matching the borrowed JS generator's own internal indent width
@@ -437,6 +557,10 @@ export function generateCpp(workspace: Blockly.Workspace, robot: RobotKind = "ca
     .map((line) => (line ? `  ${line}` : line))
     .join("\n")
     .replace(/\n+$/, "\n");
+
+  if (robot === "built") {
+    return `${BUILT_CPP_INCLUDE}\n${BUILT_CPP_MAIN}${indented}\n  return 0;\n}\n`;
+  }
 
   const usesBlock = (types: string[]) =>
     types.some((type) => workspace.getBlocksByType(type, false).length > 0);
@@ -451,6 +575,12 @@ export function generateCpp(workspace: Blockly.Workspace, robot: RobotKind = "ca
 }
 
 export type RobotKind = "car" | "arm" | "drone";
+/** Widens RobotKind for Blockly-facing signatures only (BlocksPanel's prop,
+ * toolboxFor/starterWorkspace/generatePython/generateCpp) -- RobotKind
+ * itself stays untouched since it's also used by App.tsx's Simulate-mode
+ * robot picker, LessonsPanel.tsx, and packs/lesson.ts's Lesson.robot (pack
+ * content), none of which can ever target a built robot. */
+export type BlocksRobotKind = RobotKind | "built";
 
 const COMMON_TOOLBOX_TAIL = [
   { kind: "block", type: "controls_if" },
@@ -509,6 +639,16 @@ export const DRONE_TOOLBOX = {
     { kind: "block", type: "okrobo_wait" },
     { kind: "block", type: "okrobo_drone_altitude" },
     { kind: "block", type: "okrobo_drone_distance" },
+    ...COMMON_TOOLBOX_TAIL,
+  ],
+};
+
+export const BUILT_TOOLBOX = {
+  kind: "flyoutToolbox",
+  contents: [
+    { kind: "block", type: "okrobo_built_set_actuator" },
+    { kind: "block", type: "okrobo_built_read_sensor" },
+    { kind: "block", type: "okrobo_wait" },
     ...COMMON_TOOLBOX_TAIL,
   ],
 };
@@ -667,14 +807,26 @@ export const DRONE_STARTER_WORKSPACE = {
   },
 };
 
-export function starterWorkspace(robot: RobotKind): object {
+/** A single wait block -- deliberately not seeded with any actuator/sensor
+ * id, since those are student-chosen and per-document, so no universal
+ * starter can safely reference one. */
+export const BUILT_STARTER_WORKSPACE = {
+  blocks: {
+    languageVersion: 0,
+    blocks: [{ type: "okrobo_wait", x: 24, y: 24, fields: { SECONDS: 1 } }],
+  },
+};
+
+export function starterWorkspace(robot: BlocksRobotKind): object {
   if (robot === "arm") return ARM_STARTER_WORKSPACE;
   if (robot === "drone") return DRONE_STARTER_WORKSPACE;
+  if (robot === "built") return BUILT_STARTER_WORKSPACE;
   return STARTER_WORKSPACE;
 }
 
-export function toolboxFor(robot: RobotKind): Blockly.utils.toolbox.ToolboxDefinition {
-  const toolbox = robot === "arm" ? ARM_TOOLBOX : robot === "drone" ? DRONE_TOOLBOX : TOOLBOX;
+export function toolboxFor(robot: BlocksRobotKind): Blockly.utils.toolbox.ToolboxDefinition {
+  const toolbox =
+    robot === "arm" ? ARM_TOOLBOX : robot === "drone" ? DRONE_TOOLBOX : robot === "built" ? BUILT_TOOLBOX : TOOLBOX;
   return toolbox as Blockly.utils.toolbox.ToolboxDefinition;
 }
 
@@ -693,10 +845,19 @@ const PYTHON_HEADERS: Record<RobotKind, string> = {
 
 const VISION_BLOCK_TYPES = ["okrobo_see_color", "okrobo_color_bearing"];
 
-export function generatePython(workspace: Blockly.Workspace, robot: RobotKind = "car"): string {
-  pythonReceiver = RECEIVER_BY_ROBOT[robot];
+// Robot Builder Phase 6: no okrobo.BuiltRobot package exists -- this header
+// is the "built" branch's illustrative-only substitute for PYTHON_HEADERS
+// below, not a real package import.
+const BUILT_PYTHON_HEADER =
+  "# Illustrative only -- no okrobo.BuiltRobot exists yet.\n# A real built-robot Python API is future work; this previews the same\n# shape Blocks/C++ already use.\nrobot = ...\n\n";
+
+export function generatePython(workspace: Blockly.Workspace, robot: BlocksRobotKind = "car"): string {
+  pythonReceiver = robot === "built" ? "robot" : RECEIVER_BY_ROBOT[robot];
   const body = pythonGenerator.workspaceToCode(workspace);
   pythonReceiver = "robot";
+
+  if (robot === "built") return BUILT_PYTHON_HEADER + body;
+
   // Only import find_color when a vision block is actually on the workspace,
   // so a plain move/turn program's preview doesn't grow an unused import.
   const usesVision = VISION_BLOCK_TYPES.some(

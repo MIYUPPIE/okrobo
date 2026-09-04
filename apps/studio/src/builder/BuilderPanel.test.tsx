@@ -20,6 +20,13 @@ vi.mock("./BuilderViewport", () => ({
 vi.mock("./TestViewport", () => ({
   TestViewport: () => <div data-testid="test-viewport-stub" />,
 }));
+// jsdom has no ResizeObserver and can't lay out real SVG, both of which
+// Blockly.inject needs -- same reason BuilderViewport/TestViewport are
+// mocked above. BlocksPanel is only ever exercised for real via the
+// browser CDP e2e check (scripts/lib/studio-e2e-check.mjs).
+vi.mock("../BlocksPanel", () => ({
+  BlocksPanel: (props: { robot: string }) => <div data-testid="blocks-panel-stub" data-robot={props.robot} />,
+}));
 
 const identity = { position: [0, 0, 0] as [number, number, number], rotation_rpy: [0, 0, 0] as [number, number, number] };
 const inertia = { ixx: 0.01, iyy: 0.01, izz: 0.01 };
@@ -134,6 +141,52 @@ describe("BuilderPanel", () => {
     expect(screen.getByRole("option", { name: "None (floor only)" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Obstacle Course" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Ramp" })).toBeInTheDocument();
+  });
+
+  // Robot Builder Phase 6: the Test-mode program drawer.
+  it("the program drawer only renders in Test mode", async () => {
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={() => {}} />);
+
+    expect(screen.queryByText("▶ Run")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Test" }));
+    await waitFor(() => expect(screen.getByTestId("test-viewport-stub")).toBeInTheDocument(), { timeout: 10000 });
+    expect(screen.getByText("▶ Run")).toBeInTheDocument();
+    expect(screen.getByTestId("blocks-panel-stub")).toHaveAttribute("data-robot", "built");
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.queryByText("▶ Run")).not.toBeInTheDocument();
+  });
+
+  it("Run is disabled until the physics engine is ready, Stop is disabled until a program is running", async () => {
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Test" }));
+    expect(screen.getByRole("button", { name: "▶ Run" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "⏹ Stop" })).toBeDisabled();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "▶ Run" })).not.toBeDisabled(), { timeout: 10000 });
+    expect(screen.getByRole("button", { name: "⏹ Stop" })).toBeDisabled();
+  });
+
+  it("clicking Run drives a real BuiltProgramRunner and never mutates the document", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={onChange} />);
+
+    await user.click(screen.getByRole("button", { name: "Test" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "▶ Run" })).not.toBeDisabled(), { timeout: 10000 });
+
+    expect(screen.getByText("idle")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "▶ Run" }));
+    // The mocked BlocksPanel never calls onCode, so the compiled program is
+    // an empty async function -- it runs against the real BuiltProgramRunner
+    // (real EngineBuiltRobot, mocked viewport, same pattern this file
+    // already uses) and finishes immediately, back to idle.
+    await waitFor(() => expect(screen.getByText("idle")).toBeInTheDocument(), { timeout: 10000 });
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it("picking a world from the Test-mode picker doesn't crash or mutate the document", async () => {
