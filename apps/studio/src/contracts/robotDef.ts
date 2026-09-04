@@ -70,6 +70,8 @@ export type Joint =
   | (JointCommon & { type: "ball"; damping?: number })
   | (JointCommon & { type: "free" });
 
+export type JointType = Joint["type"];
+
 export type ActuatorType = "motor" | "servo" | "force" | "torque" | "velocity";
 
 export interface ActuatorLimits {

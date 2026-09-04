@@ -1,8 +1,11 @@
 // Pure document-editing helpers for the Robot Builder: default starter
-// content and cascading a body deletion through the joints/actuators/
-// sensors that reference it. No React, no three.js.
+// content, cascading a body deletion through the joints/actuators/sensors
+// that reference it, and joint-authoring helpers (computing an origin,
+// diffing validation issues). Uses three.js's Matrix4/Quaternion purely as
+// numeric utilities (no scene graph, no rendering) -- still no React.
 
-import type { Body, RobotDef } from "../contracts/robotDef";
+import * as THREE from "three";
+import type { Body, Issue, RobotDef, Transform } from "../contracts/robotDef";
 
 const DEFAULT_STARTER_COLOR: [number, number, number] = [0.3, 0.5, 0.9];
 const DEFAULT_BODY_COLOR: [number, number, number] = [0.6, 0.6, 0.6];
@@ -70,4 +73,59 @@ export function removeBody(robot: RobotDef, bodyId: string): RobotDef {
   const actuators = robot.actuators.filter((a) => !removedJointIds.has(a.target_joint));
   const sensors = robot.sensors.filter((s) => s.body !== bodyId && !(s.joint !== undefined && removedJointIds.has(s.joint)));
   return { ...robot, bodies, joints, actuators, sensors };
+}
+
+/** "joint-N", bumped past any existing id collision -- mirrors nextBodyId. */
+export function nextJointId(robot: RobotDef): string {
+  const existing = new Set(robot.joints.map((j) => j.id));
+  let n = robot.joints.length + 1;
+  while (existing.has(`joint-${n}`)) n += 1;
+  return `joint-${n}`;
+}
+
+function matrixFromTransform(transform: Transform): THREE.Matrix4 {
+  const position = new THREE.Vector3(...transform.position);
+  const euler = new THREE.Euler(transform.rotation_rpy[0], transform.rotation_rpy[1], transform.rotation_rpy[2], "XYZ");
+  const quaternion = new THREE.Quaternion().setFromEuler(euler);
+  return new THREE.Matrix4().compose(position, quaternion, new THREE.Vector3(1, 1, 1));
+}
+
+function transformFromMatrix(matrix: THREE.Matrix4): Transform {
+  const position = new THREE.Vector3();
+  const quaternion = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  matrix.decompose(position, quaternion, scale);
+  const euler = new THREE.Euler().setFromQuaternion(quaternion, "XYZ");
+  return { position: [position.x, position.y, position.z], rotation_rpy: [euler.x, euler.y, euler.z] };
+}
+
+/** The joint origin that keeps `child`'s current world pose unchanged once
+ * it's attached to `parent`. Before this joint exists, both bodies are
+ * independent roots and their own `transform` is root-relative; a joint's
+ * `origin` instead means "child's pose expressed in parent's frame," so
+ * this composes real 4x4 matrices (not a naive position subtraction, since
+ * either body may already be rotated) to convert one into the other.
+ * Callers reset the child's own `transform` to identity after applying
+ * this, matching how the shipped templates author a jointed child's mount
+ * point entirely through the joint's origin. */
+export function computeJointOrigin(parent: Body, child: Body): Transform {
+  const parentMatrix = matrixFromTransform(parent.transform);
+  const childMatrix = matrixFromTransform(child.transform);
+  const origin = new THREE.Matrix4().copy(parentMatrix).invert().multiply(childMatrix);
+  return transformFromMatrix(origin);
+}
+
+function issueKey(issue: Issue): string {
+  return `${issue.rule}:${issue.element_kind ?? ""}:${issue.element_id ?? ""}`;
+}
+
+/** Issues present in `after` that weren't already present in `before`,
+ * matched by rule+element_kind+element_id. Lets an authoring UI (JointCreator)
+ * show exactly what a proposed change would newly break without needing to
+ * predict in advance which specific element a rule like robot-cycle will
+ * attach its error to -- that's still validateRobotDef's own call, this
+ * just isolates the delta. Generic, not joint-specific. */
+export function issuesIntroducedBy(before: Issue[], after: Issue[]): Issue[] {
+  const seen = new Set(before.map(issueKey));
+  return after.filter((issue) => !seen.has(issueKey(issue)));
 }

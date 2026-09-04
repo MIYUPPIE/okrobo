@@ -13,6 +13,7 @@ import { BodyInspector } from "./BodyInspector";
 import { BuilderViewport, type GizmoMode } from "./BuilderViewport";
 import { exportRobotDef } from "./exportRobot";
 import { HierarchyList } from "./HierarchyList";
+import { JointCreator } from "./JointCreator";
 import { makeDefaultBody, nextBodyId, removeBody } from "./robotEdits";
 import { SensorPanel } from "./SensorPanel";
 import { TestViewport } from "./TestViewport";
@@ -42,10 +43,19 @@ type BuilderMode = "edit" | "test";
 type TestStatus = "loading" | "ready" | "missing" | "error";
 type ProgramTab = "Blocks" | "Python" | "C++";
 type ProgramStatus = "idle" | "running" | "error";
+/** "transform" is the ordinary select-and-gizmo tool; "add-joint" is the
+ * joint-authoring tool (parent-then-child viewport picking). */
+type BuilderTool = "transform" | "add-joint";
+interface JointDraft {
+  parentId: string;
+  childId?: string;
+}
 
 export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   const [selectedBodyId, setSelectedBodyId] = useState<string | null>(robot.bodies[0]?.id ?? null);
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
+  const [builderTool, setBuilderTool] = useState<BuilderTool>("transform");
+  const [jointDraft, setJointDraft] = useState<JointDraft | null>(null);
   // Bumped only on a gizmo commit (not on the inspector's own Apply), so
   // BodyInspector resyncs its draft when a drag moved the body it's
   // showing -- mirrors App.tsx's existing worldEpoch convention.
@@ -130,6 +140,31 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
     setTransformEpoch((n) => n + 1);
   };
 
+  const toggleJointTool = () => {
+    setBuilderTool((current) => (current === "add-joint" ? "transform" : "add-joint"));
+    setJointDraft(null);
+  };
+
+  /** Parent-then-child picking for the Add Joint tool -- shared by both the
+   * 3D viewport's raycast picking (BuilderViewport's jointPick prop) and
+   * HierarchyList's own rows (a real DOM button, unlike a 3D click, so this
+   * is also what a real end-to-end browser check drives). Re-picking the
+   * current parent is a no-op (not a self-loop draft) rather than an error
+   * -- it's clearly just a misclick, not an attempt to joint a body to itself. */
+  const handleJointPick = (bodyId: string) => {
+    setJointDraft((current) => {
+      if (!current) return { parentId: bodyId };
+      if (!current.childId) return bodyId === current.parentId ? current : { ...current, childId: bodyId };
+      return current;
+    });
+  };
+
+  const applyJoint = (next: RobotDef) => {
+    onChange(next);
+    setBuilderTool("transform");
+    setJointDraft(null);
+  };
+
   // Robot Builder Phase 6: mirrors App.tsx's own run()/stop() shape for the
   // Car/Arm/Drone pipeline -- abort-if-already-running, arm(), set status,
   // runProgram().then/.catch/.finally, zero every actuator on the way out
@@ -198,7 +233,11 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
             Test
           </button>
         </div>
-        <HierarchyList robot={robot} selectedBodyId={selectedBodyId} onSelect={setSelectedBodyId} />
+        <HierarchyList
+          robot={robot}
+          selectedBodyId={builderTool === "add-joint" ? (jointDraft?.parentId ?? null) : selectedBodyId}
+          onSelect={builderTool === "add-joint" ? handleJointPick : setSelectedBodyId}
+        />
         {builderMode === "edit" && (
           <button type="button" className="builder-add-body" onClick={addBody}>
             + Add body
@@ -214,15 +253,38 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
             onSelectBody={setSelectedBodyId}
             onTransformBody={transformBody}
             gizmoMode={gizmoMode}
+            jointPick={builderTool === "add-joint" ? { parentId: jointDraft?.parentId ?? null, onPick: handleJointPick } : undefined}
           />
           <div className="builder-toolbar">
-            <button type="button" className={gizmoMode === "translate" ? "active" : ""} onClick={() => setGizmoMode("translate")}>
+            <button
+              type="button"
+              className={gizmoMode === "translate" ? "active" : ""}
+              disabled={builderTool === "add-joint"}
+              onClick={() => setGizmoMode("translate")}
+            >
               Move
             </button>
-            <button type="button" className={gizmoMode === "rotate" ? "active" : ""} onClick={() => setGizmoMode("rotate")}>
+            <button
+              type="button"
+              className={gizmoMode === "rotate" ? "active" : ""}
+              disabled={builderTool === "add-joint"}
+              onClick={() => setGizmoMode("rotate")}
+            >
               Rotate
             </button>
+            <button
+              type="button"
+              className={builderTool === "add-joint" ? "active" : ""}
+              disabled={robot.bodies.length < 2}
+              title={robot.bodies.length < 2 ? "Add a second body first" : undefined}
+              onClick={toggleJointTool}
+            >
+              Add Joint
+            </button>
           </div>
+          {builderTool === "add-joint" && !jointDraft?.childId && (
+            <p className="joint-pick-hint">{jointDraft ? "Click the child body." : "Click the parent body."}</p>
+          )}
         </div>
       ) : (
         <div className="builder-stage">
@@ -315,7 +377,15 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
 
       <aside className="builder-inspector">
         {builderMode === "edit" ? (
-          selectedBody ? (
+          jointDraft?.childId ? (
+            <JointCreator
+              robot={robot}
+              parentId={jointDraft.parentId}
+              childId={jointDraft.childId}
+              onApply={applyJoint}
+              onCancel={() => setJointDraft(null)}
+            />
+          ) : selectedBody && builderTool === "transform" ? (
             <BodyInspector
               key={`${selectedBody.id}:${transformEpoch}`}
               robot={robot}
@@ -324,7 +394,9 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
               onRequestDelete={deleteBody}
             />
           ) : (
-            <p className="builder-empty-inspector">Select a body to edit it.</p>
+            <p className="builder-empty-inspector">
+              {builderTool === "add-joint" ? "Pick a parent and a child body in the 3D view." : "Select a body to edit it."}
+            </p>
           )
         ) : builtRobot ? (
           <>

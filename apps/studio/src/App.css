@@ -1495,6 +1495,22 @@ body {
   font-size: 13px;
 }
 
+/* Add Joint tool's in-progress hint (Build mode, Edit sub-mode). */
+.joint-pick-hint {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  right: 12px;
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 6px 10px;
+  text-align: center;
+}
+
 .test-mode-note {
   position: absolute;
   bottom: 12px;

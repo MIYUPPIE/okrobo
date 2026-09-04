@@ -13,8 +13,27 @@ afterEach(() => cleanup());
 // switching, real EngineBuiltRobot construction against the real compiled
 // WASM module) for real.
 vi.mock("./BuilderViewport", () => ({
-  BuilderViewport: (props: { robot: RobotDef; selectedBodyId: string | null }) => (
-    <div data-testid="builder-viewport-stub" data-selected={props.selectedBodyId ?? ""} data-body-count={props.robot.bodies.length} />
+  BuilderViewport: (props: {
+    robot: RobotDef;
+    selectedBodyId: string | null;
+    jointPick?: { parentId: string | null; onPick: (id: string) => void };
+  }) => (
+    <div
+      data-testid="builder-viewport-stub"
+      data-selected={props.selectedBodyId ?? ""}
+      data-body-count={props.robot.bodies.length}
+      data-joint-parent={props.jointPick?.parentId ?? ""}
+    >
+      {/* Real BuilderViewport picks a body by raycasting a 3D click; this
+       * stub exposes the same "click a body" interaction as plain buttons
+       * so tests can drive the Add Joint tool's parent-then-child picking
+       * without a real WebGLRenderer. */}
+      {props.jointPick && props.robot.bodies.map((b) => (
+        <button key={b.id} onClick={() => props.jointPick!.onPick(b.id)}>
+          {`pick ${b.id}`}
+        </button>
+      ))}
+    </div>
   ),
 }));
 vi.mock("./TestViewport", () => ({
@@ -103,6 +122,60 @@ describe("BuilderPanel", () => {
     const next: RobotDef = onChange.mock.calls[0][0];
     expect(next.bodies).toHaveLength(0);
     expect(screen.getByText("Select a body to edit it.")).toBeInTheDocument();
+  });
+
+  it("Add Joint is disabled with fewer than two bodies", () => {
+    render(<BuilderPanel robot={makeRobot()} onChange={() => {}} />);
+    expect(screen.getByRole("button", { name: "Add Joint" })).toBeDisabled();
+  });
+
+  it("Add Joint: picking parent then child shows JointCreator; Apply commits the joint and returns to the normal tool", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    const base = makeRobot();
+    const robot: RobotDef = { ...base, bodies: [...base.bodies, { id: "wheel", name: "Wheel", transform: identity, mass: 0.1, inertia }] };
+    render(<BuilderPanel robot={robot} onChange={onChange} />);
+
+    const addJoint = screen.getByRole("button", { name: "Add Joint" });
+    expect(addJoint).not.toBeDisabled();
+    await user.click(addJoint);
+    expect(addJoint).toHaveClass("active");
+    expect(screen.getByText("Click the parent body.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "pick base" }));
+    expect(screen.getByText("Click the child body.")).toBeInTheDocument();
+    // Re-picking the same body as its own child is a no-op, not a self-loop draft.
+    await user.click(screen.getByRole("button", { name: "pick base" }));
+    expect(screen.getByText("Click the child body.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "pick wheel" }));
+    expect(screen.getByText("Base → Wheel")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next: RobotDef = onChange.mock.calls[0][0];
+    expect(next.joints).toHaveLength(1);
+    expect(next.joints[0]).toMatchObject({ parent: "base", child: "wheel" });
+    // The tool resets back to normal selection once the joint is applied.
+    expect(screen.queryByRole("button", { name: "Add Joint" })).not.toHaveClass("active");
+  });
+
+  it("Add Joint: Cancel from JointCreator clears the draft but stays in the tool for another pick", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    const base = makeRobot();
+    const robot: RobotDef = { ...base, bodies: [...base.bodies, { id: "wheel", name: "Wheel", transform: identity, mass: 0.1, inertia }] };
+    render(<BuilderPanel robot={robot} onChange={onChange} />);
+
+    await user.click(screen.getByRole("button", { name: "Add Joint" }));
+    await user.click(screen.getByRole("button", { name: "pick base" }));
+    await user.click(screen.getByRole("button", { name: "pick wheel" }));
+    expect(screen.getByText("Base → Wheel")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Add Joint" })).toHaveClass("active"); // still in the tool
+    expect(screen.getByText("Click the parent body.")).toBeInTheDocument();
   });
 
   it("disables Test mode while the document has an error", () => {

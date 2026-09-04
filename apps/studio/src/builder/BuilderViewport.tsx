@@ -35,11 +35,19 @@ export interface BuilderViewportProps {
    * the same object while dragging). */
   onTransformBody: (bodyId: string, transform: Transform) => void;
   gizmoMode: GizmoMode;
+  /** Joint-authoring tool (Add Joint in the toolbar). When set, a viewport
+   * click picks a body for the joint instead of selecting/gizmo-editing it
+   * -- a miss is ignored rather than deselecting, so a stray click on the
+   * grid can't cancel an in-progress pick. `parentId` (once picked) is
+   * highlighted in place of `selectedBodyId`, and the gizmo stays detached
+   * the whole time -- dragging bodies and picking a joint pair are two
+   * different things to be doing at once. */
+  jointPick?: { parentId: string | null; onPick: (bodyId: string) => void };
 }
 
 const DRAG_CLICK_THRESHOLD_PX = 4;
 
-export function BuilderViewport({ robot, selectedBodyId, onSelectBody, onTransformBody, gizmoMode }: BuilderViewportProps) {
+export function BuilderViewport({ robot, selectedBodyId, onSelectBody, onTransformBody, gizmoMode, jointPick }: BuilderViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Populated by the mount effect; read by the rebuild effect and by the
@@ -52,10 +60,12 @@ export function BuilderViewport({ robot, selectedBodyId, onSelectBody, onTransfo
   const selectedBodyIdRef = useRef(selectedBodyId);
   const onSelectBodyRef = useRef(onSelectBody);
   const onTransformBodyRef = useRef(onTransformBody);
+  const jointPickRef = useRef(jointPick);
   useEffect(() => {
     selectedBodyIdRef.current = selectedBodyId;
     onSelectBodyRef.current = onSelectBody;
     onTransformBodyRef.current = onTransformBody;
+    jointPickRef.current = jointPick;
   });
 
   // Mount-once: renderer, scene, camera, controls, render loop, picking.
@@ -129,7 +139,14 @@ export function BuilderViewport({ robot, selectedBodyId, onSelectBody, onTransfo
       pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
       const hits = raycaster.intersectObjects([...bodyGroupByIdRef.current.values()], true);
-      onSelectBodyRef.current(hits.length > 0 ? resolveBodyId(hits[0].object) : null);
+      const hitBodyId = hits.length > 0 ? resolveBodyId(hits[0].object) : null;
+
+      const pick = jointPickRef.current;
+      if (pick) {
+        if (hitBodyId) pick.onPick(hitBodyId);
+        return; // a miss is ignored -- don't cancel an in-progress pick
+      }
+      onSelectBodyRef.current(hitBodyId);
     };
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
     renderer.domElement.addEventListener("pointerup", onPointerUp);
@@ -181,13 +198,21 @@ export function BuilderViewport({ robot, selectedBodyId, onSelectBody, onTransfo
     robotRoot.add(root);
     bodyGroupByIdRef.current = bodyGroupById;
 
-    for (const [id, group] of bodyGroupById) setHighlighted(group, id === selectedBodyId);
+    const highlightedId = jointPick ? jointPick.parentId : selectedBodyId;
+    for (const [id, group] of bodyGroupById) setHighlighted(group, id === highlightedId);
 
+    if (jointPick) {
+      // Picking a joint pair and dragging a body are two different things
+      // to be doing at once -- the gizmo has no business being attached
+      // while the tool is active, regardless of any stale selection.
+      transformControls.detach();
+      return;
+    }
     transformControls.setMode(gizmoMode);
     const selectedGroup = selectedBodyId ? bodyGroupById.get(selectedBodyId) : undefined;
     if (selectedGroup) transformControls.attach(selectedGroup);
     else transformControls.detach();
-  }, [robot, selectedBodyId, gizmoMode]);
+  }, [robot, selectedBodyId, gizmoMode, jointPick]);
 
   return <div ref={containerRef} className="viewport-3d builder-viewport" />;
 }

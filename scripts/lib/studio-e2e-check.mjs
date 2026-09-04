@@ -573,6 +573,44 @@ try {
   );
   check("Build mode: the newly added body is the active hierarchy row", newRowActive);
 
+  // -- robot builder: Add Joint (joint authoring in Build mode) -----------
+  // Real picking normally happens by raycasting a 3D click, which this
+  // harness can't reliably drive (no way to compute where a body renders
+  // on screen from here) -- HierarchyList rows are wired to the exact same
+  // parent-then-child picking handler as a real, DOM-native alternative
+  // input, so this check drives that path instead of faking coordinates.
+  // The origin math (computeJointOrigin) and the validation-diff gating
+  // (issuesIntroducedBy) are proven directly by robotEdits.test.ts and
+  // JointCreator.test.tsx, not re-derived here. See
+  // docs/decisions/robot-builder-joints.md.
+  await page.clickText(".builder-toolbar button", "/^Add Joint$/");
+  const jointHintShown = await waitForCondition(
+    "document.querySelector('.joint-pick-hint')?.textContent === 'Click the parent body.'",
+    5000,
+  );
+  check("Build mode: Add Joint enters the picking tool with a hint", jointHintShown);
+
+  await page.clickText(".hierarchy-row", "/^Chassis$/");
+  const jointHintAdvanced = await waitForCondition(
+    "document.querySelector('.joint-pick-hint')?.textContent === 'Click the child body.'",
+    5000,
+  );
+  check("Build mode: picking the parent advances the hint to the child", jointHintAdvanced);
+
+  await page.clickText(".hierarchy-row", "/^body-2$/");
+  const jointFormShown = await waitForCondition(
+    "document.querySelector('.builder-inspector h4')?.textContent === 'New joint'",
+    5000,
+  );
+  check("Build mode: picking parent then child shows the joint-creation form", jointFormShown);
+
+  await page.evalClickText(".inspector-actions button", "/^Apply$/");
+  const jointApplied = await waitForCondition(
+    "document.querySelectorAll('.hierarchy-list > ul > li').length === 1", // body-2 is nested under Chassis now, not its own root row
+    5000,
+  );
+  check("Build mode: Apply commits the joint -- the child is no longer a separate root", jointApplied);
+
   await page.clickText(".hierarchy-row", "/^Chassis$/");
   await waitForCondition("document.querySelector('[aria-label=\"body name\"]')?.value === 'Chassis'", 5000);
   await page.setInputValue('[aria-label="body mass"]', "2.5");

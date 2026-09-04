@@ -1057,3 +1057,62 @@ at the Tauri IPC boundary. 3 new `studio-e2e-check.mjs` checks, all passed
 on the first real-browser run. `cargo test` (32 passed), `npm run test`
 (376 passed across 43 files), `npm run build`, and the full `test-all.sh`
 gate suite all green.
+
+## Robot Builder: Joint Authoring in Build Mode (2026-09-05)
+
+Closed the gap every phase since Phase 2 restated as an accepted non-goal:
+Build mode now has a real way to attach a new body to a parent with a
+joint. A new "Add Joint" toolbar tool sits alongside Move/Rotate; while
+active, picking a parent then a child body swaps the inspector to a new
+`JointCreator` panel (`apps/studio/src/builder/JointCreator.tsx`),
+mirroring `BodyInspector.tsx`'s own draft/live-validate/Apply idiom.
+Researched against this app's own patterns before designing anything new
+(no drag-and-drop library or `draggable` attribute exists anywhere in this
+codebase) -- the toolbar-tool-then-pick-two-bodies design directly extends
+`BuilderViewport.tsx`'s existing raycast-click machinery rather than
+inventing a new interaction paradigm. See
+`docs/decisions/robot-builder-joints.md`.
+
+Two real design problems solved, not glossed over:
+
+- **Picking must not teleport the child.** Before a joint exists, both
+  bodies are independent roots with root-relative transforms; a joint's
+  `origin` means something different (the child's pose in the *parent's*
+  frame). `robotEdits.ts`'s new `computeJointOrigin(parent, child)` composes
+  real `THREE.Matrix4`s (not a naive position subtraction -- either body
+  may already be rotated) so the child's world pose is bit-for-bit
+  unchanged the instant Apply is clicked; `JointCreator` then resets the
+  child's own `transform` to identity, matching how the shipped templates
+  already author a jointed child's mount point. Verified against the
+  actual invariant (`parent ∘ origin` reconstructs `child`), not hand-typed
+  literals that could just as easily encode an arithmetic mistake.
+- **Validation reuses the real rules via a diff, not a reimplementation.**
+  A bad joint can surface its error on either body, the joint itself, or
+  the whole robot (a cycle can land on any body in the loop) -- rather
+  than guessing which, `issuesIntroducedBy(before, after)` (`robotEdits.ts`)
+  diffs `validateRobotDef`'s own output before vs. after the draft joint
+  and gates Apply on anything new, so every one of `joint-duplicate-child`/
+  `robot-cycle`/`joint-self-loop`/etc. is enforced through its one real
+  implementation.
+
+A second, real input path beyond what was originally scoped: `HierarchyList`
+rows are wired to the same picking handler as the 3D viewport's raycast
+click, added because it's a genuine standalone improvement (a real
+DOM-button alternative to hunting for a body in 3D) that also happens to
+close a testing gap honestly -- `studio-e2e-check.mjs` has no way to
+compute where a body renders on screen for a coordinate-based 3D click
+(the same limitation already stated plainly for gizmo-drag), so the new
+e2e checks drive the tree instead of faking coordinates.
+
+Tests: `robotEdits.test.ts` (7 new cases -- `nextJointId`, three
+`computeJointOrigin` cases including the self-checking reconstruction
+invariant, three `issuesIntroducedBy` cases), `JointCreator.test.tsx` (7
+cases: defaults, type-dependent field visibility, a valid Apply, a
+duplicate-child rejection, a manufactured-cycle rejection, Cancel).
+`BuilderPanel.test.tsx` (3 new cases: Add Joint's disabled state, the full
+pick-then-Apply flow via the extended `BuilderViewport` mock, Cancel
+staying in the tool). 4 new `studio-e2e-check.mjs` checks (tool entry and
+hint text, parent/child picking via real `HierarchyList` rows, the form
+appearing, Apply actually restructuring the tree) -- all passed on the
+first real-browser run. `npm run test` (394 passed across 44 files),
+`npm run build`, and the full `test-all.sh` gate suite all green.
