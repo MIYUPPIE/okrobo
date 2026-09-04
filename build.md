@@ -476,3 +476,26 @@ five parity gates, and the full `test-all.sh` all green (see the commit for
 exact counts). `test-all.sh` now bootstraps `tools/mujoco/build-native`
 automatically on a machine that doesn't have it yet, the same pattern it
 already used for `runtime/python/.deps`.
+
+**A real miss, caught by the user immediately after "done": the object was
+never actually visible.** Every layer below the pixel — engine physics,
+parity gate, contracts, Blockly, the C++ SDK — was built and gate-tested,
+but `Viewport3D.tsx` never got a mesh for the graspable object, so a student
+switching to Arm and running a grip/release program would see the arm move
+and nothing else: no box to grip, no fall to watch. All of this session's
+"verify empirically" discipline had been aimed at the simulation being
+*correct*; nobody had pointed a browser at whether the result was
+*visible*, which for a visual simulator is not a lesser bug, it is the
+whole product. Fixed: `Viewport3D.tsx` gained a box mesh, a child of the
+same `root` group the arm links use, updated every frame from
+`state.object` with the identical `(x, z, -y)` sim→Three.js mapping the
+drone's position updates already established, colour-coded orange (resting
+free) / green (held) as a bonus is-it-gripped cue that cost nothing extra.
+`DEFAULT_ARM_OBJECT` added to `contracts/robotApi.ts` alongside the existing
+`DEFAULT_ARM`/`DEFAULT_WORLD`/`DEFAULT_DRONE` viewport-drawing constants,
+same pattern. Verified the only way that actually proves a rendering fix:
+a real headless-Chrome run against a real sidecar, clicking through the new
+"Pick and drop" lesson's first step for real and screenshotting the 3D
+canvas before and after — the box is visibly orange at its resting spot,
+then visibly green and relocated to the tip once gripped (`tip z 0.06 m`
+in the status line matching the screenshot exactly).

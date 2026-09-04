@@ -2,7 +2,13 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { RobotKind } from "./blocks/okroboBlocks";
-import { type ArmState, DEFAULT_ARM, type DroneState, type State } from "./contracts/robotApi";
+import {
+  type ArmState,
+  DEFAULT_ARM,
+  DEFAULT_ARM_OBJECT,
+  type DroneState,
+  type State,
+} from "./contracts/robotApi";
 import type { EngineArm } from "./engine/EngineArm";
 import type { EngineDrone } from "./engine/EngineDrone";
 import type { EngineWorld } from "./engine/EngineWorld";
@@ -183,6 +189,8 @@ export function Viewport3D({
     let shoulderGroup: THREE.Group | null = null;
     let elbowGroup: THREE.Group | null = null;
     let wristGroup: THREE.Group | null = null;
+    let armObjectMesh: THREE.Mesh | null = null;
+    let armObjectMaterial: THREE.MeshStandardMaterial | null = null;
     if (robot === "arm") {
       const { baseHeight, link1, link2, link3 } = DEFAULT_ARM;
       const root = new THREE.Group();
@@ -235,6 +243,25 @@ export function Viewport3D({
       );
       tip.position.x = link3;
       wristGroup.add(tip);
+
+      // The graspable object (Arm.grip()/release(), contract v3). A child of
+      // `root`, not the yaw/shoulder/elbow chain: state.object is already an
+      // absolute position in the same arm-base-relative frame state.tip is,
+      // not a joint-local offset, so it moves independently of the arm's own
+      // rotations -- matching the drone's flat position.set() pattern below,
+      // just relative to `root` instead of `scene`.
+      const objectSize = DEFAULT_ARM_OBJECT.halfExtent * 2;
+      armObjectMaterial = new THREE.MeshStandardMaterial({ color: 0xffa733 });
+      armObjectMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(objectSize, objectSize, objectSize),
+        armObjectMaterial,
+      );
+      armObjectMesh.position.set(
+        DEFAULT_ARM_OBJECT.start.x,
+        DEFAULT_ARM_OBJECT.start.z,
+        -DEFAULT_ARM_OBJECT.start.y,
+      );
+      root.add(armObjectMesh);
     }
 
     // ---- drone scene pieces: a simple X-frame quadrotor ----
@@ -344,6 +371,10 @@ export function Viewport3D({
         shoulderGroup.rotation.z = shoulder;
         elbowGroup.rotation.z = elbow;
         wristGroup.rotation.z = wrist;
+        if (armObjectMesh) {
+          armObjectMesh.position.set(state.object.x, state.object.z, -state.object.y);
+          if (armObjectMaterial) armObjectMaterial.color.setHex(state.holding ? 0x37c871 : 0xffa733);
+        }
         if (frame++ % 10 === 0) onState({ kind: "arm", state });
       }
 

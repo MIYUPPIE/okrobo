@@ -35,6 +35,12 @@ export const DEFAULT_ARM = {
   start: [0, Math.PI / 3, -Math.PI / 6, -Math.PI / 6],
 } as const;
 
+/** Mirrors engine PhysicsObjectConfig; used by the viewport for drawing only. */
+export const DEFAULT_ARM_OBJECT = {
+  halfExtent: 0.03,
+  start: { x: 0.3, y: 0.0, z: 0.03 } as const,
+} as const;
+
 export interface Pose {
   x: number;
   y: number;
