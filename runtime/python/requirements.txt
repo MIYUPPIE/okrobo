@@ -7,3 +7,11 @@
 # against that now, but the fix is to keep this file complete).
 websockets>=13
 pyserial>=3.5
+# Pinned exactly (not >=): must match tools/mujoco's vendored tag
+# (scripts/build-mujoco-native.sh / build-mujoco-wasm.sh) so the Python and
+# C++/WASM sides of the arm's graspable-object parity gate run the same
+# solver, not just "a" solver. Pulls numpy/glfw/pyopengl/absl-py/etils as its
+# own hard deps (~135 MB total in .deps) -- glfw/pyopengl are for mujoco's
+# optional viewer, which this project never calls, but pip installs them
+# unconditionally since mujoco declares them as required, not extras.
+mujoco==3.9.0

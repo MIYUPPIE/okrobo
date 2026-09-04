@@ -54,6 +54,21 @@ class Arm:
         """(x, y, z) of the arm's tip in meters."""
         return self.world.state().tip
 
+    def grip(self) -> bool:
+        """Grip the graspable object if the tip is within reach of it. Returns success."""
+        return self.world.grip()
+
+    def release(self) -> None:
+        """Let go; the object falls under real gravity/contact once released."""
+        self.world.release()
+
+    def holding(self) -> bool:
+        return self.world.state().holding
+
+    def object_position(self) -> tuple:
+        """(x, y, z) of the graspable object in meters."""
+        return self.world.state().object
+
     def wait(self, seconds: float = 1.0) -> None:
         """Do nothing while simulation time passes."""
         steps = int(round(seconds / self.DT))

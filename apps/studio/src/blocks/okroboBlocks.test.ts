@@ -14,6 +14,10 @@ import {
 } from "./okroboBlocks";
 
 const ENGINE_DIR = join(process.cwd(), "..", "..", "engine");
+// Arm.grip()/release() needs PhysicsObject, which needs MuJoCo (real
+// gravity/contact once released) — see scripts/build-mujoco-native.sh.
+const MUJOCO_DIR = join(process.cwd(), "..", "..", "tools", "mujoco");
+const MUJOCO_LIBS = ["-lmujoco", "-lccd", "-lqhullstatic_r", "-llodepng", "-ltinyxml2", "-ltinyobjloader"];
 
 // Headless workspace: no DOM needed for loading and code generation.
 let workspace: Blockly.Workspace;
@@ -252,18 +256,107 @@ describe("block code generation", () => {
           ),
       );
       execFileSync("g++", [
-        "-std=c++17",
+        "-std=c++20",
         "-I",
         join(ENGINE_DIR, "src"),
         "-I",
         join(ENGINE_DIR, "api"),
+        "-I",
+        join(MUJOCO_DIR, "include"),
         source,
         join(ENGINE_DIR, "src", "arm_world.cpp"),
+        join(ENGINE_DIR, "src", "physics_object.cpp"),
+        "-L",
+        join(MUJOCO_DIR, "build-native", "lib"),
+        ...MUJOCO_LIBS,
+        `-Wl,-rpath,${join(MUJOCO_DIR, "build-native", "lib")}`,
         "-o",
         binary,
       ]);
       const output = execFileSync(binary, { encoding: "utf8", timeout: 5000 }).trim();
       expect(output).toBe("0.32 0.32 0.22");
+    },
+    20000,
+  );
+
+  const GRIP_RELEASE_WORKSPACE = {
+    blocks: {
+      languageVersion: 0,
+      blocks: [
+        {
+          type: "okrobo_arm_move",
+          x: 24,
+          y: 24,
+          fields: { JOINT: "shoulder", DEGREES: 50 },
+          next: {
+            block: {
+              type: "okrobo_arm_move",
+              fields: { JOINT: "elbow", DEGREES: -104 },
+              next: {
+                block: {
+                  type: "okrobo_arm_move",
+                  fields: { JOINT: "wrist", DEGREES: -2 },
+                  next: {
+                    block: {
+                      type: "okrobo_arm_grip",
+                      next: { block: { type: "okrobo_arm_release" } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      ],
+    },
+  };
+
+  it("generates grip/release in C++ against engine/api/arm.hpp", () => {
+    const cpp = generateCpp(load(GRIP_RELEASE_WORKSPACE), "arm");
+    expect(cpp).toContain("arm.move(\"shoulder\", 50);");
+    expect(cpp).toContain("arm.grip();");
+    expect(cpp).toContain("arm.release();");
+  });
+
+  it(
+    "the generated grip/release C++ actually compiles and drops the object, which really falls",
+    () => {
+      const cpp = generateCpp(load(GRIP_RELEASE_WORKSPACE), "arm");
+      const dir = mkdtempSync(join(tmpdir(), "okrobo-cpp-"));
+      const source = join(dir, "program.cpp");
+      const binary = join(dir, "program");
+      writeFileSync(
+        source,
+        cpp
+          .replace('#include "arm.hpp"', '#include <cstdio>\n#include "arm.hpp"')
+          .replace(
+            "return 0;",
+            'arm.wait(1.5); auto [x, y, z] = arm.object(); ' +
+              'std::printf("%.2f %.2f %.2f\\n", x, y, z); return 0;',
+          ),
+      );
+      execFileSync("g++", [
+        "-std=c++20",
+        "-I",
+        join(ENGINE_DIR, "src"),
+        "-I",
+        join(ENGINE_DIR, "api"),
+        "-I",
+        join(MUJOCO_DIR, "include"),
+        source,
+        join(ENGINE_DIR, "src", "arm_world.cpp"),
+        join(ENGINE_DIR, "src", "physics_object.cpp"),
+        "-L",
+        join(MUJOCO_DIR, "build-native", "lib"),
+        ...MUJOCO_LIBS,
+        `-Wl,-rpath,${join(MUJOCO_DIR, "build-native", "lib")}`,
+        "-o",
+        binary,
+      ]);
+      const output = execFileSync(binary, { encoding: "utf8", timeout: 5000 }).trim();
+      // Gripped at the tip (~0.30, 0, 0.06), released, and settled on the
+      // floor at the box's half-extent -- a real fall under real gravity.
+      expect(output).toBe("0.30 0.00 0.03");
     },
     20000,
   );

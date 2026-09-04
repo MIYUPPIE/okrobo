@@ -29,7 +29,7 @@ These are settled. Do not re-litigate them in future sessions unless something b
 
 ## Open decisions (decide when the phase starts, not before)
 
-- ~~Phase 5 physics library~~ decided: MuJoCo, integration deferred to the first contact-dynamics feature ([docs/decisions/physics-engine.md](docs/decisions/physics-engine.md)).
+- ~~Phase 5 physics library~~ decided: MuJoCo, integration deferred to the first contact-dynamics feature, **integrated 2026-09-03** for the arm's graspable object ([docs/decisions/physics-engine.md](docs/decisions/physics-engine.md)).
 - ~~Blockly execution target~~ decided in Phase 2: JS for execution (async runner, interruptible), Python for display until Phase 3 makes it the real path.
 - ~~Phase 7 serial transport~~ decided: the Python sidecar, because WebKitGTK has no Web Serial API ([docs/decisions/serial-transport.md](docs/decisions/serial-transport.md)).
 
@@ -374,3 +374,105 @@ The last real "Not done" note that wasn't deliberately deferred: `firmware/READM
 Tests: 8 new `flasher.py` unit tests (`test_flasher.py`, real subprocess-shaped fakes, no arduino-cli needed), 4 new sidecar integration tests (`test_sidecar_flash.py`), 1 new Rust test (`spawn_passes_firmware_dir_as_an_env_var`) plus an extended `dev_resolution_finds_repo_runtime` assertion, 1 new PythonBridge integration test against a real spawned sidecar. `cargo test` (29), `pytest` (115), `vitest` (193), all four parity gates, and the full `test-all.sh` all green.
 
 Remaining "Not done" items are all deliberately out of scope for the reasons already on record: MuJoCo (deferred until a feature needs contact dynamics), YOLO models (offline-size cost), in-studio/on-device C++ compilation (a made decision, not a gap), and testing this flashing path against a physical board (needs hardware on the desk, which this environment doesn't have).
+
+## MuJoCo arrives: the arm can pick things up and drop them (2026-09-03)
+
+The one remaining deferred decision. MuJoCo's integration trigger
+("objects to push/grasp, gravity-driven interaction") was pulled forward on
+request rather than waiting for a feature to force it, so this round started
+with a real feasibility question the original decision doc had only assumed
+an answer to: **can MuJoCo actually be compiled to WASM for this project,
+and does it produce correct physics there?** That was answered first, as an
+isolated spike confined to a gitignored `tools/mujoco/` sandbox before any
+engine code changed — see [docs/decisions/physics-engine.md](docs/decisions/physics-engine.md)'s
+new "Integration" section for the full finding: MuJoCo 3.9.0 has first-class
+upstream Emscripten support (zero patches needed), and a free-fall test
+matched the exact discrete solution to machine precision.
+
+**Scope, deliberately narrower than the original decision's wording
+implied**: "MuJoCo replaces [the arm's kinematic backend] behind these same
+messages" read as the arm's own joint motion migrating into an articulated
+physics model. What shipped instead: MuJoCo simulates one new graspable
+object — a free body with real gravity and contact — while the arm's
+joints stay exactly Phase 5's kinematic model, unchanged, still gated by
+the same `test_arm.cpp`/`test_arm.py`. This delivers the stated trigger
+without the much bigger, different project of rewriting the arm's whole
+motion model, which nothing asked for. `contracts/robot-api/v3/contract.md`
+documents this explicitly as a narrower reading than v1's own note, rather
+than leaving that note's wording uncorrected.
+
+- **`engine/src/physics_object.hpp`/`.cpp`**: a small, MuJoCo-opaque wrapper
+  (no MuJoCo type appears in the header) — held is plain kinematics
+  (position pinned wherever the caller puts it, zero simulation cost),
+  `release()` hands it to MuJoCo as a free body. `ArmWorld` gained
+  `grip()`/`release()`/`ArmState.holding`/`ArmState.object`; `grip()`
+  succeeds within `kGraspTolerance` (0.05 m) of the object, found reachable
+  against the default `ArmConfig` by a numeric search over the joint ranges
+  (not hand-derived trig) — see `engine/tests/test_arm_physics.cpp`.
+- **Vendoring, twice, both gitignored under `tools/mujoco/`** (same
+  treatment `tools/emsdk` already gets): `scripts/build-mujoco-native.sh`
+  (host, for `engine/`'s own ctest — added via CMake FetchContent, bumping
+  the engine to C++20 since MuJoCo's own implementation needs it, though its
+  public C API header stays plain-C-compatible either way) and
+  `scripts/build-mujoco-wasm.sh` (the proven spike recipe, formalized).
+  `build-engine-wasm.sh` now links the WASM engine against the latter.
+- **Python gets real physics too, not a stub**: `runtime/python/okrobo/physics.py`
+  uses the official `mujoco` PyPI package, pinned to the *exact* tag
+  (`3.9.0`) the C++/WASM side vendors — same solver on both sides of the
+  parity gate, not just "a" solver. Pulls ~135 MB into `.deps`
+  (numpy/glfw/pyopengl/absl-py/etils, all hard deps of the base `mujoco`
+  package even though this project never calls its renderer) — accepted
+  as the honest cost of using the official package as intended, the same
+  way bundling a full CPython already was.
+- **A fifth parity gate**: `engine/tests/parity/parity.mjs` replays a
+  grip → swing-while-holding → release → settle scenario through both the
+  WASM engine and the Python reference and compares field-by-field. The
+  tolerance question was resolved by measuring, not guessing: the concern
+  that the WASM build's portable scalar fallback (no AVX under Emscripten)
+  might diverge from whatever SIMD the native Python wheel picks turned out
+  not to matter here — the actual max diff is 5.55e-17, so the gate uses
+  the same 1e-9 tolerance as every other field in this file rather than a
+  loose bound that would mask a real future regression.
+- **Full stack, all four languages**: `engine/api/arm.hpp` gained
+  `grip`/`release`/`holding`/`object` (the C++ track's README now documents
+  the extra MuJoCo link step this one class needs — `-std=c++20` and six
+  more `-l` flags, the honest consequence of "no build system beyond a C++
+  compiler" no longer being quite true for the Arm specifically);
+  `contracts/robot-api/v3` and `contracts/robot-remote/v3` (new command/state
+  fields, new RPC methods); `runtime/python/okrobo/arm.py` and `worker.py`'s
+  remote proxy; the WASM `wasm_api.cpp` exports and `EngineArm.ts`/`ProgramRunner.ts`;
+  four new Blockly blocks (`grip object`, `release object`, `holding
+  object?`, `object height (m)`) with JS/Python/C++ codegen.
+- **A real, load-bearing consequence found immediately, not assumed
+  away**: the existing Arm C++ SDK compile-and-run gate test broke the
+  moment `arm_world.cpp` started depending on `physics_object.cpp` — a
+  plain `g++ ... arm_world.cpp` no longer linked. Fixed by adding
+  `physics_object.cpp` plus the MuJoCo link flags to that test and to the
+  README's documented command, not by working around it.
+- **The strongest test again**: a vitest case builds a real "reach, grip,
+  swing the base, release" program from Blockly blocks, compiles it with a
+  real `g++` against the real headers, runs the binary, and asserts the
+  object's exact settled position (`"0.30 0.00 0.03"`) — proof the object
+  really fell and really stopped at the box's half-extent, not a string
+  check. Verified in a real headless-Chrome run too: the Arm toolbox
+  genuinely renders the four new blocks with the right labels.
+- **A gap in my own verification, caught by the full gate suite doing its job**: `npx tsc --noEmit` alone (run repeatedly through this round as a quick check) only covers `tsconfig.json`; `npm run build` also runs `tsconfig.test.json`, which caught a real error `tsc --noEmit` alone missed — `statusText.test.ts`'s hand-built `ArmState` mock was missing the new `holding`/`object` fields. Fixed, and a reminder that "the quick check passed" isn't the same claim as "the actual gate passed" — `test-all.sh`'s full run is the one that counts.
+- **One process-hygiene near-miss during manual browser verification**: an
+  ad hoc verification script's `kill $DEVPID` missed an orphaned vite
+  process (the backgrounding shell job it was tracking had already exited
+  for an unrelated reason), leaving a stray dev server on port 5198 —
+  caught by the same `ss -ltnp` post-check habit this session already uses,
+  fixed by killing the specific leaked PID directly rather than assuming
+  the generic cleanup trap had worked.
+
+Tests: 6 new `engine/tests/test_arm_physics.cpp` cases, 7 new
+`runtime/python/tests/test_arm_physics.py` cases (mirroring the C++ ones
+exactly), 1 extended `test_arm.py` (state message shape), 1 new fifth
+parity-gate section, 4 new `armPhysics.test.ts` vitest cases against the
+**real WASM engine**, 2 new `okroboBlocks.test.ts` cases including the
+real-compile-and-run one, 1 new + 1 extended Rust `sidecar.rs` test carried
+over from the prior round untouched. `cargo test`, `pytest`, `vitest`, all
+five parity gates, and the full `test-all.sh` all green (see the commit for
+exact counts). `test-all.sh` now bootstraps `tools/mujoco/build-native`
+automatically on a machine that doesn't have it yet, the same pattern it
+already used for `runtime/python/.deps`.

@@ -9,6 +9,8 @@
 #include <array>
 #include <cstdint>
 
+#include "physics_object.hpp"
+
 namespace okrobo {
 
 constexpr int kArmJoints = 4;  // base, shoulder, elbow, wrist
@@ -34,17 +36,26 @@ struct Tip {
     double z = 0.0;
 };
 
+// Grip succeeds when the tip is within this radius of the object, in
+// meters. Generous enough to be forgiving, tight enough to require a real
+// approach — verified reachable with real margin against ArmConfig's
+// default joint limits (see build.md).
+constexpr double kGraspTolerance = 0.05;
+
 struct ArmState {
     std::uint64_t tick = 0;
     std::array<double, kArmJoints> angles{};
     std::array<double, kArmJoints> targets{};
     bool moving = false;
     Tip tip;
+    bool holding = false;
+    Vec3 object;
 };
 
 class ArmWorld {
 public:
-    explicit ArmWorld(const ArmConfig& config = ArmConfig{});
+    explicit ArmWorld(const ArmConfig& config = ArmConfig{},
+                       const PhysicsObjectConfig& object_config = PhysicsObjectConfig{});
 
     /** Set one joint's target angle (clamped to its limits). */
     void set_target(int joint, double angle);
@@ -52,6 +63,11 @@ public:
     void stop();
     void reset();
     void step(double dt);
+
+    /** Grip the object if the tip is within kGraspTolerance of it. Returns success. */
+    bool grip();
+    /** Let go: the object becomes a free body and falls under real gravity/contact. */
+    void release();
 
     ArmState state() const;
 
@@ -62,6 +78,8 @@ private:
     std::array<double, kArmJoints> angles_;
     std::array<double, kArmJoints> targets_;
     std::uint64_t tick_ = 0;
+    PhysicsObject object_;
+    bool holding_ = false;
 };
 
 }  // namespace okrobo

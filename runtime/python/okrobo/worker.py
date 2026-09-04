@@ -101,6 +101,19 @@ def make_okrobo_module(rpc) -> types.ModuleType:
             result = rpc("arm_tip")
             return (float(result[0]), float(result[1]), float(result[2]))
 
+        def grip(self) -> bool:
+            return bool(rpc("arm_grip"))
+
+        def release(self) -> None:
+            rpc("arm_release")
+
+        def holding(self) -> bool:
+            return bool(rpc("arm_holding"))
+
+        def object_position(self) -> tuple:
+            result = rpc("arm_object")
+            return (float(result[0]), float(result[1]), float(result[2]))
+
         def wait(self, seconds: float = 1.0) -> None:
             rpc("wait", seconds=seconds)
 

@@ -92,6 +92,20 @@ public:
 
     void stop() { arm_.stop(); }
 
+    /** Grip the graspable object if the tip is within reach of it. Returns success. */
+    bool grip() { return arm_.grip(); }
+
+    /** Let go; the object falls under real gravity/contact once released. */
+    void release() { arm_.release(); }
+
+    bool holding() const { return arm_.state().holding; }
+
+    /** (x, y, z) of the graspable object in meters. */
+    std::tuple<double, double, double> object() const {
+        const auto o = arm_.state().object;
+        return {o.x, o.y, o.z};
+    }
+
     /** The underlying ArmWorld, for callers that need engine-level access. */
     ArmWorld& engine() { return arm_; }
     const ArmWorld& engine() const { return arm_; }

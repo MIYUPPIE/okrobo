@@ -57,6 +57,12 @@ export interface EngineModule {
   _arm_tip_x(arm: number): number;
   _arm_tip_y(arm: number): number;
   _arm_tip_z(arm: number): number;
+  _arm_grip(arm: number): number;
+  _arm_release(arm: number): void;
+  _arm_holding(arm: number): number;
+  _arm_object_x(arm: number): number;
+  _arm_object_y(arm: number): number;
+  _arm_object_z(arm: number): number;
   _drone_create(
     arenaWidth: number,
     arenaHeight: number,

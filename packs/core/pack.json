@@ -10,7 +10,8 @@
     "lessons": [
       "lessons/01-drive-to-the-wall.md",
       "lessons/02-wave-the-arm.md",
-      "lessons/03-fly-a-square.md"
+      "lessons/03-fly-a-square.md",
+      "lessons/04-pick-and-drop.md"
     ]
   }
 }

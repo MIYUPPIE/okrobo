@@ -16,6 +16,12 @@ export class EngineArm {
       case "arm_target":
         this.module._arm_set_target(this.handle, command.joint, command.angle);
         break;
+      case "arm_grip":
+        this.module._arm_grip(this.handle);
+        break;
+      case "arm_release":
+        this.module._arm_release(this.handle);
+        break;
       case "stop":
         this.module._arm_stop(this.handle);
         break;
@@ -42,6 +48,12 @@ export class EngineArm {
         x: this.module._arm_tip_x(this.handle),
         y: this.module._arm_tip_y(this.handle),
         z: this.module._arm_tip_z(this.handle),
+      },
+      holding: this.module._arm_holding(this.handle) === 1,
+      object: {
+        x: this.module._arm_object_x(this.handle),
+        y: this.module._arm_object_y(this.handle),
+        z: this.module._arm_object_z(this.handle),
       },
     };
   }

@@ -87,6 +87,14 @@ export async function executeRemoteRequest(
       return robot.armAngles();
     case "arm_tip":
       return robot.armTip();
+    case "arm_grip":
+      return robot.armGrip();
+    case "arm_release":
+      return robot.armRelease();
+    case "arm_holding":
+      return robot.armHolding();
+    case "arm_object":
+      return robot.armObjectPosition();
     case "drone_takeoff":
       return robot.droneTakeoff(num(args.height, 0.4));
     case "drone_land":

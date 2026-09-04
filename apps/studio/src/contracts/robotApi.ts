@@ -1,5 +1,6 @@
-// TypeScript mirror of contracts/robot-api/v2 (v1 car + arm + lidar, plus the drone).
-// Change only together with the contract (version bump) and the other sides.
+// TypeScript mirror of contracts/robot-api/v3 (v2 car + arm + lidar + drone,
+// plus the arm's graspable object). Change only together with the contract
+// (version bump) and the other sides.
 
 export type Command =
   | { type: "drive"; left: number; right: number }
@@ -8,6 +9,8 @@ export type Command =
 
 export type ArmCommand =
   | { type: "arm_target"; joint: number; angle: number }
+  | { type: "arm_grip" }
+  | { type: "arm_release" }
   | { type: "stop" }
   | { type: "reset" };
 
@@ -16,6 +19,9 @@ export interface ArmState {
   joints: { angles: number[]; targets: number[] };
   moving: boolean;
   tip: { x: number; y: number; z: number };
+  /** contract v3: a graspable object, real MuJoCo physics once released. */
+  holding: boolean;
+  object: { x: number; y: number; z: number };
 }
 
 export const ARM_JOINT_NAMES = ["base", "shoulder", "elbow", "wrist"] as const;

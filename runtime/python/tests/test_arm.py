@@ -59,9 +59,11 @@ def test_stop_freezes_motion():
 
 def test_state_message_shape():
     msg = ArmWorld().state().to_message()
-    assert set(msg) == {"tick", "joints", "moving", "tip"}
+    assert set(msg) == {"tick", "joints", "moving", "tip", "holding", "object"}
     assert len(msg["joints"]["angles"]) == 4
     assert set(msg["tip"]) == {"x", "y", "z"}
+    assert set(msg["object"]) == {"x", "y", "z"}
+    assert msg["holding"] is False
 
 
 def test_arm_api_move_blocking_and_degrees():

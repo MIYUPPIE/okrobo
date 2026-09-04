@@ -28,6 +28,8 @@ const ARM_HUD: StatusInput["hud"] = {
     joints: { angles: [0, Math.PI / 2, 0, 0], targets: [0, Math.PI / 2, 0, 0] },
     moving: false,
     tip: { x: 0, y: 0, z: 0.62 },
+    holding: false,
+    object: { x: 0.3, y: 0, z: 0.03 },
   },
 };
 

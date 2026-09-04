@@ -124,6 +124,36 @@ if (!Blockly.Blocks["okrobo_forward"]) {
       tooltip: "How high the arm's tip is above the ground",
     },
     {
+      type: "okrobo_arm_grip",
+      message0: "grip object",
+      previousStatement: null,
+      nextStatement: null,
+      colour: 290,
+      tooltip: "Grip the object if the tip is close enough to it",
+    },
+    {
+      type: "okrobo_arm_release",
+      message0: "release object",
+      previousStatement: null,
+      nextStatement: null,
+      colour: 290,
+      tooltip: "Let go; the object falls under real gravity once released",
+    },
+    {
+      type: "okrobo_arm_holding",
+      message0: "holding object?",
+      output: "Boolean",
+      colour: 290,
+      tooltip: "Whether the object is currently gripped",
+    },
+    {
+      type: "okrobo_arm_object_height",
+      message0: "object height (m)",
+      output: "Number",
+      colour: 25,
+      tooltip: "How high the graspable object is above the ground",
+    },
+    {
       type: "okrobo_drone_takeoff",
       message0: "takeoff to %1 m",
       args0: [{ type: "field_number", name: "HEIGHT", value: 0.4, min: 0.1, precision: 0.01 }],
@@ -237,6 +267,13 @@ javascriptGenerator.forBlock["okrobo_arm_tip_height"] = () => [
   "robot.armTip()[2]",
   JsOrder.MEMBER,
 ];
+javascriptGenerator.forBlock["okrobo_arm_grip"] = () => `robot.armGrip();\n`;
+javascriptGenerator.forBlock["okrobo_arm_release"] = () => `robot.armRelease();\n`;
+javascriptGenerator.forBlock["okrobo_arm_holding"] = () => ["robot.armHolding()", JsOrder.FUNCTION_CALL];
+javascriptGenerator.forBlock["okrobo_arm_object_height"] = () => [
+  "robot.armObjectPosition()[2]",
+  JsOrder.MEMBER,
+];
 javascriptGenerator.forBlock["okrobo_drone_takeoff"] = (block) =>
   `await robot.droneTakeoff(${block.getFieldValue("HEIGHT")});\n`;
 javascriptGenerator.forBlock["okrobo_drone_land"] = () => `await robot.droneLand();\n`;
@@ -285,6 +322,10 @@ pythonGenerator.forBlock["okrobo_color_bearing"] = (block) => [
 pythonGenerator.forBlock["okrobo_arm_move"] = (block) =>
   `arm.move("${block.getFieldValue("JOINT")}", ${block.getFieldValue("DEGREES")})\n`;
 pythonGenerator.forBlock["okrobo_arm_tip_height"] = () => ["arm.tip()[2]", PyOrder.MEMBER];
+pythonGenerator.forBlock["okrobo_arm_grip"] = () => `arm.grip()\n`;
+pythonGenerator.forBlock["okrobo_arm_release"] = () => `arm.release()\n`;
+pythonGenerator.forBlock["okrobo_arm_holding"] = () => ["arm.holding()", PyOrder.FUNCTION_CALL];
+pythonGenerator.forBlock["okrobo_arm_object_height"] = () => ["arm.object_position()[2]", PyOrder.MEMBER];
 pythonGenerator.forBlock["okrobo_drone_takeoff"] = (block) =>
   `drone.takeoff(${block.getFieldValue("HEIGHT")})\n`;
 pythonGenerator.forBlock["okrobo_drone_land"] = () => `drone.land()\n`;
@@ -353,6 +394,10 @@ cppGenerator.forBlock["okrobo_color_bearing"] = (block) => [
 cppGenerator.forBlock["okrobo_arm_move"] = (block) =>
   `arm.move("${block.getFieldValue("JOINT")}", ${block.getFieldValue("DEGREES")});\n`;
 cppGenerator.forBlock["okrobo_arm_tip_height"] = () => ["std::get<2>(arm.tip())", JsOrder.FUNCTION_CALL];
+cppGenerator.forBlock["okrobo_arm_grip"] = () => `arm.grip();\n`;
+cppGenerator.forBlock["okrobo_arm_release"] = () => `arm.release();\n`;
+cppGenerator.forBlock["okrobo_arm_holding"] = () => ["arm.holding()", JsOrder.FUNCTION_CALL];
+cppGenerator.forBlock["okrobo_arm_object_height"] = () => ["std::get<2>(arm.object())", JsOrder.FUNCTION_CALL];
 cppGenerator.forBlock["okrobo_drone_takeoff"] = (block) =>
   `drone.takeoff(${block.getFieldValue("HEIGHT")});\n`;
 cppGenerator.forBlock["okrobo_drone_land"] = () => `drone.land();\n`;
@@ -442,6 +487,10 @@ export const ARM_TOOLBOX = {
     { kind: "block", type: "okrobo_arm_move" },
     { kind: "block", type: "okrobo_wait" },
     { kind: "block", type: "okrobo_arm_tip_height" },
+    { kind: "block", type: "okrobo_arm_grip" },
+    { kind: "block", type: "okrobo_arm_release" },
+    { kind: "block", type: "okrobo_arm_holding" },
+    { kind: "block", type: "okrobo_arm_object_height" },
     ...COMMON_TOOLBOX_TAIL,
   ],
 };

@@ -108,7 +108,7 @@ describe("core pack", () => {
     // lesson for a student, and nothing else would catch it.
     const known = [
       /robot\.(forward|backward|turn_left|turn_right|wait|distance|lidar|camera|heading|position|stop)\(/,
-      /arm\.(move|move_all|angles|tip|wait|stop)\(/,
+      /arm\.(move|move_all|angles|tip|wait|stop|grip|release|holding|object_position)\(/,
       /drone\.(takeoff|land|forward|backward|up|down|turn_left|turn_right|altitude|distance|heading|position|wait|stop)\(/,
       /(find_color|find_color_opencv)\(/,
       /(frame|picture)\.(pixel|width|height|pixels)/,

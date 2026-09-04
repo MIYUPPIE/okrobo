@@ -33,6 +33,10 @@ def apply_car_command(world: World, command: dict) -> None:
 def apply_arm_command(world: ArmWorld, command: dict) -> None:
     if command["type"] == "arm_target":
         world.set_target(command["joint"], command["angle"])
+    elif command["type"] == "arm_grip":
+        world.grip()
+    elif command["type"] == "arm_release":
+        world.release()
     elif command["type"] == "stop":
         world.stop()
     elif command["type"] == "reset":

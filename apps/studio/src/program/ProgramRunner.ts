@@ -53,6 +53,12 @@ export interface RobotApi {
   armMoveAll(degrees: number[]): Promise<void>;
   armAngles(): number[];
   armTip(): [number, number, number];
+  /** True if the tip was close enough to the object to grip it. */
+  armGrip(): boolean;
+  /** Let go; the object falls under real gravity/contact once released. */
+  armRelease(): void;
+  armHolding(): boolean;
+  armObjectPosition(): [number, number, number];
   /** Rise to `height` meters (from wherever it is). */
   droneTakeoff(height?: number): Promise<void>;
   /** Descend straight down to the ground. */
@@ -155,6 +161,17 @@ export class ProgramRunner {
       armAngles: () => this.requireArm().state().joints.angles.map((a) => (a * 180) / Math.PI),
       armTip: () => {
         const { x, y, z } = this.requireArm().state().tip;
+        return [x, y, z];
+      },
+      armGrip: () => {
+        const arm = this.requireArm();
+        arm.apply({ type: "arm_grip" });
+        return arm.state().holding;
+      },
+      armRelease: () => this.requireArm().apply({ type: "arm_release" }),
+      armHolding: () => this.requireArm().state().holding,
+      armObjectPosition: () => {
+        const { x, y, z } = this.requireArm().state().object;
         return [x, y, z];
       },
       droneTakeoff: (height = 0.4) => {

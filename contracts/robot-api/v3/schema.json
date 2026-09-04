@@ -1,0 +1,97 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "okrobo:robot-api:v3",
+  "title": "OKROBO Robot API v3",
+  "description": "v2 (car + arm + lidar + drone) plus the arm's graspable object. Units: meters, radians, seconds. theta=0 faces +x, CCW positive, normalized to (-pi, pi].",
+  "definitions": {
+    "car_command": { "$ref": "../v1/schema.json#/definitions/car_command" },
+    "car_state": { "$ref": "../v1/schema.json#/definitions/car_state" },
+    "lidar": { "$ref": "../v1/schema.json#/definitions/lidar" },
+    "drone_command": { "$ref": "../v2/schema.json#/definitions/drone_command" },
+    "drone_state": { "$ref": "../v2/schema.json#/definitions/drone_state" },
+    "arm_command": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "joint", "angle"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "arm_target" },
+            "joint": { "type": "integer", "minimum": 0, "maximum": 3 },
+            "angle": { "type": "number", "description": "radians, clamped to the joint's limits" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "arm_grip" },
+            "description": "no-op if already holding, or if the tip is out of reach of the object"
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "arm_release" },
+            "description": "no-op if not holding"
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": { "type": { "const": "stop" } }
+        },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": { "type": { "const": "reset" } }
+        }
+      ]
+    },
+    "arm_state": {
+      "type": "object",
+      "required": ["tick", "joints", "moving", "tip", "holding", "object"],
+      "additionalProperties": false,
+      "properties": {
+        "tick": { "type": "integer", "minimum": 0 },
+        "joints": {
+          "type": "object",
+          "required": ["angles", "targets"],
+          "additionalProperties": false,
+          "properties": {
+            "angles": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 },
+            "targets": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 }
+          }
+        },
+        "moving": { "type": "boolean" },
+        "tip": {
+          "type": "object",
+          "required": ["x", "y", "z"],
+          "additionalProperties": false,
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "z": { "type": "number" }
+          }
+        },
+        "holding": { "type": "boolean", "description": "true while the object is gripped and tracking the tip" },
+        "object": {
+          "type": "object",
+          "required": ["x", "y", "z"],
+          "additionalProperties": false,
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "z": { "type": "number", "minimum": 0 }
+          },
+          "description": "the pinned position while held; MuJoCo's real free-body position once released"
+        }
+      }
+    }
+  }
+}

@@ -23,10 +23,29 @@ alongside your program, matching whichever class you use:
 
 ```sh
 g++ -std=c++17 -I engine/src -I engine/api your_program.cpp engine/src/world.cpp       -o your_program   # Robot
-g++ -std=c++17 -I engine/src -I engine/api your_program.cpp engine/src/arm_world.cpp   -o your_program   # Arm
 g++ -std=c++17 -I engine/src -I engine/api your_program.cpp engine/src/drone_world.cpp -o your_program   # Drone
 ./your_program
 ```
+
+**Arm needs one more thing and one more flag.** `Arm.grip()`/`release()`
+simulate the graspable object with real MuJoCo physics
+(`docs/decisions/physics-engine.md`), so compiling it links against MuJoCo —
+build it once with `./scripts/build-mujoco-native.sh` (fetches and builds
+MuJoCo for this machine, ~2 min, `tools/` is gitignored so this stays local),
+then:
+
+```sh
+g++ -std=c++20 -I engine/src -I engine/api -I tools/mujoco/include \
+  your_program.cpp engine/src/arm_world.cpp engine/src/physics_object.cpp \
+  -L tools/mujoco/build-native/lib \
+  -lmujoco -lccd -lqhullstatic_r -llodepng -ltinyxml2 -ltinyobjloader \
+  -Wl,-rpath,tools/mujoco/build-native/lib \
+  -o your_program
+./your_program
+```
+
+(`-std=c++20`, not 17: only `physics_object.cpp`'s implementation needs it —
+MuJoCo's own public C API header is plain-C-compatible either way.)
 
 ```cpp
 // your_program.cpp
@@ -53,7 +72,9 @@ the arm's config describe.
   `turn_right`, `wait`, `distance`, `lidar`, `heading`, `position`, `stop`,
   `camera` — the car's full movement/sensor/camera API.
 - **`arm.hpp` → `okrobo::Arm`**: `move` (by joint name or index), `move_all`,
-  `angles`, `tip`, `wait`, `stop`.
+  `angles`, `tip`, `wait`, `stop`, `grip`, `release`, `holding`, `object` — a
+  graspable box the tip can pick up and drop, real gravity/contact via
+  MuJoCo once released (see the compile note above).
 - **`drone.hpp` → `okrobo::Drone`**: `takeoff`, `land`, `forward`,
   `backward`, `up`, `down`, `turn_left`, `turn_right`, `wait`, `altitude`,
   `distance`, `heading`, `position`, `stop`.
@@ -86,4 +107,7 @@ each mirror their Python test file's scenarios and expected values exactly —
 the same inputs are asserted against the same hand-computed numbers in both
 languages, independently, which is the cross-language proof that these
 headers' behavior actually matches the student-facing classes everywhere
-else.
+else. `test_arm_physics.cpp` covers `grip`/`release`/`object` directly
+against `ArmWorld` (real MuJoCo, not mocked): grip fails out of reach and
+succeeds in reach, the object tracks the tip while held, and a released
+object actually falls and settles at the right height with no lateral drift.

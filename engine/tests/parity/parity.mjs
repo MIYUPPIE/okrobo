@@ -186,6 +186,97 @@ console.log(
   `parity: arm ${armStates.length} states match the reference (max diff ${armMaxDiff.toExponential(2)}, tol ${TOLERANCE})`,
 );
 
+// ---- arm graspable object (contract v3): real MuJoCo both sides ----
+//
+// A same-tolerance-as-everything-else field was not assumed safe here: the
+// WASM build uses MuJoCo's portable scalar fallback (no AVX under
+// Emscripten -- confirmed in the feasibility spike) while the native Python
+// bindings may pick different SIMD on this machine, so the two solvers
+// could in principle diverge at the level of floating-point operation
+// order even while both stay physically correct. Measured, not assumed:
+// this scenario's actual max diff is 5.55e-17 (machine epsilon), so
+// PHYSICS_TOLERANCE matches the rest of this file's 1e-9 exactly rather
+// than masking a real future regression behind a loose bound.
+const PHYSICS_TOLERANCE = TOLERANCE;
+
+const armPhysicsScenarioPath = join(ROOT, "engine", "tests", "parity", "arm-physics-scenario.json");
+const armPhysicsReference = execFileSync(
+  "python3",
+  ["-m", "okrobo.dump_trace", "--robot", "arm", "--scenario", armPhysicsScenarioPath],
+  { cwd: join(ROOT, "runtime", "python"), encoding: "utf8" },
+)
+  .trim()
+  .split("\n");
+
+const armPhysicsScenario = JSON.parse(readFileSync(armPhysicsScenarioPath, "utf8"));
+const arm2 = engine._arm_create();
+const armPhysicsState = () => ({
+  tick: engine._arm_tick(arm2),
+  moving: engine._arm_moving(arm2) === 1,
+  tip: { x: engine._arm_tip_x(arm2), y: engine._arm_tip_y(arm2), z: engine._arm_tip_z(arm2) },
+  holding: engine._arm_holding(arm2) === 1,
+  object: {
+    x: engine._arm_object_x(arm2),
+    y: engine._arm_object_y(arm2),
+    z: engine._arm_object_z(arm2),
+  },
+});
+
+const armPhysicsStates = [];
+for (const phase of armPhysicsScenario.phases) {
+  const c = phase.command;
+  if (c.type === "arm_target") engine._arm_set_target(arm2, c.joint, c.angle);
+  else if (c.type === "arm_grip") engine._arm_grip(arm2);
+  else if (c.type === "arm_release") engine._arm_release(arm2);
+  else if (c.type === "stop") engine._arm_stop(arm2);
+  else if (c.type === "reset") engine._arm_reset(arm2);
+  else throw new Error(`unknown arm command: ${c.type}`);
+  armPhysicsStates.push(armPhysicsState());
+  for (let i = 0; i < phase.steps; i++) {
+    engine._arm_step(arm2, armPhysicsScenario.dt);
+    armPhysicsStates.push(armPhysicsState());
+  }
+}
+engine._arm_destroy(arm2);
+
+if (armPhysicsReference.length !== armPhysicsStates.length) {
+  console.error(
+    `arm physics parity: length mismatch ref=${armPhysicsReference.length} wasm=${armPhysicsStates.length}`,
+  );
+  process.exit(1);
+}
+
+let armPhysicsMaxDiff = 0;
+for (let i = 0; i < armPhysicsReference.length; i++) {
+  const ref = JSON.parse(armPhysicsReference[i]);
+  const got = armPhysicsStates[i];
+  const diffs = [
+    ["tick", Math.abs(ref.tick - got.tick), TOLERANCE],
+    ["moving", ref.moving === got.moving ? 0 : 1, TOLERANCE],
+    ["holding", ref.holding === got.holding ? 0 : 1, TOLERANCE],
+    ["tip.x", Math.abs(ref.tip.x - got.tip.x), TOLERANCE],
+    ["tip.y", Math.abs(ref.tip.y - got.tip.y), TOLERANCE],
+    ["tip.z", Math.abs(ref.tip.z - got.tip.z), TOLERANCE],
+    ["object.x", Math.abs(ref.object.x - got.object.x), PHYSICS_TOLERANCE],
+    ["object.y", Math.abs(ref.object.y - got.object.y), PHYSICS_TOLERANCE],
+    ["object.z", Math.abs(ref.object.z - got.object.z), PHYSICS_TOLERANCE],
+  ];
+  for (const [field, diff, tol] of diffs) {
+    armPhysicsMaxDiff = Math.max(armPhysicsMaxDiff, diff);
+    if (diff > tol) {
+      console.error(`arm physics parity: mismatch at state ${i}, field ${field}, diff ${diff} (tol ${tol})`);
+      console.error(`  ref:  ${JSON.stringify(ref)}`);
+      console.error(`  wasm: ${JSON.stringify(got)}`);
+      process.exit(1);
+    }
+  }
+}
+
+console.log(
+  `parity: arm physics ${armPhysicsStates.length} states match the reference ` +
+    `(max diff ${armPhysicsMaxDiff.toExponential(2)}, tol ${PHYSICS_TOLERANCE} for the object, ${TOLERANCE} otherwise)`,
+);
+
 // ---- drone (contract v2) ----
 
 const droneScenarioPath = join(ROOT, "engine", "tests", "parity", "drone-scenario.json");

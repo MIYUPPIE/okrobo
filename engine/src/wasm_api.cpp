@@ -150,6 +150,26 @@ double arm_tip_y(const okrobo::ArmWorld* arm) { return arm->state().tip.y; }
 EMSCRIPTEN_KEEPALIVE
 double arm_tip_z(const okrobo::ArmWorld* arm) { return arm->state().tip.z; }
 
+/// Grip the graspable object if the tip is within kGraspTolerance of it.
+/// Returns 1 on success, 0 otherwise.
+EMSCRIPTEN_KEEPALIVE
+int arm_grip(okrobo::ArmWorld* arm) { return arm->grip() ? 1 : 0; }
+
+EMSCRIPTEN_KEEPALIVE
+void arm_release(okrobo::ArmWorld* arm) { arm->release(); }
+
+EMSCRIPTEN_KEEPALIVE
+int arm_holding(const okrobo::ArmWorld* arm) { return arm->state().holding ? 1 : 0; }
+
+EMSCRIPTEN_KEEPALIVE
+double arm_object_x(const okrobo::ArmWorld* arm) { return arm->state().object.x; }
+
+EMSCRIPTEN_KEEPALIVE
+double arm_object_y(const okrobo::ArmWorld* arm) { return arm->state().object.y; }
+
+EMSCRIPTEN_KEEPALIVE
+double arm_object_z(const okrobo::ArmWorld* arm) { return arm->state().object.z; }
+
 // ---- drone (contract v2) ----
 
 EMSCRIPTEN_KEEPALIVE

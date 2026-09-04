@@ -30,7 +30,9 @@ callers assemble the fan.
 
 The arm's kinematic backend is deliberately solver-agnostic; when contact
 dynamics arrive, MuJoCo replaces it behind these same messages
-(docs/decisions/physics-engine.md).
+(docs/decisions/physics-engine.md). **v3 narrowed this**: MuJoCo simulates a
+new graspable object, not the arm's own joint motion, which stays exactly
+this kinematic model — see v3's contract for why.
 
 ## Reference dynamics
 

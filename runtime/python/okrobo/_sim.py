@@ -226,6 +226,11 @@ class ArmConfig:
     start: tuple = (0.0, 1.0471975511965976, -0.5235987755982988, -0.5235987755982988)
 
 
+# Grip succeeds when the tip is within this radius of the object, in
+# meters -- mirrors engine/src/arm_world.hpp's kGraspTolerance exactly.
+ARM_GRASP_TOLERANCE = 0.05
+
+
 @dataclass
 class ArmState:
     tick: int
@@ -233,25 +238,33 @@ class ArmState:
     targets: list
     moving: bool
     tip: tuple  # (x, y, z)
+    holding: bool = False
+    object: tuple = (0.0, 0.0, 0.0)  # (x, y, z)
 
     def to_message(self) -> dict:
-        """Contract v1 arm state message."""
+        """Contract v3 arm state message."""
         return {
             "tick": self.tick,
             "joints": {"angles": list(self.angles), "targets": list(self.targets)},
             "moving": self.moving,
             "tip": {"x": self.tip[0], "y": self.tip[1], "z": self.tip[2]},
+            "holding": self.holding,
+            "object": {"x": self.object[0], "y": self.object[1], "z": self.object[2]},
         }
 
 
 class ArmWorld:
     """Reference model for the 4-DOF arm; mirrors engine/src/arm_world.cpp exactly."""
 
-    def __init__(self, config: ArmConfig | None = None) -> None:
+    def __init__(self, config: ArmConfig | None = None, object_config=None) -> None:
+        from .physics import PhysicsObject  # lazy: mujoco is a heavy, arm-only dependency
+
         self.config = config or ArmConfig()
         self._angles = list(self.config.start)
         self._targets = list(self.config.start)
         self._tick = 0
+        self._object = PhysicsObject(object_config)
+        self._holding = False
 
     def set_target(self, joint: int, angle: float) -> None:
         if not 0 <= joint < ARM_JOINTS:
@@ -265,13 +278,37 @@ class ArmWorld:
         self._angles = list(self.config.start)
         self._targets = list(self.config.start)
         self._tick = 0
+        self._holding = False
+        self._object.reset()
 
     def step(self, dt: float) -> None:
         for j in range(ARM_JOINTS):
             max_delta = self.config.speed[j] * dt
             delta = min(max(self._targets[j] - self._angles[j], -max_delta), max_delta)
             self._angles[j] += delta
+        if self._holding:
+            self._object.set_kinematic(self._forward_kinematics())
+        else:
+            self._object.step(dt)
         self._tick += 1
+
+    def grip(self) -> bool:
+        if self._holding:
+            return True
+        tip = self._forward_kinematics()
+        ox, oy, oz = self._object.position()
+        dx, dy, dz = tip[0] - ox, tip[1] - oy, tip[2] - oz
+        if dx * dx + dy * dy + dz * dz > ARM_GRASP_TOLERANCE * ARM_GRASP_TOLERANCE:
+            return False
+        self._holding = True
+        self._object.set_kinematic(tip)
+        return True
+
+    def release(self) -> None:
+        if not self._holding:
+            return
+        self._holding = False
+        self._object.release(self._object.position())
 
     def _forward_kinematics(self) -> tuple:
         c = self.config
@@ -290,6 +327,8 @@ class ArmWorld:
             targets=list(self._targets),
             moving=moving,
             tip=self._forward_kinematics(),
+            holding=self._holding,
+            object=self._object.position(),
         )
 
 

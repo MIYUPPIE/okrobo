@@ -9,7 +9,8 @@ namespace {
 constexpr double kEpsilon = 1e-9;
 }
 
-ArmWorld::ArmWorld(const ArmConfig& config) : config_(config), angles_(config.start), targets_(config.start) {}
+ArmWorld::ArmWorld(const ArmConfig& config, const PhysicsObjectConfig& object_config)
+    : config_(config), angles_(config.start), targets_(config.start), object_(object_config) {}
 
 void ArmWorld::set_target(int joint, double angle) {
     if (joint < 0 || joint >= kArmJoints) return;
@@ -24,6 +25,8 @@ void ArmWorld::reset() {
     angles_ = config_.start;
     targets_ = config_.start;
     tick_ = 0;
+    holding_ = false;
+    object_.reset();
 }
 
 void ArmWorld::step(double dt) {
@@ -32,7 +35,33 @@ void ArmWorld::step(double dt) {
         const double delta = std::clamp(targets_[j] - angles_[j], -max_delta, max_delta);
         angles_[j] += delta;
     }
+    if (holding_) {
+        const Tip tip = forward_kinematics();
+        object_.set_kinematic({tip.x, tip.y, tip.z});
+    } else {
+        object_.step(dt);
+    }
     ++tick_;
+}
+
+bool ArmWorld::grip() {
+    if (holding_) return true;
+    const Tip tip = forward_kinematics();
+    const Vec3 object_pos = object_.position();
+    const double dx = tip.x - object_pos.x;
+    const double dy = tip.y - object_pos.y;
+    const double dz = tip.z - object_pos.z;
+    if (dx * dx + dy * dy + dz * dz > kGraspTolerance * kGraspTolerance) return false;
+    holding_ = true;
+    object_.set_kinematic({tip.x, tip.y, tip.z});
+    return true;
+}
+
+void ArmWorld::release() {
+    if (!holding_) return;
+    holding_ = false;
+    const Vec3 drop_pos = object_.position();
+    object_.release(drop_pos);
 }
 
 Tip ArmWorld::forward_kinematics() const {
@@ -60,6 +89,8 @@ ArmState ArmWorld::state() const {
         if (std::abs(targets_[j] - angles_[j]) > kEpsilon) s.moving = true;
     }
     s.tip = forward_kinematics();
+    s.holding = holding_;
+    s.object = object_.position();
     return s;
 }
 

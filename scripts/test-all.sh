@@ -41,6 +41,14 @@ echo "== engine (WASM + parity vs reference model) =="
 "$ROOT/scripts/build-engine-wasm.sh"
 node "$ROOT/engine/tests/parity/parity.mjs"
 
+# Arm.grip()/release()'s C++ SDK compile-and-run gate test (in apps/studio's
+# vitest suite below) links a plain `g++` command against MuJoCo natively,
+# same as a student following engine/api/README.md would -- bootstrap it
+# once, the same pattern as runtime/python/.deps above.
+if [ ! -f "$ROOT/tools/mujoco/build-native/lib/libmujoco.so" ]; then
+  "$ROOT/scripts/build-mujoco-native.sh"
+fi
+
 echo "== vision (Blocks/JS find_color parity vs Python reference) =="
 node "$ROOT/scripts/lib/vision-parity-check.mjs"
 
