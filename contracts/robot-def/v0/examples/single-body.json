@@ -1,0 +1,16 @@
+{
+  "id": "single-body",
+  "name": "Single Body",
+  "description": "The minimal valid robot-def document: one root body, nothing else.",
+  "bodies": [
+    {
+      "id": "chassis",
+      "name": "Chassis",
+      "visual": { "type": "box", "size": [0.2, 0.15, 0.08] },
+      "collision": { "type": "box", "size": [0.2, 0.15, 0.08] },
+      "mass": 1.0,
+      "inertia": { "ixx": 0.01, "iyy": 0.01, "izz": 0.01 },
+      "material": { "color": [0.3, 0.5, 0.9] }
+    }
+  ]
+}

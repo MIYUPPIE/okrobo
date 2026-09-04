@@ -1,0 +1,306 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "okrobo:robot-def:v0",
+  "title": "OKROBO Robot Definition v0",
+  "description": "A structural, backend-agnostic description of an arbitrary robot: bodies, joints, actuators, sensors. Purely a data document -- it carries no simulation behavior and is not consumed by the live app in v0. Units: meters, kilograms, radians, seconds. Rotation is roll-pitch-yaw (intrinsic XYZ Euler, radians), matching the rpy convention URDF (and this repo's packs/core/robots/arm.urdf) already uses. The kinematic tree is defined entirely by joints[] edges, not a body.parent field: a body with no incoming joint edge is a root, and rigid attachment is expressed as a fixed joint rather than a second hierarchy mechanism.",
+  "type": "object",
+  "required": ["id", "name", "bodies"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,63}$",
+      "description": "Stable identifier, kebab-case (matches contracts/pack/v0's id convention)."
+    },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "root_placement": {
+      "$ref": "#/definitions/transform",
+      "description": "Where the root body sits in world space. Default: identity."
+    },
+    "bodies": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/body" }
+    },
+    "joints": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/joint" }
+    },
+    "actuators": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/actuator" }
+    },
+    "sensors": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/sensor" }
+    }
+  },
+  "definitions": {
+    "vec3": {
+      "type": "array",
+      "items": { "type": "number" },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "transform": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "position": { "$ref": "#/definitions/vec3" },
+        "rotation_rpy": { "$ref": "#/definitions/vec3", "description": "roll, pitch, yaw, radians" }
+      }
+    },
+    "geometry": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "size"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "box" },
+            "size": { "$ref": "#/definitions/vec3", "description": "full extents x,y,z, each > 0" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "radius"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "sphere" },
+            "radius": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "radius", "length"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "cylinder" },
+            "radius": { "type": "number", "exclusiveMinimum": 0 },
+            "length": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "radius", "length"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "capsule" },
+            "radius": { "type": "number", "exclusiveMinimum": 0 },
+            "length": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "radius", "length"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "cone" },
+            "radius": { "type": "number", "exclusiveMinimum": 0 },
+            "length": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "size"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "plane" },
+            "size": {
+              "type": "array",
+              "items": { "type": "number", "exclusiveMinimum": 0 },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "path"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "mesh" },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "pack-relative path, resolved and loaded later (Phase 3+); not opened in v0"
+            },
+            "scale": { "$ref": "#/definitions/vec3", "description": "default [1,1,1]" }
+          }
+        }
+      ]
+    },
+    "body": {
+      "type": "object",
+      "required": ["id", "name", "mass", "inertia"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+        "name": { "type": "string", "minLength": 1 },
+        "transform": {
+          "$ref": "#/definitions/transform",
+          "description": "geometry offset within this body's own frame; default identity"
+        },
+        "visual": { "$ref": "#/definitions/geometry" },
+        "collision": { "$ref": "#/definitions/geometry" },
+        "mass": { "type": "number", "exclusiveMinimum": 0 },
+        "inertia": {
+          "type": "object",
+          "required": ["ixx", "iyy", "izz"],
+          "additionalProperties": false,
+          "description": "Diagonal moments of inertia, kg*m^2. Off-diagonal products are out of scope for v0.",
+          "properties": {
+            "ixx": { "type": "number", "exclusiveMinimum": 0 },
+            "iyy": { "type": "number", "exclusiveMinimum": 0 },
+            "izz": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        "material": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "color": {
+              "type": "array",
+              "items": { "type": "number", "minimum": 0, "maximum": 1 },
+              "minItems": 3,
+              "maxItems": 4,
+              "description": "RGB or RGBA, each channel 0..1"
+            }
+          }
+        }
+      }
+    },
+    "joint": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["id", "name", "type", "parent", "child"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string" },
+            "name": { "type": "string" },
+            "type": { "const": "fixed" },
+            "parent": { "type": "string" },
+            "child": { "type": "string" },
+            "origin": { "$ref": "#/definitions/transform" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["id", "name", "type", "parent", "child", "axis"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string" },
+            "name": { "type": "string" },
+            "type": { "const": "hinge" },
+            "parent": { "type": "string" },
+            "child": { "type": "string" },
+            "origin": { "$ref": "#/definitions/transform" },
+            "axis": { "$ref": "#/definitions/vec3", "description": "rotation axis, unit vector, in the parent frame" },
+            "limits": {
+              "type": "object",
+              "required": ["lower", "upper"],
+              "additionalProperties": false,
+              "properties": {
+                "lower": { "type": "number" },
+                "upper": { "type": "number" }
+              }
+            },
+            "damping": { "type": "number", "minimum": 0 },
+            "friction": { "type": "number", "minimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["id", "name", "type", "parent", "child", "axis"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string" },
+            "name": { "type": "string" },
+            "type": { "const": "slider" },
+            "parent": { "type": "string" },
+            "child": { "type": "string" },
+            "origin": { "$ref": "#/definitions/transform" },
+            "axis": { "$ref": "#/definitions/vec3", "description": "translation axis, unit vector, in the parent frame" },
+            "limits": {
+              "type": "object",
+              "required": ["lower", "upper"],
+              "additionalProperties": false,
+              "properties": {
+                "lower": { "type": "number" },
+                "upper": { "type": "number" }
+              }
+            },
+            "damping": { "type": "number", "minimum": 0 },
+            "friction": { "type": "number", "minimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["id", "name", "type", "parent", "child"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string" },
+            "name": { "type": "string" },
+            "type": { "const": "ball" },
+            "parent": { "type": "string" },
+            "child": { "type": "string" },
+            "origin": { "$ref": "#/definitions/transform" },
+            "damping": { "type": "number", "minimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["id", "name", "type", "parent", "child"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string" },
+            "name": { "type": "string" },
+            "type": { "const": "free" },
+            "parent": { "type": "string" },
+            "child": { "type": "string" },
+            "origin": { "$ref": "#/definitions/transform" }
+          }
+        }
+      ]
+    },
+    "actuator": {
+      "type": "object",
+      "required": ["id", "name", "type", "target_joint"],
+      "additionalProperties": false,
+      "description": "Declares that a joint can be driven, and its limits. No gains/PID/target -- that is a controller's job (out of scope for v0).",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "enum": ["motor", "servo", "force", "torque", "velocity"] },
+        "target_joint": { "type": "string" },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "effort": { "type": "number", "exclusiveMinimum": 0 },
+            "velocity": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        }
+      }
+    },
+    "sensor": {
+      "type": "object",
+      "required": ["id", "name", "type", "body"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "enum": ["camera", "distance", "lidar", "imu", "encoder", "gps", "touch", "force_torque"] },
+        "body": { "type": "string" },
+        "joint": { "type": "string", "description": "required when type=encoder: which joint it reads" },
+        "transform": { "$ref": "#/definitions/transform", "description": "mount offset within body's frame" },
+        "params": {
+          "type": "object",
+          "description": "Type-specific parameters (e.g. camera resolution, lidar ray count/FOV). Envelope only -- full per-type validation lives in the hand-written validators, not here."
+        }
+      }
+    }
+  }
+}

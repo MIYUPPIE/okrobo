@@ -1,0 +1,15 @@
+{
+  "id": "invalid-fixture",
+  "name": "robot-cycle",
+  "bodies": [
+    { "id": "root", "name": "Root", "mass": 1.0, "inertia": { "ixx": 0.01, "iyy": 0.01, "izz": 0.01 } },
+    { "id": "p", "name": "P", "mass": 0.5, "inertia": { "ixx": 0.005, "iyy": 0.005, "izz": 0.005 } },
+    { "id": "q", "name": "Q", "mass": 0.5, "inertia": { "ixx": 0.005, "iyy": 0.005, "izz": 0.005 } },
+    { "id": "r", "name": "R", "mass": 0.5, "inertia": { "ixx": 0.005, "iyy": 0.005, "izz": 0.005 } }
+  ],
+  "joints": [
+    { "id": "j1", "name": "J1", "type": "fixed", "parent": "p", "child": "q" },
+    { "id": "j2", "name": "J2", "type": "fixed", "parent": "q", "child": "r" },
+    { "id": "j3", "name": "J3", "type": "fixed", "parent": "r", "child": "p" }
+  ]
+}

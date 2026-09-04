@@ -27,12 +27,34 @@ set(MUJOCO_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(mujoco)
 
+# robot_def.cpp's JSON parsing only -- see docs/decisions/robot-definition-schema.md
+# for why a vendored parser (vs. hand-rolled) and why it's scoped to its own
+# target rather than okrobo_engine. Single header, no impact on the WASM
+# build: scripts/build-engine-wasm.sh hand-lists its own .cpp sources and
+# robot_def.cpp is never among them.
+FetchContent_Declare(
+  nlohmann_json
+  GIT_REPOSITORY https://github.com/nlohmann/json
+  GIT_TAG v3.11.3
+  GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(nlohmann_json)
+
 add_library(okrobo_engine src/world.cpp src/arm_world.cpp src/drone_world.cpp src/physics_object.cpp)
 # api/ is the header-only student SDK (engine/api/robot.hpp): real,
 # standalone C++ built on the same World the parity gate locks to Python.
 target_include_directories(okrobo_engine PUBLIC src api)
 target_compile_options(okrobo_engine PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(okrobo_engine PRIVATE mujoco::mujoco)
+
+# Robot Builder Phase 1 (contracts/robot-def/v0): parse + validate only, no
+# simulation behavior. A separate target/library, deliberately never linked
+# into okrobo_engine, so nlohmann/json can never reach the WASM build even
+# by accident.
+add_library(okrobo_robot_def src/robot_def.cpp)
+target_include_directories(okrobo_robot_def PUBLIC src)
+target_link_libraries(okrobo_robot_def PRIVATE nlohmann_json::nlohmann_json)
+target_compile_options(okrobo_robot_def PRIVATE -Wall -Wextra -Werror)
 
 enable_testing()
 
@@ -74,3 +96,14 @@ add_test(NAME vision_api COMMAND test_vision_api)
 
 okrobo_add_test(test_arm_physics tests/test_arm_physics.cpp)
 add_test(NAME arm_physics COMMAND test_arm_physics)
+
+# Not okrobo_add_test: robot_def has nothing to do with okrobo_engine and
+# must not link it (see the target's own comment above).
+add_executable(test_robot_def tests/test_robot_def.cpp)
+target_link_libraries(test_robot_def PRIVATE okrobo_robot_def)
+target_compile_options(test_robot_def PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+# Baked in at configure time so the test finds the fixtures regardless of
+# ctest's working directory, rather than guessing from __FILE__ or CWD.
+target_compile_definitions(test_robot_def PRIVATE
+  OKROBO_ROBOT_DEF_CONTRACT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../contracts/robot-def/v0")
+add_test(NAME robot_def COMMAND test_robot_def)

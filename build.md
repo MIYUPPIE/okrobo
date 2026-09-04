@@ -499,3 +499,81 @@ a real headless-Chrome run against a real sidecar, clicking through the new
 canvas before and after — the box is visibly orange at its resting spot,
 then visibly green and relocated to the tip once gripped (`tip z 0.06 m`
 in the status line matching the screenshot exactly).
+
+## Robot Builder Phase 1: Foundation (2026-09-04)
+
+The first slice of turning OKROBO from "pick Car, Arm, or Drone and program
+it" into a general-purpose, component-based Robot & World Builder. Phase 1
+only, deliberately narrow: a versioned, language-mirrored **structural**
+schema for an arbitrary robot — bodies, joints, actuators, sensors — plus
+serialization and validation. No 3D builder UI, no MJCF generation, no
+engine/WASM wiring, no Blockly/Python API changes. Car/Arm/Drone are
+completely untouched — this is purely additive, sitting next to the
+existing hardcoded robots until a later phase decides whether/how to
+re-express them as ordinary assemblies on top of it.
+
+New contract family `contracts/robot-def/v0/` (schema.json + contract.md +
+`examples/` + `invalid/`), deliberately separate from the existing
+message-oriented `contracts/robot-api/`: robot-def describes what a robot
+*is* (a static document — bodies/joints/actuators/sensors), robot-api is the
+protocol a running robot speaks (commands in, state out). The kinematic tree
+is defined entirely by `joints[]` edges, not a `body.parent` field, mirroring
+URDF and this repo's own `apps/studio/src/packs/urdf.ts` idiom exactly, so
+there's never a second, possibly-disagreeing way to express the same tree.
+
+Hand-mirrored into Python (`runtime/python/okrobo/robot_def.py`, the
+executable spec — the same role `_sim.py` already plays for kinematics),
+TypeScript (`apps/studio/src/contracts/robotDef.ts`), and C++
+(`engine/src/robot_def.{hpp,cpp}`), following this repo's established
+hand-mirror-no-codegen convention. The C++ side needed real JSON parsing for
+the first time in this engine — `wasm_api.cpp` has always deliberately
+avoided it, keeping the WASM boundary to primitive scalars. Vendored
+**nlohmann/json** via `FetchContent`, the same mechanism already used for
+MuJoCo, scoped to its own `okrobo_robot_def` CMake target that is never
+linked into `okrobo_engine` and never added to
+`scripts/build-engine-wasm.sh`'s source list — it structurally cannot reach
+the WASM bundle students' browsers download. Recorded in
+`docs/decisions/robot-definition-schema.md`, alongside the tree-via-joints
+and new-family-not-a-version-bump decisions.
+
+23 validation rules (duplicate/unknown ids, invalid geometry/mass/inertia,
+invalid joint axis/limits/damping, missing-root/multiple-root/cycle
+detection on the joint graph, unresolvable actuator/sensor targets), each
+with its own `invalid/<rule-id>.json` fixture read identically by all three
+language test suites — a rule that drifts between languages fails in all
+three at once. `validate_robot_def`/`validateRobotDef`/`ValidateRobotDef`
+never throw: they always return a list of issues, so a future builder UI can
+show every problem on a robot at once (a deliberate departure from
+`validateWorld.ts`'s throw-on-first-error style — see contract.md).
+Parsing still throws on malformed shape, same posture as every existing
+pack/world parser.
+
+The graph checks (root-counting, cycle detection) needed real care to keep
+every fixture triggering exactly one rule: duplicate ids are deduplicated
+(first occurrence wins) before any graph logic runs, so a
+`body-duplicate-id` fixture can't also manufacture a phantom extra root;
+multiple joints targeting the same child are excluded from the tree (only
+the first becomes an edge) so `joint-duplicate-child` can't masquerade as
+`robot-cycle`; and cycle detection only runs once at least one root exists,
+so a `robot-no-root-body` fixture doesn't also fire `robot-cycle` on the
+same disconnected loop. Verified by writing all 23 Python tests first and
+getting every one green before porting the identical logic to TypeScript
+and C++ — both ports needed zero changes to the fixtures or the rule logic
+once the Python version was right, and all three independently agreed on
+every fixture on the first try.
+
+Tests: `runtime/python/tests/test_robot_def.py` (52 cases: round-trip +
+parametrized fixture loop + one message-wording assertion per rule),
+`apps/studio/src/contracts/robotDef.test.ts` (52 cases, same structure),
+`engine/tests/test_robot_def.cpp` (round-trip + fixture loop over all 23
+`invalid/*.json`, C++20 defaulted `operator==` for structural equality).
+`pytest` (174 passed, 1 skipped), `vitest`, `tsc --noEmit` (both
+tsconfigs), and the full `engine/` ctest suite (10/10, including every
+pre-existing gate) all green. Nothing outside `contracts/robot-def/`,
+`docs/decisions/robot-definition-schema.md`,
+`runtime/python/okrobo/{robot_def.py,__init__.py}`,
+`runtime/python/tests/test_robot_def.py`,
+`apps/studio/src/contracts/robotDef.{ts,test.ts}`, `engine/CMakeLists.txt`,
+`engine/src/robot_def.{hpp,cpp}`, and `engine/tests/test_robot_def.cpp`
+changed — the five existing parity gates, the CDP e2e script, and every pack
+and lesson are untouched.
