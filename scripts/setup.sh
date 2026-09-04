@@ -71,6 +71,31 @@ else
 fi
 
 echo
+echo "== mujoco, native + wasm (tools/mujoco) =="
+# The arm's graspable object (Arm.grip()/release()) needs a real solver on
+# both the host (engine ctest, the C++-track compile-and-run gate test) and
+# WASM (the studio's own engine build) sides -- see
+# docs/decisions/physics-engine.md. Both are gitignored under tools/, same
+# as tools/emsdk above; each script clones tools/mujoco once (~175 MB) and
+# reuses it for the other.
+if [ -f tools/mujoco/build-native/lib/libmujoco.so ]; then
+  note "native build already present"
+else
+  note "building native (a minute or two)..."
+  bash scripts/build-mujoco-native.sh >/dev/null 2>&1 && note "installed" ||
+    note "FAILED — run ./scripts/build-mujoco-native.sh by hand to see why"
+fi
+if [ -f tools/mujoco/build-wasm/lib/libmujoco.a ]; then
+  note "wasm build already present"
+elif command -v emcc >/dev/null 2>&1 || [ -f tools/emsdk/emsdk_env.sh ]; then
+  note "building wasm (a minute or two)..."
+  bash scripts/build-mujoco-wasm.sh >/dev/null 2>&1 && note "installed" ||
+    note "FAILED — run ./scripts/build-mujoco-wasm.sh by hand to see why"
+else
+  note "skipped — emscripten isn't set up yet; build-engine-wasm.sh builds this itself when needed"
+fi
+
+echo
 echo "== what is left for you =="
 if [ ${#missing_system[@]} -gt 0 ]; then
   note "install these first: ${missing_system[*]}"

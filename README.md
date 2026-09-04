@@ -11,7 +11,7 @@ Students build programs in blocks or real Python, run them against a C++ simulat
 ## Quick start
 
 ```bash
-./scripts/setup.sh             # once per clone: emsdk, node modules, python deps
+./scripts/setup.sh             # once per clone: emsdk, mujoco, node modules, python deps
 ./scripts/test-all.sh          # all gate suites
 ./scripts/check-dev-server.sh  # the dev server really loads the engine + 3D
 cd apps/studio && npm run dev  # the studio
@@ -40,6 +40,14 @@ node scripts/build-pack-index.mjs   # archives + index.json in dist/packs
 node scripts/school-server.mjs      # prints the LAN address to enter in File → Asset Store…
 ```
 
+## Hardware
+
+A physical car (`firmware/okrobo_car/`, any ESP32/Arduino-class board) speaks
+the same protocol the simulator does, so an unmodified student program drives
+either one. Flash it from the Hardware section in the studio's sidebar (needs
+[arduino-cli](https://arduino.github.io/arduino-cli/latest/installation/) on
+PATH), or by hand — see [firmware/README.md](firmware/README.md).
+
 ## Layout
 
 | Directory | What |
@@ -49,4 +57,6 @@ node scripts/school-server.mjs      # prints the LAN address to enter in File �
 | `engine/` | C++ simulation core (the only home of the sim math) |
 | `runtime/python/` | `okrobo` student Python package and the sidecar |
 | `packs/` | Worlds, robots (URDF), and lessons |
+| `firmware/` | Physical car firmware — host-tested protocol parser + board-specific `.ino` |
 | `scripts/` | Glue: builds, test runner, school server |
+| `tools/` | Fetched build toolchains (Emscripten, MuJoCo) — gitignored, `setup.sh` populates them |
