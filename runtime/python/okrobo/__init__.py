@@ -46,6 +46,13 @@ from .robot_def import (
     robot_def_to_dict,
     validate_robot_def,
 )
+from .world_def import (
+    WorldDef,
+    WorldObject,
+    parse_world_def,
+    validate_world_def,
+    world_def_to_dict,
+)
 
 __all__ = [
     "Robot",
@@ -90,5 +97,10 @@ __all__ = [
     "parse_robot_def",
     "validate_robot_def",
     "robot_def_to_dict",
+    "WorldDef",
+    "WorldObject",
+    "parse_world_def",
+    "validate_world_def",
+    "world_def_to_dict",
 ]
 __version__ = "0.4.0"

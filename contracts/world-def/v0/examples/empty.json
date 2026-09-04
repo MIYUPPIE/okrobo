@@ -1,0 +1,6 @@
+{
+  "id": "empty",
+  "name": "Empty",
+  "description": "The minimal valid world-def document: no objects at all.",
+  "objects": []
+}

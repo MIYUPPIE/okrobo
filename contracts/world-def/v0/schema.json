@@ -1,0 +1,147 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "okrobo:world-def:v0",
+  "title": "OKROBO World Definition v0",
+  "description": "A structural, backend-agnostic description of an arbitrary static environment: a flat list of placed objects (obstacles, terrain shapes). Purely a data document -- it carries no simulation behavior on its own. Units: meters, radians, seconds. Rotation is roll-pitch-yaw (intrinsic XYZ Euler, radians), matching contracts/robot-def/v0's own convention -- the vec3/transform/geometry/material shapes here are intentionally identical to that contract's, since they are the same underlying concepts (a position/rotation, a primitive shape, a color), not a coincidence. Unlike robot-def, world objects have no kinematic tree: every object is independently placed and static (welded to the world, never moves in v0) -- there are no joints, no actuators, no sensors, and no mass/inertia.",
+  "type": "object",
+  "required": ["id", "name", "objects"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,63}$",
+      "description": "Stable identifier, kebab-case (matches contracts/pack/v0's id convention)."
+    },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "objects": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/object" }
+    }
+  },
+  "definitions": {
+    "vec3": {
+      "type": "array",
+      "items": { "type": "number" },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "transform": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "position": { "$ref": "#/definitions/vec3" },
+        "rotation_rpy": { "$ref": "#/definitions/vec3", "description": "roll, pitch, yaw, radians" }
+      }
+    },
+    "geometry": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "size"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "box" },
+            "size": { "$ref": "#/definitions/vec3", "description": "full extents x,y,z, each > 0" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "radius"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "sphere" },
+            "radius": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "radius", "length"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "cylinder" },
+            "radius": { "type": "number", "exclusiveMinimum": 0 },
+            "length": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "radius", "length"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "capsule" },
+            "radius": { "type": "number", "exclusiveMinimum": 0 },
+            "length": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "radius", "length"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "cone" },
+            "radius": { "type": "number", "exclusiveMinimum": 0 },
+            "length": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "size"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "plane" },
+            "size": {
+              "type": "array",
+              "items": { "type": "number", "exclusiveMinimum": 0 },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "path"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "mesh" },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "pack-relative path, resolved and loaded later; not opened in v0"
+            },
+            "scale": { "$ref": "#/definitions/vec3", "description": "default [1,1,1]" }
+          }
+        }
+      ]
+    },
+    "material": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "color": {
+          "type": "array",
+          "items": { "type": "number", "minimum": 0, "maximum": 1 },
+          "minItems": 3,
+          "maxItems": 4,
+          "description": "RGB or RGBA, each channel 0..1"
+        }
+      }
+    },
+    "object": {
+      "type": "object",
+      "required": ["id", "name", "geometry"],
+      "additionalProperties": false,
+      "description": "A single static placed object. No visual/collision split (unlike robot-def's Body): one geometry serves as both, matching how the robot builder's own inspector already unifies them on Apply.",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+        "name": { "type": "string", "minLength": 1 },
+        "transform": {
+          "$ref": "#/definitions/transform",
+          "description": "world-absolute placement; default identity"
+        },
+        "geometry": { "$ref": "#/definitions/geometry" },
+        "material": { "$ref": "#/definitions/material" }
+      }
+    }
+  }
+}

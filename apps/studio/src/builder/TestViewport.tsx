@@ -2,8 +2,10 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { RobotDef } from "../contracts/robotDef";
+import type { WorldDef } from "../contracts/worldDef";
 import type { EngineBuiltRobot } from "../engine/EngineBuiltRobot";
 import { materializeRobotScene } from "./robotThree";
+import { materializeWorldScene } from "./worldThree";
 
 // Physics preview for Test mode -- deliberately separate from
 // BuilderViewport.tsx, the same reasoning that already separates
@@ -23,11 +25,16 @@ import { materializeRobotScene } from "./robotThree";
 export interface TestViewportProps {
   robot: RobotDef;
   builtRobot: EngineBuiltRobot;
+  /** Robot Builder Phase 5 -- omitted means the plain floor only, exactly
+   * pre-Phase-5 Test mode. When given, its objects are real MuJoCo
+   * colliders (see EngineBuiltRobot's own `world` parameter); this prop
+   * only controls whether they're *rendered* here. */
+  world?: WorldDef;
 }
 
 const STEP_DT = 0.01;
 
-export function TestViewport({ robot, builtRobot }: TestViewportProps) {
+export function TestViewport({ robot, builtRobot, world }: TestViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -63,6 +70,12 @@ export function TestViewport({ robot, builtRobot }: TestViewportProps) {
     const grid = new THREE.GridHelper(4, 40, 0x263043, 0x263043);
     grid.position.y = 0.001;
     scene.add(grid);
+
+    // World objects (Robot Builder Phase 5) are static -- materialized once
+    // here and added directly to `scene`, never touched again in the
+    // animate() loop (unlike the robot's own bodies below, which get a
+    // fresh pose every frame from the physics step).
+    if (world) scene.add(materializeWorldScene(world));
 
     // Build meshes once from the static document. Each body's own
     // bodyGroup (already carrying body.transform as its local transform,
@@ -114,7 +127,7 @@ export function TestViewport({ robot, builtRobot }: TestViewportProps) {
       renderer.dispose();
       container.removeChild(renderer.domElement);
     };
-  }, [robot, builtRobot]);
+  }, [robot, builtRobot, world]);
 
   return <div ref={containerRef} className="viewport-3d test-viewport" />;
 }

@@ -1,0 +1,7 @@
+{
+  "id": "invalid-fixture",
+  "name": "object-invalid-geometry",
+  "objects": [
+    { "id": "box1", "name": "Box A", "geometry": { "type": "box", "size": [0.1, 0.0, 0.1] } }
+  ]
+}

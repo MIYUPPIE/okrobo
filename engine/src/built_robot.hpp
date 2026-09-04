@@ -1,35 +1,41 @@
 #pragma once
 
-// Robot Builder Phase 3/4: given an arbitrary RobotDef, generate an MJCF
-// model and simulate it with the same vendored MuJoCo already used for the
-// Arm's graspable object (physics_object.hpp). Bodies, joints, actuators
-// (Phase 3), and seven of the eight sensor types (Phase 4) -- `camera` is
-// not implemented, see docs/decisions/robot-builder-sensors.md. See
-// docs/decisions/robot-builder-physics.md for the Phase 3 interpretive
-// decisions behind the MJCF mapping (every root gets a <freejoint/>, a
-// synthesized floor plane, cone->cylinder and mesh->placeholder-box
-// fallbacks, why `plane` geometry and a non-root `free` joint can never
-// compile, actuators targeting ball/free joints are skipped, the default
-// position-actuator gain, and the open question on joint.axis's frame) and
-// docs/decisions/robot-builder-sensors.md for the Phase 4 ones (the
-// per-sensor <site> mechanism, the encoder-on-non-scalar-joint skip, the
-// lidar params/fan-axis convention, force/torque's "parent joint reaction"
-// semantics, why camera is deferred).
+// Robot Builder Phase 3/4/5: given an arbitrary RobotDef (and optionally a
+// WorldDef to test it in), generate an MJCF model and simulate it with the
+// same vendored MuJoCo already used for the Arm's graspable object
+// (physics_object.hpp). Bodies, joints, actuators (Phase 3), seven of the
+// eight sensor types (Phase 4, no `camera`), and static world objects
+// (Phase 5). See docs/decisions/robot-builder-physics.md for the Phase 3
+// interpretive decisions behind the MJCF mapping (every root gets a
+// <freejoint/>, a synthesized floor plane, cone->cylinder and
+// mesh->placeholder-box fallbacks, why `plane` geometry and a non-root
+// `free` joint can never compile, actuators targeting ball/free joints are
+// skipped, the default position-actuator gain, and the open question on
+// joint.axis's frame), docs/decisions/robot-builder-sensors.md for the
+// Phase 4 ones (the per-sensor <site> mechanism, the
+// encoder-on-non-scalar-joint skip, the lidar params/fan-axis convention,
+// force/torque's "parent joint reaction" semantics, why camera is
+// deferred), and docs/decisions/robot-builder-world.md for the Phase 5
+// ones (bare <geom> with no <body> wrapper for static objects, the
+// `world_` name-prefix collision guard).
 //
 // No MuJoCo type appears in this header -- only built_robot.cpp includes
 // <mujoco/mujoco.h>, same posture as physics_object.hpp.
 
 #include "robot_def.hpp"
+#include "world_def.hpp"
 
 #include <string>
 #include <vector>
 
 namespace okrobo {
 
-/// Generates an MJCF document for `robot`. Exposed standalone (not just
+/// Generates an MJCF document for `robot`, optionally including `world`'s
+/// static objects (null/omitted means no world -- just the robot and the
+/// floor, exactly Phase 3/4's behavior). Exposed standalone (not just
 /// inside BuiltRobot) so it has its own test coverage independent of
 /// whether MuJoCo can actually compile the result.
-std::string GenerateMjcf(const RobotDef& robot);
+std::string GenerateMjcf(const RobotDef& robot, const WorldDef* world = nullptr);
 
 struct BuiltBodyPose {
     double x = 0.0;
@@ -50,10 +56,11 @@ struct BuiltBodyPose {
 /// docs/decisions/robot-builder-sensors.md).
 class BuiltRobot {
 public:
-    /// Throws std::runtime_error if `robot` can't be turned into a
-    /// compilable MJCF model (e.g. a `plane`-geometry body, or a non-root
-    /// `free` joint -- see docs/decisions/robot-builder-physics.md).
-    explicit BuiltRobot(const RobotDef& robot);
+    /// Throws std::runtime_error if `robot` (plus `world`'s objects, when
+    /// given) can't be turned into a compilable MJCF model (e.g. a
+    /// `plane`-geometry body, or a non-root `free` joint -- see
+    /// docs/decisions/robot-builder-physics.md).
+    explicit BuiltRobot(const RobotDef& robot, const WorldDef* world = nullptr);
     ~BuiltRobot();
     BuiltRobot(const BuiltRobot&) = delete;
     BuiltRobot& operator=(const BuiltRobot&) = delete;

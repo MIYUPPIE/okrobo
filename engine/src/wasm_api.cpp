@@ -249,19 +249,29 @@ int drone_collided(const okrobo::DroneWorld* drone) {
 EMSCRIPTEN_KEEPALIVE
 double drone_ray(const okrobo::DroneWorld* drone, double offset) { return drone->ray(offset); }
 
-// ---- built robot (Robot Builder Phase 3; contracts/robot-def/v0) ----
-// No sensors (Phase 4). See docs/decisions/robot-builder-physics.md.
+// ---- built robot (Robot Builder Phase 3/5; contracts/robot-def/v0,
+// contracts/world-def/v0) ----
+// No sensors (Phase 4 -- no `camera`). See docs/decisions/robot-builder-physics.md
+// and docs/decisions/robot-builder-world.md.
 
-/// Parses `json` (a robot-def v0 document, `json_len` bytes, not
-/// necessarily null-terminated) and builds a simulated instance. Returns
-/// null on any parse or MJCF-compile failure -- the JS side checks for a
-/// falsy handle rather than catching a C++ exception across the ABI.
+/// Parses `robot_json` (a robot-def v0 document) and, when `world_len > 0`,
+/// `world_json` (a world-def v0 document) too, then builds a simulated
+/// instance of the robot in that environment. `world_len == 0` means "no
+/// world" (matches Phase 3/4's exact behavior -- just the robot and the
+/// floor). Neither buffer needs to be null-terminated. Returns null on any
+/// parse or MJCF-compile failure -- the JS side checks for a falsy handle
+/// rather than catching a C++ exception across the ABI.
 EMSCRIPTEN_KEEPALIVE
-okrobo::BuiltRobot* built_create(const char* json, int json_len) {
+okrobo::BuiltRobot* built_create(const char* robot_json, int robot_len, const char* world_json, int world_len) {
     try {
-        const std::string text(json, static_cast<size_t>(json_len));
-        const okrobo::RobotDef robot = okrobo::ParseRobotDef(text);
-        return new okrobo::BuiltRobot(robot);
+        const std::string robot_text(robot_json, static_cast<size_t>(robot_len));
+        const okrobo::RobotDef robot = okrobo::ParseRobotDef(robot_text);
+        if (world_len <= 0) {
+            return new okrobo::BuiltRobot(robot);
+        }
+        const std::string world_text(world_json, static_cast<size_t>(world_len));
+        const okrobo::WorldDef world = okrobo::ParseWorldDef(world_text);
+        return new okrobo::BuiltRobot(robot, &world);
     } catch (const std::exception&) {
         return nullptr;
     }

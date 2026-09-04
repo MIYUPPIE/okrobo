@@ -234,9 +234,15 @@ class Issue:
 
 
 # ---- parsing ----
+#
+# parse_transform/parse_geometry/transform_to_dict/geometry_to_dict are
+# public (Robot Builder Phase 5) so runtime/python/okrobo/world_def.py can
+# reuse them directly rather than redefining an equivalent shape -- a
+# position/rotation and a primitive shape are the same concepts for a world
+# object as for a robot body. See docs/decisions/robot-builder-world.md.
 
 
-def _parse_transform(data: dict | None) -> Transform:
+def parse_transform(data: dict | None) -> Transform:
     if not data:
         return Transform()
     position = tuple(float(v) for v in data.get("position", (0.0, 0.0, 0.0)))
@@ -244,7 +250,7 @@ def _parse_transform(data: dict | None) -> Transform:
     return Transform(position=position, rotation_rpy=rotation)
 
 
-def _parse_geometry(data: dict | None) -> Geometry | None:
+def parse_geometry(data: dict | None) -> Geometry | None:
     if data is None:
         return None
     kind = data.get("type")
@@ -275,9 +281,9 @@ def _parse_body(data: dict) -> Body:
     return Body(
         id=str(data["id"]),
         name=str(data["name"]),
-        transform=_parse_transform(data.get("transform")),
-        visual=_parse_geometry(data.get("visual")),
-        collision=_parse_geometry(data.get("collision")),
+        transform=parse_transform(data.get("transform")),
+        visual=parse_geometry(data.get("visual")),
+        collision=parse_geometry(data.get("collision")),
         mass=float(data["mass"]),
         inertia=Inertia(ixx=float(inertia_data["ixx"]), iyy=float(inertia_data["iyy"]), izz=float(inertia_data["izz"])),
         material=material,
@@ -297,7 +303,7 @@ def _parse_joint(data: dict) -> Joint:
         name=str(data["name"]),
         parent=str(data["parent"]),
         child=str(data["child"]),
-        origin=_parse_transform(data.get("origin")),
+        origin=parse_transform(data.get("origin")),
     )
     if kind == "fixed":
         return FixedJoint(**common)
@@ -340,7 +346,7 @@ def _parse_sensor(data: dict) -> Sensor:
         type=str(data["type"]),
         body=str(data["body"]),
         joint=str(data["joint"]) if "joint" in data else None,
-        transform=_parse_transform(data.get("transform")),
+        transform=parse_transform(data.get("transform")),
         params=dict(data.get("params", {})),
     )
 
@@ -356,7 +362,7 @@ def parse_robot_def(data: dict) -> RobotDef:
         id=str(data["id"]),
         name=str(data["name"]),
         description=str(data.get("description", "")),
-        root_placement=_parse_transform(data.get("root_placement")),
+        root_placement=parse_transform(data.get("root_placement")),
         bodies=[_parse_body(b) for b in data["bodies"]],
         joints=[_parse_joint(j) for j in data.get("joints", [])],
         actuators=[_parse_actuator(a) for a in data.get("actuators", [])],
@@ -367,11 +373,11 @@ def parse_robot_def(data: dict) -> RobotDef:
 # ---- serialization (round-trip) ----
 
 
-def _transform_to_dict(t: Transform) -> dict:
+def transform_to_dict(t: Transform) -> dict:
     return {"position": list(t.position), "rotation_rpy": list(t.rotation_rpy)}
 
 
-def _geometry_to_dict(g: Geometry) -> dict:
+def geometry_to_dict(g: Geometry) -> dict:
     if isinstance(g, BoxGeometry):
         return {"type": "box", "size": list(g.size)}
     if isinstance(g, SphereGeometry):
@@ -389,21 +395,21 @@ def _body_to_dict(b: Body) -> dict:
     out = {
         "id": b.id,
         "name": b.name,
-        "transform": _transform_to_dict(b.transform),
+        "transform": transform_to_dict(b.transform),
         "mass": b.mass,
         "inertia": {"ixx": b.inertia.ixx, "iyy": b.inertia.iyy, "izz": b.inertia.izz},
     }
     if b.visual is not None:
-        out["visual"] = _geometry_to_dict(b.visual)
+        out["visual"] = geometry_to_dict(b.visual)
     if b.collision is not None:
-        out["collision"] = _geometry_to_dict(b.collision)
+        out["collision"] = geometry_to_dict(b.collision)
     if b.material is not None and b.material.color is not None:
         out["material"] = {"color": list(b.material.color)}
     return out
 
 
 def _joint_to_dict(j: Joint) -> dict:
-    out = {"id": j.id, "name": j.name, "type": j.type, "parent": j.parent, "child": j.child, "origin": _transform_to_dict(j.origin)}
+    out = {"id": j.id, "name": j.name, "type": j.type, "parent": j.parent, "child": j.child, "origin": transform_to_dict(j.origin)}
     if isinstance(j, (HingeJoint, SliderJoint)):
         out["axis"] = list(j.axis)
         if j.limits is not None:
@@ -431,7 +437,7 @@ def _actuator_to_dict(a: Actuator) -> dict:
 
 
 def _sensor_to_dict(s: Sensor) -> dict:
-    out = {"id": s.id, "name": s.name, "type": s.type, "body": s.body, "transform": _transform_to_dict(s.transform)}
+    out = {"id": s.id, "name": s.name, "type": s.type, "body": s.body, "transform": transform_to_dict(s.transform)}
     if s.joint is not None:
         out["joint"] = s.joint
     if s.params:
@@ -444,7 +450,7 @@ def robot_def_to_dict(robot: RobotDef) -> dict:
         "id": robot.id,
         "name": robot.name,
         "description": robot.description,
-        "root_placement": _transform_to_dict(robot.root_placement),
+        "root_placement": transform_to_dict(robot.root_placement),
         "bodies": [_body_to_dict(b) for b in robot.bodies],
         "joints": [_joint_to_dict(j) for j in robot.joints],
         "actuators": [_actuator_to_dict(a) for a in robot.actuators],

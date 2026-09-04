@@ -541,6 +541,55 @@ void TestLidarReadsOpenRangeThenBlocked() {
     assert(any_close_hit);
 }
 
+// ---- Robot Builder Phase 5: world objects ----
+// See docs/decisions/robot-builder-world.md.
+
+// A robot body dropped directly above a world-def obstacle box settles
+// resting on the box's top surface, not the floor -- proof a world object
+// is a real MuJoCo collider, not just a rendered decoration.
+void TestRobotSettlesOnWorldObject() {
+    okrobo::RobotDef robot;
+    robot.id = "world-collision-test";
+    robot.name = "World Collision Test";
+    robot.root_placement.position = {0.0, 0.0, 0.6};
+
+    constexpr double kRobotHalfZ = 0.04;
+    okrobo::Body box;
+    box.id = "box";
+    box.name = "Box";
+    box.mass = 1.0;
+    box.inertia = MakeInertia(0.01);
+    box.has_collision = true;
+    box.collision.type = okrobo::GeometryType::kBox;
+    box.collision.size = {0.1, 0.1, kRobotHalfZ * 2};
+    robot.bodies.push_back(box);
+
+    constexpr double kObstacleHalfZ = 0.05;
+    okrobo::WorldDef world;
+    world.id = "world-collision-test-world";
+    world.name = "World Collision Test World";
+    okrobo::WorldObject obstacle;
+    obstacle.id = "platform";
+    obstacle.name = "Platform";
+    obstacle.transform.position = {0.0, 0.0, kObstacleHalfZ};
+    obstacle.geometry.type = okrobo::GeometryType::kBox;
+    obstacle.geometry.size = {0.3, 0.3, kObstacleHalfZ * 2};
+    world.objects.push_back(obstacle);
+
+    okrobo::BuiltRobot built(robot, &world);
+    Run(built, 2.0);
+
+    const auto pose = built.body_pose(0);
+    const double platform_top = kObstacleHalfZ * 2;  // obstacle center (kObstacleHalfZ) + its own half-height
+    std::fprintf(stderr, "world-collision: z=%.6f (platform top %.4f + robot half-z %.4f = %.4f)\n", pose.z,
+                 platform_top, kRobotHalfZ, platform_top + kRobotHalfZ);
+    assert(std::abs(pose.x) < 1e-6);
+    assert(std::abs(pose.y) < 1e-6);
+    assert(std::abs(pose.z - (platform_top + kRobotHalfZ)) < 5e-3);
+    // Nowhere near the floor (z=0) -- confirms it landed on the platform, not through it.
+    assert(pose.z > kObstacleHalfZ);
+}
+
 }  // namespace
 
 int main() {
@@ -555,6 +604,7 @@ int main() {
     TestForceTorqueNonzeroOnLoadedJoint();
     TestImuAccelerometerReadsGravityAtRest();
     TestLidarReadsOpenRangeThenBlocked();
+    TestRobotSettlesOnWorldObject();
     std::puts("built_robot: all tests passed");
     return 0;
 }

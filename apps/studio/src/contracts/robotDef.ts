@@ -134,7 +134,12 @@ function asVec3(value: unknown, context: string): Vec3 {
   return [value[0], value[1], value[2]];
 }
 
-function parseTransform(value: unknown): Transform {
+// parseTransform/parseGeometry/transformToJson/geometryToJson are exported
+// (Robot Builder Phase 5) so apps/studio/src/contracts/worldDef.ts can reuse
+// them directly rather than redefining an equivalent shape -- a position/
+// rotation and a primitive shape are the same concepts for a world object
+// as for a robot body. See docs/decisions/robot-builder-world.md.
+export function parseTransform(value: unknown): Transform {
   if (value === undefined) return { position: [0, 0, 0], rotation_rpy: [0, 0, 0] };
   const t = asRecord(value);
   return {
@@ -143,7 +148,7 @@ function parseTransform(value: unknown): Transform {
   };
 }
 
-function parseGeometry(value: unknown): Geometry | undefined {
+export function parseGeometry(value: unknown): Geometry | undefined {
   if (value === undefined) return undefined;
   const g = asRecord(value);
   switch (g.type) {
@@ -287,11 +292,11 @@ export function parseRobotDef(data: unknown): RobotDef {
 
 // ---- serialization (round-trip) ----
 
-function transformToJson(t: Transform): unknown {
+export function transformToJson(t: Transform): unknown {
   return { position: t.position, rotation_rpy: t.rotation_rpy };
 }
 
-function geometryToJson(g: Geometry): unknown {
+export function geometryToJson(g: Geometry): unknown {
   switch (g.type) {
     case "box":
       return { type: "box", size: g.size };

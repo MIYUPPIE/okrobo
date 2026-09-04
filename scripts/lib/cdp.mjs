@@ -137,6 +137,24 @@ export async function connect(cdpPort, { retries = 20, delayMs = 500 } = {}) {
     if (!ok) throw new Error(`setInputValue: no element for ${selector}`);
   };
 
+  /**
+   * Set a controlled <select>'s value and fire a real 'change' event, so
+   * React's onChange sees it -- same reasoning as setInputValue, but
+   * HTMLSelectElement's value setter and React's own change-tracking use
+   * 'change', not 'input', for select/checkbox/radio elements.
+   */
+  const setSelectValue = async (selector, value) => {
+    const ok = await evaluate(`(() => {
+      const el = document.querySelector(${JSON.stringify(selector)});
+      if (!el) return false;
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set;
+      setter.call(el, ${JSON.stringify(String(value))});
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+    if (!ok) throw new Error(`setSelectValue: no element for ${selector}`);
+  };
+
   const keyPress = async (key) => {
     for (const type of ["keyDown", "keyUp"]) {
       await send("Input.dispatchKeyEvent", { type, key, code: key });
@@ -154,6 +172,7 @@ export async function connect(cdpPort, { retries = 20, delayMs = 500 } = {}) {
     evalClick,
     evalClickText,
     setInputValue,
+    setSelectValue,
     keyPress,
     close,
   };

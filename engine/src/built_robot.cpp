@@ -174,7 +174,7 @@ void AppendSites(std::ostringstream& xml, const std::vector<const Sensor*>& sens
 
 }  // namespace
 
-std::string GenerateMjcf(const RobotDef& robot) {
+std::string GenerateMjcf(const RobotDef& robot, const WorldDef* world) {
     const KinematicTree tree = BuildKinematicTree(robot);
     std::unordered_map<std::string, const Body*> body_by_id;
     for (const auto& body : robot.bodies) {
@@ -226,6 +226,21 @@ std::string GenerateMjcf(const RobotDef& robot) {
 
     for (const auto& root_id : tree.root_ids) append_body(root_id, true);
     for (const auto& orphan_id : tree.unreachable_ids) append_body(orphan_id, true);
+
+    // Static world objects (Robot Builder Phase 5): a bare <geom>, no
+    // <body> wrapper -- a geom with no enclosing body attaches to the
+    // implicit world body, exactly like the floor geom above already
+    // does. Named world_{object.id} to avoid a namespace collision with a
+    // robot body/joint/sensor of the same id (robot-def and world-def
+    // documents are authored independently, with no way to know about
+    // each other's ids in advance). See docs/decisions/robot-builder-world.md.
+    if (world) {
+        for (const auto& object : world->objects) {
+            const GeomAttrs attrs = MjcfGeomAttrs(object.geometry);
+            xml << "<geom name=\"world_" << object.id << "\" type=\"" << attrs.type << "\" size=\"" << attrs.size
+                << "\" " << MjcfPosEuler(object.transform) << "/>";
+        }
+    }
 
     xml << "</worldbody>";
 
@@ -350,8 +365,8 @@ struct BuiltRobot::Impl {
     }
 };
 
-BuiltRobot::BuiltRobot(const RobotDef& robot) {
-    const std::string xml = GenerateMjcf(robot);
+BuiltRobot::BuiltRobot(const RobotDef& robot, const WorldDef* world) {
+    const std::string xml = GenerateMjcf(robot, world);
     char error[1024] = {0};
     mjSpec* spec = mj_parseXMLString(xml.c_str(), nullptr, error, sizeof(error));
     if (!spec) {

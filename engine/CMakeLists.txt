@@ -56,6 +56,16 @@ target_include_directories(okrobo_robot_def PUBLIC src)
 target_link_libraries(okrobo_robot_def PRIVATE nlohmann_json::nlohmann_json)
 target_compile_options(okrobo_robot_def PRIVATE -Wall -Wextra -Werror)
 
+# Robot Builder Phase 5: contracts/world-def/v0 -- a static environment
+# description reusing robot_def.hpp's own Vec3/Transform/Geometry/Material
+# types directly (header-only reuse; no link dependency on okrobo_robot_def
+# is needed since world_def.cpp calls none of its functions, only uses its
+# type definitions). See docs/decisions/robot-builder-world.md.
+add_library(okrobo_world_def src/world_def.cpp)
+target_include_directories(okrobo_world_def PUBLIC src)
+target_link_libraries(okrobo_world_def PRIVATE nlohmann_json::nlohmann_json)
+target_compile_options(okrobo_world_def PRIVATE -Wall -Wextra -Werror)
+
 # Robot Builder Phase 3: kinematic-tree helper for MJCF generation. Its own
 # target, not added to okrobo_robot_def -- that target is documented frozen
 # (contracts/robot-def/v0/contract.md) once all three language mirrors ship.
@@ -133,6 +143,13 @@ target_compile_options(test_robot_tree PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_compile_definitions(test_robot_tree PRIVATE
   OKROBO_ROBOT_DEF_CONTRACT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../contracts/robot-def/v0")
 add_test(NAME robot_tree COMMAND test_robot_tree)
+
+add_executable(test_world_def tests/test_world_def.cpp)
+target_link_libraries(test_world_def PRIVATE okrobo_world_def)
+target_compile_options(test_world_def PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_compile_definitions(test_world_def PRIVATE
+  OKROBO_WORLD_DEF_CONTRACT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../contracts/world-def/v0")
+add_test(NAME world_def COMMAND test_world_def)
 
 add_executable(test_built_robot tests/test_built_robot.cpp)
 target_link_libraries(test_built_robot PRIVATE okrobo_built_robot)

@@ -62,6 +62,7 @@ em++ -O2 -std=c++20 -fexceptions --no-entry \
   "$ROOT/engine/src/physics_object.cpp" \
   "$ROOT/engine/src/robot_def.cpp" \
   "$ROOT/engine/src/robot_tree.cpp" \
+  "$ROOT/engine/src/world_def.cpp" \
   "$ROOT/engine/src/built_robot.cpp" \
   "$ROOT/engine/src/wasm_api.cpp" \
   -o "$OUT_DIR/okrobo_engine.js" \

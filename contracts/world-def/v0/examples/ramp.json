@@ -1,0 +1,14 @@
+{
+  "id": "ramp",
+  "name": "Ramp",
+  "description": "A single angled box a robot can drive or roll up -- 'terrain' in v0 means a shaped, rotated primitive, not heightfield authoring.",
+  "objects": [
+    {
+      "id": "ramp1",
+      "name": "Ramp",
+      "transform": { "position": [0.5, 0.0, 0.1], "rotation_rpy": [0.0, 0.3, 0.0] },
+      "geometry": { "type": "box", "size": [0.8, 0.4, 0.02] },
+      "material": { "color": [0.5, 0.5, 0.55] }
+    }
+  ]
+}

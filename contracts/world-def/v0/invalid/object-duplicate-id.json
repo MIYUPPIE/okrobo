@@ -1,0 +1,8 @@
+{
+  "id": "invalid-fixture",
+  "name": "object-duplicate-id",
+  "objects": [
+    { "id": "box1", "name": "Box A", "geometry": { "type": "box", "size": [0.1, 0.1, 0.1] } },
+    { "id": "box1", "name": "Box B", "geometry": { "type": "box", "size": [0.1, 0.1, 0.1] } }
+  ]
+}

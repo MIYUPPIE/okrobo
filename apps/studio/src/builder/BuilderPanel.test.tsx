@@ -120,4 +120,36 @@ describe("BuilderPanel", () => {
     expect(screen.getByTestId("builder-viewport-stub")).toBeInTheDocument();
     expect(screen.queryByTestId("test-viewport-stub")).not.toBeInTheDocument();
   });
+
+  // Robot Builder Phase 5: the Test-mode world picker.
+  it("Test mode shows a world picker defaulting to None, listing every WORLD_OPTIONS entry", async () => {
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Test" }));
+    await waitFor(() => expect(screen.getByTestId("test-viewport-stub")).toBeInTheDocument(), { timeout: 10000 });
+
+    const picker = screen.getByLabelText("World");
+    expect(picker).toHaveValue("");
+    expect(screen.getByRole("option", { name: "None (floor only)" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Obstacle Course" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Ramp" })).toBeInTheDocument();
+  });
+
+  it("picking a world from the Test-mode picker doesn't crash or mutate the document", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={onChange} />);
+
+    await user.click(screen.getByRole("button", { name: "Test" }));
+    await waitFor(() => expect(screen.getByTestId("test-viewport-stub")).toBeInTheDocument(), { timeout: 10000 });
+
+    await user.selectOptions(screen.getByLabelText("World"), "Obstacle Course");
+    expect(screen.getByLabelText("World")).toHaveValue("obstacle-course");
+    // Picking a world rebuilds the physics instance against it (a world
+    // object is a real MuJoCo collider, not just a rendered decoration) --
+    // briefly back to "loading" before the new instance is ready.
+    await waitFor(() => expect(screen.getByTestId("test-viewport-stub")).toBeInTheDocument(), { timeout: 10000 });
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });

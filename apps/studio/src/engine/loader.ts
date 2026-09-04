@@ -87,14 +87,17 @@ export interface EngineModule {
   _drone_collided(drone: number): number;
   _drone_ray(drone: number, offset: number): number;
 
-  // Robot Builder Phase 3/4 (contracts/robot-def/v0): an arbitrary built
-  // robot, simulated with MuJoCo -- bodies, joints, actuators (Phase 3),
-  // and seven of the eight sensor types (Phase 4; no `camera`, see
-  // docs/decisions/robot-builder-sensors.md).
-  /** `json`/`jsonLen` describe a UTF-8-encoded robot-def document already
-   * written into HEAPU8 at `json`. Returns 0 (falsy) on parse/MJCF-compile
-   * failure. */
-  _built_create(json: number, jsonLen: number): number;
+  // Robot Builder Phase 3/4/5 (contracts/robot-def/v0, contracts/world-def/v0):
+  // an arbitrary built robot, optionally tested in a static world, simulated
+  // with MuJoCo -- bodies, joints, actuators (Phase 3), seven of the eight
+  // sensor types (Phase 4; no `camera`, see docs/decisions/robot-builder-sensors.md),
+  // and static world objects (Phase 5, see docs/decisions/robot-builder-world.md).
+  /** `robotJson`/`robotLen` describe a UTF-8-encoded robot-def document
+   * already written into HEAPU8. `worldJson`/`worldLen` describe an
+   * optional world-def document the same way -- `worldLen === 0` means no
+   * world (just the robot and the floor). Returns 0 (falsy) on parse/
+   * MJCF-compile failure. */
+  _built_create(robotJson: number, robotLen: number, worldJson: number, worldLen: number): number;
   _built_destroy(robot: number): void;
   _built_step(robot: number, dt: number): void;
   _built_body_count(robot: number): number;

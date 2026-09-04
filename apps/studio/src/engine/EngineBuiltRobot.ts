@@ -1,5 +1,13 @@
 import { robotDefToJson, type RobotDef, type Sensor, type SensorType } from "../contracts/robotDef";
+import { worldDefToJson, type WorldDef } from "../contracts/worldDef";
 import type { EngineModule } from "./loader";
+
+function writeJsonPayload(module: EngineModule, data: unknown): { ptr: number; len: number } {
+  const bytes = new TextEncoder().encode(JSON.stringify(data));
+  const ptr = module._malloc(bytes.length);
+  module.HEAPU8.set(bytes, ptr);
+  return { ptr, len: bytes.length };
+}
 
 export interface BodyPose {
   x: number;
@@ -25,30 +33,36 @@ export interface SensorReading {
 
 /**
  * A simulated instance of an arbitrary built robot (contracts/robot-def/v0),
+ * optionally tested in a static environment (contracts/world-def/v0),
  * wrapping the WASM `built_*` exports. Bodies, joints, actuators (Phase 3),
- * and seven of the eight sensor types (Phase 4; no `camera`). See
- * docs/decisions/robot-builder-physics.md and
- * docs/decisions/robot-builder-sensors.md.
+ * seven of the eight sensor types (Phase 4; no `camera`), and static world
+ * objects (Phase 5). See docs/decisions/robot-builder-physics.md,
+ * docs/decisions/robot-builder-sensors.md, and
+ * docs/decisions/robot-builder-world.md.
  */
 export class EngineBuiltRobot {
   private readonly module: EngineModule;
   private readonly handle: number;
   private readonly sensors: Sensor[];
 
-  /** Throws if `robot` can't be turned into a compilable physics model
-   * (e.g. a `plane`-geometry body, or a non-root `free` joint -- see
-   * docs/decisions/robot-builder-physics.md for why those can never work). */
-  constructor(module: EngineModule, robot: RobotDef) {
+  /** Throws if `robot` (plus `world`'s objects, when given) can't be
+   * turned into a compilable physics model (e.g. a `plane`-geometry body,
+   * or a non-root `free` joint -- see docs/decisions/robot-builder-physics.md
+   * for why those can never work). `world` is optional (Robot Builder
+   * Phase 5) -- omitting it means just the robot and the floor, exactly
+   * Phase 3/4's behavior. */
+  constructor(module: EngineModule, robot: RobotDef, world?: WorldDef) {
     this.module = module;
     this.sensors = robot.sensors;
-    const bytes = new TextEncoder().encode(JSON.stringify(robotDefToJson(robot)));
-    const ptr = module._malloc(bytes.length);
-    module.HEAPU8.set(bytes, ptr);
+
+    const robotPayload = writeJsonPayload(module, robotDefToJson(robot));
+    const worldPayload = world ? writeJsonPayload(module, worldDefToJson(world)) : null;
     let handle: number;
     try {
-      handle = module._built_create(ptr, bytes.length);
+      handle = module._built_create(robotPayload.ptr, robotPayload.len, worldPayload?.ptr ?? 0, worldPayload?.len ?? 0);
     } finally {
-      module._free(ptr);
+      module._free(robotPayload.ptr);
+      if (worldPayload) module._free(worldPayload.ptr);
     }
     if (!handle) {
       throw new Error("failed to build robot for physics -- check the document's issues");

@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseRobotDef, type RobotDef } from "../contracts/robotDef";
+import type { WorldDef } from "../contracts/worldDef";
 import { EngineBuiltRobot } from "./EngineBuiltRobot";
 import { loadEngine } from "./loader";
 
@@ -295,5 +296,58 @@ describe("EngineBuiltRobot", () => {
     const [reading] = robot.sensorReadings();
     expect(reading.values).toEqual([]);
     robot.destroy();
+  });
+
+  // Robot Builder Phase 5 (world objects). Same physical scenario and
+  // measured numbers as engine/tests/test_built_robot.cpp's
+  // TestRobotSettlesOnWorldObject -- proof a world object is a real MuJoCo
+  // collider, not just a rendered decoration, through the real WASM boundary.
+  it("a robot body settles on a world-def obstacle instead of falling through to the floor", async () => {
+    const module = await loadEngine();
+    const robotHalfZ = 0.04;
+    const robot: RobotDef = {
+      id: "world-collision-test",
+      name: "World Collision Test",
+      description: "",
+      root_placement: { position: [0, 0, 0.6], rotation_rpy: [0, 0, 0] },
+      bodies: [
+        {
+          id: "box",
+          name: "Box",
+          transform: identity,
+          mass: 1,
+          inertia: { ixx: 0.01, iyy: 0.01, izz: 0.01 },
+          collision: { type: "box", size: [0.1, 0.1, robotHalfZ * 2] },
+        },
+      ],
+      joints: [],
+      actuators: [],
+      sensors: [],
+    };
+    const obstacleHalfZ = 0.05;
+    const world: WorldDef = {
+      id: "world-collision-test-world",
+      name: "World Collision Test World",
+      description: "",
+      objects: [
+        {
+          id: "platform",
+          name: "Platform",
+          transform: { position: [0, 0, obstacleHalfZ], rotation_rpy: [0, 0, 0] },
+          geometry: { type: "box", size: [0.3, 0.3, obstacleHalfZ * 2] },
+        },
+      ],
+    };
+
+    const built = new EngineBuiltRobot(module, robot, world);
+    run(built, 2.0);
+
+    const [pose] = built.bodyPoses();
+    const platformTop = obstacleHalfZ * 2;
+    expect(pose.x).toBeCloseTo(0, 5);
+    expect(pose.y).toBeCloseTo(0, 5);
+    expect(pose.z).toBeCloseTo(platformTop + robotHalfZ, 2);
+    expect(pose.z).toBeGreaterThan(obstacleHalfZ); // nowhere near the floor -- landed on the platform, not through it
+    built.destroy();
   });
 });

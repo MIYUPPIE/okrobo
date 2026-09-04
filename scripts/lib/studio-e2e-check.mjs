@@ -589,6 +589,27 @@ try {
     await page.evaluate("!!document.querySelector('.test-viewport canvas')"),
   );
 
+  // -- robot builder: world picker (Phase 5 static world objects) ---------
+  // Real collision physics against a world object is proven numerically by
+  // engine/tests/test_built_robot.cpp's TestRobotSettlesOnWorldObject and
+  // EngineBuiltRobot.test.ts's matching WASM-boundary test -- this check
+  // only confirms the picker itself is wired end to end in a real browser:
+  // it lists the example worlds, and picking a non-empty one rebuilds the
+  // physics instance (a brief drop back to "loading") without crashing Test
+  // mode. See docs/decisions/robot-builder-world.md.
+  check(
+    "Test mode: the world picker lists every example world",
+    await page.evaluate(
+      "[...document.querySelectorAll('.builder-world-picker option')].map(o => o.textContent).join(',') === 'None (floor only),Empty,Obstacle Course,Ramp'",
+    ),
+  );
+  await page.setSelectValue(".builder-world-picker select", "obstacle-course");
+  const worldRebuilt = await waitForCondition(
+    "!!document.querySelector('.test-viewport canvas') && document.querySelector('.builder-world-picker select')?.value === 'obstacle-course'",
+    10000,
+  );
+  check("Test mode: picking a world rebuilds physics and keeps the canvas alive", worldRebuilt);
+
   await page.clickText(".builder-mode-toggle button", "/^Edit$/");
   const backToEdit = await waitForCondition("!!document.querySelector('.builder-toolbar')", 5000);
   check("Test mode: switching back to Edit restores the gizmo viewport", backToEdit);

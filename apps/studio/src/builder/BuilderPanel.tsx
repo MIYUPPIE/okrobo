@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { validateRobotDef, type RobotDef, type Transform } from "../contracts/robotDef";
+import type { WorldDef } from "../contracts/worldDef";
 import { EngineBuiltRobot } from "../engine/EngineBuiltRobot";
 import { ENGINE_MISSING_MESSAGE, loadEngine } from "../engine/loader";
 import { ActuatorPanel } from "./ActuatorPanel";
@@ -9,6 +10,7 @@ import { HierarchyList } from "./HierarchyList";
 import { makeDefaultBody, nextBodyId, removeBody } from "./robotEdits";
 import { SensorPanel } from "./SensorPanel";
 import { TestViewport } from "./TestViewport";
+import { WORLD_OPTIONS } from "./worldExamples";
 
 // Composes the Build-mode UI: hierarchy (left), viewport + toolbar (center),
 // inspector (right). Returned as a Fragment of three siblings -- not one
@@ -45,6 +47,10 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   const [testStatus, setTestStatus] = useState<TestStatus>("loading");
   const [testError, setTestError] = useState("");
   const [builtRobot, setBuiltRobot] = useState<EngineBuiltRobot | null>(null);
+  // Robot Builder Phase 5. "" = no world (today's exact pre-Phase-5 Test
+  // mode: just the robot and the floor) -- the select's own default.
+  const [worldOptionId, setWorldOptionId] = useState("");
+  const [worldDef, setWorldDef] = useState<WorldDef | null>(null);
 
   const issues = useMemo(() => validateRobotDef(robot), [robot]);
   const errorCount = issues.filter((i) => i.severity === "error").length;
@@ -59,7 +65,7 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
     loadEngine()
       .then((module) => {
         if (cancelled) return;
-        created = new EngineBuiltRobot(module, robot);
+        created = new EngineBuiltRobot(module, robot, worldDef ?? undefined);
         setBuiltRobot(created);
         setTestStatus("ready");
       })
@@ -74,12 +80,14 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
       created?.destroy();
       setBuiltRobot(null);
     };
-    // Deliberately only [builderMode]: entering Test mode snapshots `robot`
-    // at that moment and never rebuilds mid-test even if `robot` changes --
+    // Deliberately omits `robot`: entering Test mode snapshots `robot` at
+    // that moment and never rebuilds mid-test even if `robot` changes --
     // nothing can change it while builderMode==="test", since neither
-    // BodyInspector nor the edit-mode gizmo render then.
+    // BodyInspector nor the edit-mode gizmo render then. `worldDef` DOES
+    // rebuild (Robot Builder Phase 5): picking a different world from the
+    // Test-mode toolbar's <select> below is meant to take effect live.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [builderMode]);
+  }, [builderMode, worldDef]);
 
   const addBody = () => {
     const id = nextBodyId(robot);
@@ -149,8 +157,29 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
         </div>
       ) : (
         <div className="builder-stage">
+          <div className="builder-toolbar">
+            <label className="builder-world-picker">
+              World
+              <select
+                value={worldOptionId}
+                onChange={(event) => {
+                  const id = event.target.value;
+                  setWorldOptionId(id);
+                  const option = WORLD_OPTIONS.find((o) => o.id === id);
+                  setWorldDef(option ? option.make() : null);
+                }}
+              >
+                <option value="">None (floor only)</option>
+                {WORLD_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
           {testStatus === "ready" && builtRobot ? (
-            <TestViewport robot={robot} builtRobot={builtRobot} />
+            <TestViewport robot={robot} builtRobot={builtRobot} world={worldDef ?? undefined} />
           ) : (
             <div className="test-status-note">
               {testStatus === "loading" && "Loading physics engine…"}
