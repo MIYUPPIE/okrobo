@@ -536,6 +536,53 @@ try {
   );
   check("Build mode: two-click Delete body removes the selected body", bodyDeleted);
 
+  // -- robot builder: Test mode (Phase 3 physics) -------------------------
+  // Coverage gap, stated plainly: this repo's Build-mode UI has no way to
+  // author joints or actuators yet (Phase 2's own non-goal, still true
+  // here) -- the one remaining body has no joint, so there is nothing for
+  // an actuator to drive and the panel's documented empty state is exactly
+  // what should render. A real joint falling/settling under gravity is
+  // proven numerically by engine/tests/test_built_robot.cpp and
+  // EngineBuiltRobot.test.ts (a measured drop-and-settle height, an
+  // actuator moving a joint) -- this check only confirms Test mode's own
+  // wiring (engine loads, a real BuiltRobot compiles, the render loop
+  // keeps running) end to end in a real browser, via two canvas snapshots
+  // a couple of seconds apart actually differing (proof frames are still
+  // being drawn, not frozen). Entering Test mode requires zero
+  // error-severity issues on the document (BuilderPanel disables the
+  // button otherwise, exercised directly in BuilderPanel.test.tsx) -- this
+  // is exactly why this section runs after Delete body above, not before
+  // it: two disconnected bodies is itself a robot-multiple-root-bodies error.
+  await page.clickText(".builder-mode-toggle button", "/^Test$/");
+  const testCanvasReady = await waitForCondition("!!document.querySelector('.test-viewport canvas')", 10000);
+  check("Test mode: physics engine loads and the canvas renders", testCanvasReady);
+  check(
+    "Test mode: a robot with no joints shows the actuator panel's empty state",
+    await waitForCondition("document.querySelector('.actuator-empty')?.textContent?.includes('no actuators')", 5000),
+  );
+  check(
+    "Test mode: explains that nothing here is saved back to the document",
+    await page.evaluate("!!document.querySelector('.test-mode-note')"),
+  );
+
+  // Not a pixel-diff check: the default starter body begins essentially at
+  // its own rest height, and headless Chrome's requestAnimationFrame runs
+  // unthrottled (no real display to sync to), so it can settle before the
+  // very first paint -- two canvas snapshots showing identical pixels here
+  // would be a settled robot, not a frozen render loop. What this can
+  // reliably catch instead: the render loop (and the BuiltRobot instance
+  // driving it) surviving several seconds of real stepping without
+  // throwing and unmounting the canvas out from under itself.
+  await sleep(2500);
+  check(
+    "Test mode: the render loop is still running after a few seconds (no crash)",
+    await page.evaluate("!!document.querySelector('.test-viewport canvas')"),
+  );
+
+  await page.clickText(".builder-mode-toggle button", "/^Edit$/");
+  const backToEdit = await waitForCondition("!!document.querySelector('.builder-toolbar')", 5000);
+  check("Test mode: switching back to Edit restores the gizmo viewport", backToEdit);
+
   await page.clickText(".mode-toggle button", "/^Simulate$/");
   const backToSimulate = await waitForCondition(
     "!!document.querySelector('.sidebar') && !!document.querySelector('.viewport-3d canvas')",

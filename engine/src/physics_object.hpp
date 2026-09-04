@@ -22,7 +22,11 @@ struct PhysicsObjectConfig {
     double start_z = 0.03;
 };
 
-struct Vec3 {
+// Named distinctly from robot_def.hpp's own Vec3 -- Robot Builder Phase 3
+// (built_robot.hpp) needs both physics_object.hpp and robot_def.hpp visible
+// in the same translation unit (wasm_api.cpp), and two `struct Vec3` in the
+// same namespace would be a redefinition error.
+struct PhysicsVec3 {
     double x = 0.0;
     double y = 0.0;
     double z = 0.0;
@@ -39,16 +43,16 @@ public:
     void reset();
 
     /** Pin the object at `pos` with no simulation (used while held). */
-    void set_kinematic(const Vec3& pos);
+    void set_kinematic(const PhysicsVec3& pos);
 
     /** Hand control to MuJoCo: a free body from `pos`, initial velocity zero. */
-    void release(const Vec3& pos);
+    void release(const PhysicsVec3& pos);
 
     /** Advance the physics by dt. A no-op while kinematically held. */
     void step(double dt);
 
     /** Current position: the pinned position while held, MuJoCo's while free. */
-    Vec3 position() const;
+    PhysicsVec3 position() const;
 
     /** True once a released object has essentially stopped moving. */
     bool settled() const;
@@ -60,7 +64,7 @@ private:
     struct Impl;
     Impl* impl_;
     bool held_ = true;
-    Vec3 pinned_pos_;
+    PhysicsVec3 pinned_pos_;
 };
 
 }  // namespace okrobo

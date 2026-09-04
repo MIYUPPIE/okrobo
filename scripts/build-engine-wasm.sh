@@ -28,6 +28,21 @@ if [ ! -f "$MJ_BUILD/lib/libmujoco.a" ]; then
   bash "$ROOT/scripts/build-mujoco-wasm.sh"
 fi
 
+# robot_def.cpp's JSON parsing (Robot Builder Phase 3 needs it in WASM too,
+# to receive a built robot's contracts/robot-def/v0 document from JS -- see
+# docs/decisions/robot-builder-physics.md for why this reverses Phase 1's
+# "no JSON in WASM" stance). CMake's own FetchContent only populates
+# engine/build/_deps for the native build; this script is a standalone
+# em++ invocation, so it fetches the same pinned single header itself,
+# mirroring fetch-python-runtime.sh's check-then-curl idiom.
+NLOHMANN_DIR="$ROOT/tools/nlohmann_json"
+if [ ! -f "$NLOHMANN_DIR/nlohmann/json.hpp" ]; then
+  echo "fetching nlohmann/json v3.11.3 single header (pinned, matches engine/CMakeLists.txt)..." >&2
+  mkdir -p "$NLOHMANN_DIR/nlohmann"
+  curl -fsSL -o "$NLOHMANN_DIR/nlohmann/json.hpp" \
+    https://raw.githubusercontent.com/nlohmann/json/v3.11.3/single_include/nlohmann/json.hpp
+fi
+
 OUT_DIR="$ROOT/apps/studio/src/generated"
 mkdir -p "$OUT_DIR"
 # Clean up the pre-Phase-6 location so a stale copy cannot be picked up.
@@ -40,10 +55,14 @@ rm -rf "$ROOT/apps/studio/public/engine"
 em++ -O2 -std=c++20 -fexceptions --no-entry \
   -I "$ROOT/engine/src" \
   -I "$ROOT/tools/mujoco/include" \
+  -I "$NLOHMANN_DIR" \
   "$ROOT/engine/src/world.cpp" \
   "$ROOT/engine/src/arm_world.cpp" \
   "$ROOT/engine/src/drone_world.cpp" \
   "$ROOT/engine/src/physics_object.cpp" \
+  "$ROOT/engine/src/robot_def.cpp" \
+  "$ROOT/engine/src/robot_tree.cpp" \
+  "$ROOT/engine/src/built_robot.cpp" \
   "$ROOT/engine/src/wasm_api.cpp" \
   -o "$OUT_DIR/okrobo_engine.js" \
   -L "$MJ_BUILD/lib" \
@@ -55,6 +74,7 @@ em++ -O2 -std=c++20 -fexceptions --no-entry \
   -sENVIRONMENT=web,node \
   -sFILESYSTEM=0 \
   -sALLOW_MEMORY_GROWTH=1 \
-  -sEXPORTED_RUNTIME_METHODS=HEAPU8
+  -sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAPF64 \
+  -sEXPORTED_FUNCTIONS=_malloc,_free
 
 echo "built $(du -h "$OUT_DIR/okrobo_engine.js" | cut -f1) -> apps/studio/src/generated/okrobo_engine.js"

@@ -49,7 +49,7 @@ struct ArmState {
     bool moving = false;
     Tip tip;
     bool holding = false;
-    Vec3 object;
+    PhysicsVec3 object;
 };
 
 class ArmWorld {

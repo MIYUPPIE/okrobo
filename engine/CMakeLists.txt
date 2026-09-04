@@ -56,6 +56,22 @@ target_include_directories(okrobo_robot_def PUBLIC src)
 target_link_libraries(okrobo_robot_def PRIVATE nlohmann_json::nlohmann_json)
 target_compile_options(okrobo_robot_def PRIVATE -Wall -Wextra -Werror)
 
+# Robot Builder Phase 3: kinematic-tree helper for MJCF generation. Its own
+# target, not added to okrobo_robot_def -- that target is documented frozen
+# (contracts/robot-def/v0/contract.md) once all three language mirrors ship.
+add_library(okrobo_robot_tree src/robot_tree.cpp)
+target_include_directories(okrobo_robot_tree PUBLIC src)
+target_link_libraries(okrobo_robot_tree PUBLIC okrobo_robot_def)
+target_compile_options(okrobo_robot_tree PRIVATE -Wall -Wextra -Werror)
+
+# Robot Builder Phase 3: MJCF generation + MuJoCo simulation for an
+# arbitrary robot-def document. See docs/decisions/robot-builder-physics.md.
+add_library(okrobo_built_robot src/built_robot.cpp)
+target_include_directories(okrobo_built_robot PUBLIC src)
+target_link_libraries(okrobo_built_robot PUBLIC okrobo_robot_tree)
+target_link_libraries(okrobo_built_robot PRIVATE mujoco::mujoco)
+target_compile_options(okrobo_built_robot PRIVATE -Wall -Wextra -Werror)
+
 enable_testing()
 
 # The tests assert. A Release build defines NDEBUG, which compiles assert()
@@ -107,3 +123,17 @@ target_compile_options(test_robot_def PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_compile_definitions(test_robot_def PRIVATE
   OKROBO_ROBOT_DEF_CONTRACT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../contracts/robot-def/v0")
 add_test(NAME robot_def COMMAND test_robot_def)
+
+add_executable(test_robot_tree tests/test_robot_tree.cpp)
+target_link_libraries(test_robot_tree PRIVATE okrobo_robot_tree)
+target_compile_options(test_robot_tree PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_compile_definitions(test_robot_tree PRIVATE
+  OKROBO_ROBOT_DEF_CONTRACT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../contracts/robot-def/v0")
+add_test(NAME robot_tree COMMAND test_robot_tree)
+
+add_executable(test_built_robot tests/test_built_robot.cpp)
+target_link_libraries(test_built_robot PRIVATE okrobo_built_robot)
+target_compile_options(test_built_robot PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_compile_definitions(test_built_robot PRIVATE
+  OKROBO_ROBOT_DEF_CONTRACT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../contracts/robot-def/v0")
+add_test(NAME built_robot COMMAND test_built_robot)

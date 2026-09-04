@@ -70,12 +70,12 @@ void PhysicsObject::reset() {
     pinned_pos_ = {config_.start_x, config_.start_y, config_.start_z};
 }
 
-void PhysicsObject::set_kinematic(const Vec3& pos) {
+void PhysicsObject::set_kinematic(const PhysicsVec3& pos) {
     held_ = true;
     pinned_pos_ = pos;
 }
 
-void PhysicsObject::release(const Vec3& pos) {
+void PhysicsObject::release(const PhysicsVec3& pos) {
     held_ = false;
     mjData* d = impl_->data;
     d->qpos[0] = pos.x;
@@ -98,7 +98,7 @@ void PhysicsObject::step(double dt) {
     }
 }
 
-Vec3 PhysicsObject::position() const {
+PhysicsVec3 PhysicsObject::position() const {
     if (held_) return pinned_pos_;
     const mjData* d = impl_->data;
     return {d->qpos[0], d->qpos[1], d->qpos[2]};

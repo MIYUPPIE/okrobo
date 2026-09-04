@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RobotDef } from "../contracts/robotDef";
@@ -7,13 +7,18 @@ import { BuilderPanel } from "./BuilderPanel";
 
 afterEach(() => cleanup());
 
-// jsdom can't construct a real WebGLRenderer -- mock the one component that
-// needs it, not the canvas, and test everything else (hierarchy/inspector
-// sync, add/delete cascading through real shared state) for real.
+// jsdom can't construct a real WebGLRenderer -- mock the two components
+// that need one (BuilderViewport, TestViewport), not the canvas, and test
+// everything else (hierarchy/inspector sync, add/delete cascading, mode
+// switching, real EngineBuiltRobot construction against the real compiled
+// WASM module) for real.
 vi.mock("./BuilderViewport", () => ({
   BuilderViewport: (props: { robot: RobotDef; selectedBodyId: string | null }) => (
     <div data-testid="builder-viewport-stub" data-selected={props.selectedBodyId ?? ""} data-body-count={props.robot.bodies.length} />
   ),
+}));
+vi.mock("./TestViewport", () => ({
+  TestViewport: () => <div data-testid="test-viewport-stub" />,
 }));
 
 const identity = { position: [0, 0, 0] as [number, number, number], rotation_rpy: [0, 0, 0] as [number, number, number] };
@@ -79,5 +84,40 @@ describe("BuilderPanel", () => {
     const next: RobotDef = onChange.mock.calls[0][0];
     expect(next.bodies).toHaveLength(0);
     expect(screen.getByText("Select a body to edit it.")).toBeInTheDocument();
+  });
+
+  it("disables Test mode while the document has an error", () => {
+    const base = makeRobot();
+    // A second body with no joint attaching it is an extra root ->
+    // robot-multiple-root-bodies, an error-severity issue.
+    const robot: RobotDef = { ...base, bodies: [...base.bodies, { id: "second", name: "Second", transform: identity, mass: 1, inertia }] };
+    render(<BuilderPanel robot={robot} onChange={() => {}} />);
+    expect(screen.getByRole("button", { name: "Test" })).toBeDisabled();
+  });
+
+  it("switching to Test mode builds a real physics instance and never mutates the document", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={onChange} />);
+
+    expect(screen.getByRole("button", { name: "Test" })).not.toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Test" }));
+
+    await waitFor(() => expect(screen.getByTestId("test-viewport-stub")).toBeInTheDocument(), { timeout: 10000 });
+    expect(screen.queryByTestId("builder-viewport-stub")).not.toBeInTheDocument();
+    expect(screen.getByText(/doesn't affect your document/i)).toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("switching back to Edit mode restores the gizmo viewport", async () => {
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Test" }));
+    await waitFor(() => expect(screen.getByTestId("test-viewport-stub")).toBeInTheDocument(), { timeout: 10000 });
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByTestId("builder-viewport-stub")).toBeInTheDocument();
+    expect(screen.queryByTestId("test-viewport-stub")).not.toBeInTheDocument();
   });
 });

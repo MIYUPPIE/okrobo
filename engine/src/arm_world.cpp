@@ -47,7 +47,7 @@ void ArmWorld::step(double dt) {
 bool ArmWorld::grip() {
     if (holding_) return true;
     const Tip tip = forward_kinematics();
-    const Vec3 object_pos = object_.position();
+    const PhysicsVec3 object_pos = object_.position();
     const double dx = tip.x - object_pos.x;
     const double dy = tip.y - object_pos.y;
     const double dz = tip.z - object_pos.z;
@@ -60,7 +60,7 @@ bool ArmWorld::grip() {
 void ArmWorld::release() {
     if (!holding_) return;
     holding_ = false;
-    const Vec3 drop_pos = object_.position();
+    const PhysicsVec3 drop_pos = object_.position();
     object_.release(drop_pos);
 }
 

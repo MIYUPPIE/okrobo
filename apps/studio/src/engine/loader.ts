@@ -86,6 +86,28 @@ export interface EngineModule {
   _drone_distance(drone: number): number;
   _drone_collided(drone: number): number;
   _drone_ray(drone: number, offset: number): number;
+
+  // Robot Builder Phase 3 (contracts/robot-def/v0): an arbitrary built
+  // robot, simulated with MuJoCo. No sensors (Phase 4).
+  /** `json`/`jsonLen` describe a UTF-8-encoded robot-def document already
+   * written into HEAPU8 at `json`. Returns 0 (falsy) on parse/MJCF-compile
+   * failure. */
+  _built_create(json: number, jsonLen: number): number;
+  _built_destroy(robot: number): void;
+  _built_step(robot: number, dt: number): void;
+  _built_body_count(robot: number): number;
+  _built_actuator_count(robot: number): number;
+  /** Returns 1 if accepted, 0 if that actuator has no MJCF equivalent
+   * (targets a ball/free joint) or the index is out of range. */
+  _built_set_actuator_ctrl(robot: number, index: number, value: number): number;
+  /** Fills the shared pose buffer; returns the body count written. */
+  _built_sync_body_poses(robot: number): number;
+  /** Address of the pose buffer (7 float64s per body: x,y,z, then MuJoCo's
+   * native w,x,y,z quaternion order) -- read via HEAPF64. */
+  _built_body_pose_buffer(): number;
+  _malloc(size: number): number;
+  _free(ptr: number): void;
+  HEAPF64: Float64Array;
 }
 
 type EngineFactory = { default: () => Promise<EngineModule> };

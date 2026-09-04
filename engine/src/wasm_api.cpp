@@ -3,15 +3,27 @@
 // needed. The TS side (apps/studio/src/engine/) assembles contract v0 messages.
 
 #include "arm_world.hpp"
+#include "built_robot.hpp"
 #include "camera.hpp"
 #include "drone_world.hpp"
 #include "world.hpp"
+
+#include <algorithm>
+#include <string>
 
 #include <emscripten/emscripten.h>
 
 // Scratch buffer for camera frames: the JS side reads it straight out of the
 // heap, so no allocation crosses the boundary per frame.
 static unsigned char g_camera_frame[okrobo::kCameraMaxWidth * okrobo::kCameraMaxHeight * 3];
+
+// Robot Builder Phase 3: scratch buffer for a built robot's body poses,
+// same "static array + sync call + pointer accessor" pattern as the camera
+// buffer above. 7 doubles per body: x,y,z, then MuJoCo's native (w,x,y,z)
+// quaternion order -- reordered to three.js's (x,y,z,w) on the TS side
+// (apps/studio/src/engine/EngineBuiltRobot.ts), not here.
+constexpr int kBuiltMaxBodies = 64;
+static double g_body_pose_buffer[kBuiltMaxBodies * 7];
 
 extern "C" {
 
@@ -229,5 +241,66 @@ int drone_collided(const okrobo::DroneWorld* drone) {
 
 EMSCRIPTEN_KEEPALIVE
 double drone_ray(const okrobo::DroneWorld* drone, double offset) { return drone->ray(offset); }
+
+// ---- built robot (Robot Builder Phase 3; contracts/robot-def/v0) ----
+// No sensors (Phase 4). See docs/decisions/robot-builder-physics.md.
+
+/// Parses `json` (a robot-def v0 document, `json_len` bytes, not
+/// necessarily null-terminated) and builds a simulated instance. Returns
+/// null on any parse or MJCF-compile failure -- the JS side checks for a
+/// falsy handle rather than catching a C++ exception across the ABI.
+EMSCRIPTEN_KEEPALIVE
+okrobo::BuiltRobot* built_create(const char* json, int json_len) {
+    try {
+        const std::string text(json, static_cast<size_t>(json_len));
+        const okrobo::RobotDef robot = okrobo::ParseRobotDef(text);
+        return new okrobo::BuiltRobot(robot);
+    } catch (const std::exception&) {
+        return nullptr;
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE
+void built_destroy(okrobo::BuiltRobot* robot) { delete robot; }
+
+EMSCRIPTEN_KEEPALIVE
+void built_step(okrobo::BuiltRobot* robot, double dt) { robot->step(dt); }
+
+EMSCRIPTEN_KEEPALIVE
+int built_body_count(const okrobo::BuiltRobot* robot) { return robot->body_count(); }
+
+EMSCRIPTEN_KEEPALIVE
+int built_actuator_count(const okrobo::BuiltRobot* robot) { return robot->actuator_count(); }
+
+/// Returns 1 if the actuator accepted the value, 0 if that index has no
+/// MJCF equivalent (targets a ball/free joint) or is out of range.
+EMSCRIPTEN_KEEPALIVE
+int built_set_actuator_ctrl(okrobo::BuiltRobot* robot, int index, double value) {
+    return robot->set_actuator_ctrl(index, value) ? 1 : 0;
+}
+
+/// Fills the shared buffer with every body's current world pose, in
+/// robot.bodies declaration order. Returns the number of bodies written
+/// (capped at kBuiltMaxBodies).
+EMSCRIPTEN_KEEPALIVE
+int built_sync_body_poses(okrobo::BuiltRobot* robot) {
+    const int count = std::min(robot->body_count(), kBuiltMaxBodies);
+    for (int i = 0; i < count; ++i) {
+        const okrobo::BuiltBodyPose pose = robot->body_pose(i);
+        double* out = g_body_pose_buffer + i * 7;
+        out[0] = pose.x;
+        out[1] = pose.y;
+        out[2] = pose.z;
+        out[3] = pose.qw;
+        out[4] = pose.qx;
+        out[5] = pose.qy;
+        out[6] = pose.qz;
+    }
+    return count;
+}
+
+/// Address of the pose buffer, so JS can read it from the heap.
+EMSCRIPTEN_KEEPALIVE
+double* built_body_pose_buffer() { return g_body_pose_buffer; }
 
 }  // extern "C"
