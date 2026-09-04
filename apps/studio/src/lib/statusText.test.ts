@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { formatStudioStatus, type StatusInput } from "./statusText";
+import type { Issue, RobotDef } from "../contracts/robotDef";
+import { formatBuilderStatus, formatStudioStatus, type StatusInput } from "./statusText";
 
 const BASE: StatusInput = {
   robotLabel: "Arena",
@@ -175,5 +176,35 @@ describe("formatStudioStatus", () => {
       "py ✓",
       "opened demo",
     ]);
+  });
+});
+
+describe("formatBuilderStatus", () => {
+  const ROBOT: RobotDef = {
+    id: "r",
+    name: "My Robot",
+    description: "",
+    root_placement: { position: [0, 0, 0], rotation_rpy: [0, 0, 0] },
+    bodies: [{ id: "a", name: "A", transform: { position: [0, 0, 0], rotation_rpy: [0, 0, 0] }, mass: 1, inertia: { ixx: 0.01, iyy: 0.01, izz: 0.01 } }],
+    joints: [],
+    actuators: [],
+    sensors: [],
+  };
+
+  it("reports no robot when Build mode has nothing loaded yet", () => {
+    expect(formatBuilderStatus(null, [])).toBe("offline · Builder · no robot");
+  });
+
+  it("shows the robot's name, body count, and zero issues when clean", () => {
+    expect(formatBuilderStatus(ROBOT, [])).toBe("offline · Builder · My Robot · 1 body · 0 issues");
+  });
+
+  it("pluralizes bodies and counts only error-severity issues", () => {
+    const twoBodies: RobotDef = { ...ROBOT, bodies: [...ROBOT.bodies, { ...ROBOT.bodies[0], id: "b" }] };
+    const issues: Issue[] = [
+      { rule: "robot-multiple-root-bodies", severity: "error", message: "" },
+      { rule: "some-warning", severity: "warning", message: "" },
+    ];
+    expect(formatBuilderStatus(twoBodies, issues)).toBe("offline · Builder · My Robot · 2 bodies · 1 issue");
   });
 });

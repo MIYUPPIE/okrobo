@@ -4,7 +4,7 @@
 //!   projects.db                       index (id, name, timestamps)
 //!   projects/<id>/blocks.json         Blockly workspace serialization
 //!   projects/<id>/program.py          the Python buffer
-//!   projects/<id>/project.json        {world, python_edited, robot, world_custom}
+//!   projects/<id>/project.json        {world, python_edited, robot, world_custom, robot_def}
 
 use std::fs;
 use std::path::PathBuf;
@@ -44,6 +44,12 @@ pub struct ProjectPayload {
     /// project saved before the world editor existed).
     #[serde(default)]
     pub world_custom: Option<serde_json::Value>,
+    /// A full robot definition (contracts/robot-def/v0), opaque to the
+    /// shell, when the student built one in Robot Builder mode. None means
+    /// "no robot-def in this project yet" (also the state of every project
+    /// saved before the builder existed). Mirrors world_custom exactly.
+    #[serde(default)]
+    pub robot_def: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -54,6 +60,8 @@ struct SideMeta {
     robot: String,
     #[serde(default)]
     world_custom: Option<serde_json::Value>,
+    #[serde(default)]
+    robot_def: Option<serde_json::Value>,
 }
 
 fn now() -> i64 {
@@ -165,6 +173,7 @@ impl Store {
                 world: side.world,
                 robot: side.robot,
                 world_custom: side.world_custom,
+                robot_def: side.robot_def,
             },
         ))
     }
@@ -211,6 +220,7 @@ impl Store {
             python_edited: payload.python_edited,
             robot: payload.robot.clone(),
             world_custom: payload.world_custom.clone(),
+            robot_def: payload.robot_def.clone(),
         };
         fs::write(
             dir.join("project.json"),
@@ -233,6 +243,7 @@ mod tests {
             world: "arena".to_string(),
             robot: "car".to_string(),
             world_custom: None,
+            robot_def: None,
         }
     }
 
@@ -312,9 +323,10 @@ mod tests {
 
     // Regression: `robot` used to be sent by the frontend on every save but
     // had no field on this struct, so serde silently dropped it and every
-    // saved Arm project reopened as Car. `world_custom` is the analogous new
-    // field for the world editor; both are proven here so neither regresses
-    // the same way silently again.
+    // saved Arm project reopened as Car. `world_custom` (the world editor)
+    // and `robot_def` (Robot Builder mode) are the analogous later fields;
+    // all three are proven here so none regresses the same way silently
+    // again.
     #[test]
     fn robot_and_world_custom_roundtrip() {
         let (_dir, store) = store();
@@ -329,15 +341,30 @@ mod tests {
             "start": { "x": 1.5, "y": 1.0, "theta": 0.0 },
             "obstacles": [{ "x": 2.0, "y": 1.0, "width": 0.3, "height": 0.3, "color": [10, 200, 10] }]
         }));
+        arm_project.robot_def = Some(serde_json::json!({
+            "id": "my-robot",
+            "name": "My Robot",
+            "bodies": [
+                {
+                    "id": "chassis",
+                    "name": "Chassis",
+                    "mass": 1.0,
+                    "inertia": { "ixx": 0.01, "iyy": 0.01, "izz": 0.01 },
+                    "visual": { "type": "box", "size": [0.2, 0.15, 0.08] }
+                }
+            ]
+        }));
         let meta = store.create("Arm project", &arm_project).unwrap();
         let (_, loaded) = store.load(&meta.id).unwrap();
         assert_eq!(loaded.robot, "arm");
         assert_eq!(loaded.world_custom, arm_project.world_custom);
+        assert_eq!(loaded.robot_def, arm_project.robot_def);
     }
 
-    // Projects saved before `robot`/`world_custom` existed have a
-    // project.json on disk with neither key. They must keep loading, as
-    // Car with no custom world, rather than fail to deserialize.
+    // Projects saved before `robot`/`world_custom`/`robot_def` existed have
+    // a project.json on disk with none of those keys. They must keep
+    // loading, as Car with no custom world and no robot-def, rather than
+    // fail to deserialize.
     #[test]
     fn legacy_project_json_without_new_fields_still_loads() {
         let (_dir, store) = store();
@@ -351,5 +378,6 @@ mod tests {
         let (_, loaded) = store.load(&meta.id).unwrap();
         assert_eq!(loaded.robot, "car");
         assert_eq!(loaded.world_custom, None);
+        assert_eq!(loaded.robot_def, None);
     }
 }

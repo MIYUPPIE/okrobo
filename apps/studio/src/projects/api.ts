@@ -3,6 +3,7 @@
 // desktop app; `inDesktop` gates the File menu.
 
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import type { RobotDef } from "../contracts/robotDef";
 import type { WorldDef } from "../lib/validateWorld";
 
 export const inDesktop = isTauri();
@@ -29,6 +30,13 @@ export interface ProjectPayload {
    * existed round-trips as, via the Rust side's `#[serde(default)]`.
    */
   world_custom: WorldDef | null;
+  /**
+   * A full contracts/robot-def/v0 definition, when the student built one in
+   * Robot Builder mode. null means "no robot-def in this project yet" —
+   * also what every project saved before the builder existed round-trips
+   * as, via the Rust side's `#[serde(default)]`. Mirrors world_custom.
+   */
+  robot_def: RobotDef | null;
 }
 
 export const listProjects = () => invoke<ProjectMeta[]>("list_projects");

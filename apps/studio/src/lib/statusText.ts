@@ -3,6 +3,7 @@
 // doing, so its formatting is tested directly rather than only glimpsed
 // through a rendered component.
 
+import type { Issue, RobotDef } from "../contracts/robotDef";
 import type { HardwareStatus } from "../python/PythonBridge";
 import type { HudInfo } from "../Viewport3D";
 
@@ -69,4 +70,14 @@ export function formatStudioStatus(input: StatusInput): string {
 
   if (input.notice) parts.push(input.notice);
   return parts.join("  ·  ");
+}
+
+/** Status line for Build mode, where there's no engine, no HUD telemetry --
+ * just the document and its current validateRobotDef issue count. */
+export function formatBuilderStatus(robot: RobotDef | null, issues: Issue[]): string {
+  if (!robot) return "offline · Builder · no robot";
+  const errors = issues.filter((i) => i.severity === "error").length;
+  const bodyWord = robot.bodies.length === 1 ? "body" : "bodies";
+  const issueWord = errors === 1 ? "issue" : "issues";
+  return `offline · Builder · ${robot.name} · ${robot.bodies.length} ${bodyWord} · ${errors} ${issueWord}`;
 }

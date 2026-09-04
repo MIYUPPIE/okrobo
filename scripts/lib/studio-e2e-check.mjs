@@ -459,6 +459,89 @@ try {
     droneTriedCodeReady,
     (await pythonEditorText()).slice(0, 60),
   );
+
+  // -- robot builder: Build mode -----------------------------------------
+  // Coverage gap, stated plainly: this script drives a plain browser
+  // against the Vite dev server, where isTauri() is false and the File
+  // menu (Save/Open) stays disabled -- so a Save-As -> reload -> reopen
+  // persistence round-trip cannot run here. That path is instead covered by
+  // apps/studio/src-tauri/src/projects.rs's `robot_and_world_custom_roundtrip`
+  // and `legacy_project_json_without_new_fields_still_loads` cargo tests,
+  // which exercise the actual Store save/load of `robot_def` directly.
+  // Likewise, a real mouse-drag on a specific 3D gizmo handle isn't
+  // simulated here (handle screen position depends on camera/geometry,
+  // making it brittle) -- the gizmo-mode-toggle check below plus the
+  // inspector-driven transform edit are the accepted proxy coverage for
+  // "a body's transform can be changed and it sticks."
+  await page.clickText(".mode-toggle button", "/^Build$/");
+  const builderStageReady = await waitForCondition("!!document.querySelector('.builder-stage')", 5000);
+  check("Build mode: switching in shows the empty-state stage (no robot yet)", builderStageReady);
+
+  await page.clickText(".builder-new-robot", "/New Robot/");
+  const builderInspectorReady = await waitForCondition(
+    "!!document.querySelector('[aria-label=\"body name\"]')",
+    5000,
+  );
+  check("Build mode: + New Robot creates a robot with an inspector", builderInspectorReady);
+  check(
+    "Build mode: 3-pane layout appears (hierarchy, stage, inspector)",
+    await page.evaluate(
+      "!!document.querySelector('.builder-hierarchy') && !!document.querySelector('.builder-stage') && !!document.querySelector('.builder-inspector')",
+    ),
+  );
+  const builderCanvasReady = await waitForCondition("!!document.querySelector('.builder-stage canvas')", 5000);
+  check("Build mode: 3D canvas renders", builderCanvasReady);
+  check(
+    "Build mode: hierarchy shows exactly the starter body",
+    (await page.evaluate("document.querySelectorAll('.hierarchy-row').length")) === 1,
+  );
+
+  await page.clickText(".builder-add-body", "/Add body/");
+  const secondBodyAdded = await waitForCondition(
+    "document.querySelectorAll('.hierarchy-row').length === 2",
+    5000,
+  );
+  check("Build mode: + Add body grows the hierarchy and auto-selects the new body", secondBodyAdded);
+  const newRowActive = await page.evaluate(
+    "[...document.querySelectorAll('.hierarchy-row')][1]?.classList.contains('active')",
+  );
+  check("Build mode: the newly added body is the active hierarchy row", newRowActive);
+
+  await page.clickText(".hierarchy-row", "/^Chassis$/");
+  await waitForCondition("document.querySelector('[aria-label=\"body name\"]')?.value === 'Chassis'", 5000);
+  await page.setInputValue('[aria-label="body mass"]', "2.5");
+  // evalClickText, not clickText: a field edit immediately followed by
+  // clicking Apply can race a coordinate-based click (see evalClick's
+  // docstring in cdp.mjs) -- the same reason the World tab section above
+  // uses it for the identical edit-then-Apply shape.
+  await page.evalClickText(".inspector-actions button", "/^Apply$/");
+  const massApplied = await waitForCondition(
+    "document.querySelector('[aria-label=\"body mass\"]')?.value === '2.5' && !document.querySelector('.body-issue.error')",
+    5000,
+  );
+  check("Build mode: editing mass and clicking Apply commits with no error issue", massApplied);
+
+  await page.clickText(".builder-toolbar button", "/^Rotate$/");
+  const rotateActive = await waitForCondition(
+    "[...document.querySelectorAll('.builder-toolbar button')].find(b => b.textContent === 'Rotate')?.classList.contains('active')",
+    5000,
+  );
+  check("Build mode: the gizmo-mode toolbar switches to Rotate", rotateActive);
+
+  await page.evalClickText(".inspector-actions .delete-btn", "/Delete body/");
+  await page.evalClickText(".inspector-actions .delete-btn", "/delete\\?/");
+  const bodyDeleted = await waitForCondition(
+    "document.querySelectorAll('.hierarchy-row').length === 1",
+    5000,
+  );
+  check("Build mode: two-click Delete body removes the selected body", bodyDeleted);
+
+  await page.clickText(".mode-toggle button", "/^Simulate$/");
+  const backToSimulate = await waitForCondition(
+    "!!document.querySelector('.sidebar') && !!document.querySelector('.viewport-3d canvas')",
+    5000,
+  );
+  check("Build mode: switching back to Simulate restores the sim UI", backToSimulate);
 } catch (error) {
   console.error("e2e check threw:", error);
   failures.push(String(error));

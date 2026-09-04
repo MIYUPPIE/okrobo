@@ -33,6 +33,19 @@ body {
     "runbar runbar";
 }
 
+/* Build mode has no code tabs (Blockly/Python/C++ don't apply to a
+   robot-def document) -- the 220px code-tabs row is replaced entirely by a
+   hierarchy/stage/inspector row, rather than trying to fit a hierarchy and
+   an inspector into that short strip. */
+.studio.mode-build {
+  grid-template-columns: 220px 1fr 300px;
+  grid-template-rows: 40px 1fr 44px;
+  grid-template-areas:
+    "titlebar titlebar titlebar"
+    "hierarchy stage inspector"
+    "runbar runbar runbar";
+}
+
 .titlebar {
   grid-area: titlebar;
   display: flex;
@@ -139,6 +152,28 @@ body {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 2px 10px;
+}
+
+.mode-toggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.mode-toggle button {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+.mode-toggle button.active {
+  background: var(--panel-2);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .dialog-backdrop {
@@ -1010,6 +1045,287 @@ body {
 }
 
 .world-actions .primary:disabled {
+  border-color: var(--border);
+  color: var(--text-dim);
+  cursor: default;
+}
+
+/* --- robot builder --- */
+
+.builder-hierarchy {
+  grid-area: hierarchy;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.builder-hierarchy-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+.builder-robot-name {
+  font-weight: 600;
+}
+
+.builder-issue-count {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.builder-issue-count.error {
+  color: #ff7a7a;
+}
+
+.hierarchy-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.hierarchy-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.hierarchy-section {
+  margin: 12px 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.hierarchy-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-family: inherit;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.hierarchy-row:hover {
+  background: var(--panel-2);
+}
+
+.hierarchy-row.active {
+  background: var(--panel-2);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.builder-add-body {
+  margin-top: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.builder-stage {
+  grid-area: stage;
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.builder-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.builder-new-robot {
+  background: var(--panel-2);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.builder-toolbar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.builder-toolbar button {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.builder-toolbar button.active {
+  background: var(--panel-2);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.builder-inspector {
+  grid-area: inspector;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  padding: 14px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.builder-empty-inspector {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.body-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.body-inspector h4 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.body-inspector > label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.inspector-section h5 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.inspector-section label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.inspector-grid {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.body-inspector input[type="number"],
+.body-inspector input[type="text"],
+.body-inspector select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  padding: 6px 8px;
+  width: 80px;
+}
+
+.body-inspector > label input[type="text"],
+.body-inspector > label input:not([type]) {
+  width: 100%;
+}
+
+.body-inspector input[type="color"] {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+
+.inspector-note {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.body-issues {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.body-issue {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.body-issue.error {
+  color: #ff7a7a;
+  background: rgba(255, 122, 122, 0.1);
+}
+
+.body-issue.warning {
+  color: #e8b34a;
+  background: rgba(232, 179, 74, 0.1);
+}
+
+.inspector-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.inspector-actions .primary {
+  background: var(--panel-2);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.inspector-actions .primary:disabled {
   border-color: var(--border);
   color: var(--text-dim);
   cursor: default;

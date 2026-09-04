@@ -7,13 +7,16 @@ import { AssetStore } from "./AssetStore";
 import { CameraView } from "./CameraView";
 import type { RobotKind } from "./blocks/okroboBlocks";
 import { BlocksPanel, type BlocksPanelHandle } from "./BlocksPanel";
+import { BuilderPanel } from "./builder/BuilderPanel";
+import { makeDefaultRobotDef } from "./builder/robotEdits";
+import { parseRobotDef, validateRobotDef, type RobotDef } from "./contracts/robotDef";
 import { EngineArm } from "./engine/EngineArm";
 import { EngineDrone } from "./engine/EngineDrone";
 import { EngineWorld } from "./engine/EngineWorld";
 import { loadEngine } from "./engine/loader";
 import { LessonsPanel } from "./LessonsPanel";
 import { editActionsForTab } from "./lib/editMenu";
-import { formatStudioStatus } from "./lib/statusText";
+import { formatBuilderStatus, formatStudioStatus } from "./lib/statusText";
 import { isTeleopKey, normalizeKey, teleopWheels } from "./lib/teleop";
 import { validateWorld, type WorldDef } from "./lib/validateWorld";
 import { runProgram } from "./program/execute";
@@ -127,6 +130,12 @@ export default function App() {
   // the same key-remount convention BlocksPanel/PythonPanel use for content
   // seeded from outside — see their initialWorkspace/initialOverride docs.
   const [worldEpoch, setWorldEpoch] = useState(0);
+
+  // Build mode is a separate top-level mode from `robot: RobotKind` -- a
+  // robot-def in progress isn't a physics-simulated robot kind, and has no
+  // WASM engine behind it. Switching modes never touches `robot`/`engine`.
+  const [mode, setMode] = useState<"simulate" | "build">("simulate");
+  const [robotDef, setRobotDef] = useState<RobotDef | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -366,6 +375,7 @@ export default function App() {
       world: WORLD_ID,
       robot,
       world_custom: world,
+      robot_def: robotDef,
     };
   };
 
@@ -387,6 +397,22 @@ export default function App() {
       setWorld(defaultWorld);
     }
     setWorldEpoch((e) => e + 1);
+  };
+
+  /** Loads a project's robot-def (or clears it), same defensive posture as
+   * applyProjectWorld: project files are untrusted data, so a corrupted
+   * robot_def is discarded rather than crashing the app. */
+  const applyProjectRobotDef = (payload: ProjectPayload) => {
+    if (!payload.robot_def) {
+      setRobotDef(null);
+      return;
+    }
+    try {
+      setRobotDef(parseRobotDef(payload.robot_def));
+    } catch (error) {
+      console.error("invalid robot_def, discarding:", error);
+      setRobotDef(null);
+    }
   };
 
   /** Rebuilds the sim from an edited world (World tab "Apply"/"reset to
@@ -445,6 +471,7 @@ export default function App() {
     setCurrentProject(null);
     setWorld(defaultWorld);
     setWorldEpoch((e) => e + 1);
+    setRobotDef(null);
     reset();
     showNotice("new project");
   };
@@ -479,6 +506,7 @@ export default function App() {
     try {
       const [meta, payload] = await loadProject(id);
       applyProjectWorld(payload);
+      applyProjectRobotDef(payload);
       const target: RobotKind =
         payload.robot === "arm" ? "arm" : payload.robot === "drone" ? "drone" : "car";
       if (target !== robot) {
@@ -551,18 +579,21 @@ export default function App() {
   });
 
   // Formatting lives in lib/statusText.ts, tested in isolation.
-  const statusText = formatStudioStatus({
-    robotLabel: robot === "arm" ? "Arm" : robot === "drone" ? "Drone" : world.name,
-    engineStatus,
-    hud,
-    runStatus,
-    pythonConnected,
-    hardware,
-    notice,
-  });
+  const statusText =
+    mode === "build"
+      ? formatBuilderStatus(robotDef, robotDef ? validateRobotDef(robotDef) : [])
+      : formatStudioStatus({
+          robotLabel: robot === "arm" ? "Arm" : robot === "drone" ? "Drone" : world.name,
+          engineStatus,
+          hud,
+          runStatus,
+          pythonConnected,
+          hardware,
+          notice,
+        });
 
   return (
-    <div className="studio">
+    <div className={mode === "build" ? "studio mode-build" : "studio"}>
       <header className="titlebar">
         <span className="app-name">OKHUB Robotics Studio</span>
         <nav className="menus">
@@ -716,11 +747,24 @@ export default function App() {
             )}
           </div>
         </nav>
+        <div className="mode-toggle">
+          <button
+            className={mode === "simulate" ? "active" : ""}
+            onClick={() => setMode("simulate")}
+          >
+            Simulate
+          </button>
+          <button className={mode === "build" ? "active" : ""} onClick={() => setMode("build")}>
+            Build
+          </button>
+        </div>
         {inDesktop && (
           <span className="project-chip">{currentProject ? currentProject.name : "untitled"}</span>
         )}
       </header>
 
+      {mode === "simulate" && (
+      <>
       <aside className="sidebar">
         <h2>Robots</h2>
         <ul>
@@ -903,15 +947,33 @@ export default function App() {
           </div>
         </div>
       </section>
+      </>
+      )}
+
+      {mode === "build" &&
+        (robotDef ? (
+          <BuilderPanel robot={robotDef} onChange={setRobotDef} />
+        ) : (
+          <div className="builder-stage builder-empty">
+            <p>No robot in this project yet.</p>
+            <button
+              type="button"
+              className="builder-new-robot"
+              onClick={() => setRobotDef(makeDefaultRobotDef())}
+            >
+              + New Robot
+            </button>
+          </div>
+        ))}
 
       <footer className="run-bar">
-        <button className="run" onClick={run} disabled={engineStatus !== "ready"}>
+        <button className="run" onClick={run} disabled={mode !== "simulate" || engineStatus !== "ready"}>
           ▶ Run
         </button>
-        <button onClick={stop} disabled={engineStatus !== "ready"}>
+        <button onClick={stop} disabled={mode !== "simulate" || engineStatus !== "ready"}>
           ⏹ Stop
         </button>
-        <button onClick={reset} disabled={engineStatus !== "ready"}>
+        <button onClick={reset} disabled={mode !== "simulate" || engineStatus !== "ready"}>
           🔄 Reset
         </button>
         <span className="status">{statusText}</span>

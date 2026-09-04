@@ -577,3 +577,87 @@ pre-existing gate) all green. Nothing outside `contracts/robot-def/`,
 `engine/src/robot_def.{hpp,cpp}`, and `engine/tests/test_robot_def.cpp`
 changed — the five existing parity gates, the CDP e2e script, and every pack
 and lesson are untouched.
+
+## Robot Builder Phase 2: 3D Builder (2026-09-04)
+
+A real 3D construction UI on top of Phase 1's `robot-def` schema: a new,
+standalone **Build** mode (a titlebar Simulate/Build toggle) where a
+student assembles an arbitrary robot from bodies — click-select in the 3D
+view or a hierarchy tree, a properties inspector, add/delete body, a
+translate/rotate `TransformControls` gizmo, and real persistence through
+the existing project save/load pipeline. Car/Arm/Drone, `Viewport3D.tsx`,
+and the whole simulate-mode code path are completely untouched — Build
+mode has its own state (`mode`, `robotDef`), its own renderer
+(`apps/studio/src/builder/BuilderViewport.tsx`), and no WASM engine, since
+a robot-def in progress isn't simulated yet (that's Phase 3).
+
+New `apps/studio/src/builder/` module: `robotTree.ts` (kinematic tree from
+`joints[]` edges, mirroring `validateRobotDef`'s own dedup/first-edge-wins
+graph logic — cross-checked against it directly in tests so the two can't
+drift apart), `robotThree.ts` (generic `RobotDef` → three.js scene graph;
+one function, no per-robot-kind branching — box/sphere/cylinder/capsule/
+cone/plane map to real geometry, `mesh` gets a placeholder since file
+loading is out of scope), `robotEdits.ts` (default robot/body construction,
+cascading body deletion through referencing joints/actuators/sensors),
+`HierarchyList.tsx`, `BodyInspector.tsx` (replicates `WorldPanel.tsx`'s
+draft + live-`validateRobotDef` + explicit-Apply pattern, but scoped to
+just the selected body's own issues — an unrelated pre-existing error
+elsewhere in the document doesn't block fixing this one), `BuilderViewport.tsx`
+(two effects: a mount-once renderer/camera/`OrbitControls`/`TransformControls`/
+picking effect that must never re-run — re-running it would reset the
+camera on every edit — and a rebuild effect keyed on the document/selection/
+gizmo mode), and `BuilderPanel.tsx` (composes the three panes as sibling
+Fragment children so each participates directly in the CSS grid).
+
+Persistence mirrors `world_custom` exactly: `robot_def: RobotDef | null` on
+`ProjectPayload` (TS and Rust), `#[serde(default)]` on the Rust side for
+back-compat, threaded through the same `collectPayload`/`applyProjectWorld`-
+style flow in `App.tsx`. No new Tauri dependency — this repo has no native
+file-dialog plugin, and the existing per-project SQLite store already had
+the exact right shape for "an optional builder-authored document."
+
+A real bug caught by the first unit test run, not by inspection: `attach()`
+in `robotThree.ts` recursed infinitely on a genuine joint cycle with no
+external root (`childrenOf` has no natural stopping point for a pure a↔b
+cycle) — `RangeError: Maximum call stack size exceeded` on the very first
+test targeting it. Fixed with an early-return guard once a body is already
+attached, which doubles as the correct rendering behavior for a
+`validateRobotDef`-flagged `robot-cycle` document: something still renders
+rather than hanging the tab.
+
+Verified in a real headless-Chrome run against the actual dev server, not
+just the CDP e2e script: entered Build mode, created a robot, added a
+second body (confirmed as an intentional extra root — `1 issue` — since
+joint-creation is out of scope this phase, not a bug), edited it with the
+gizmo toolbar and the inspector, deleted it, switched back to Simulate,
+screenshotted the result. Status bar read
+`offline · Builder · New Robot · 2 bodies · 1 issue`, matching
+`formatBuilderStatus`'s format exactly; Run/Stop/Reset were correctly
+greyed out (no engine exists in Build mode).
+
+**A real scope discovery, not a shortcut**: the plan called for a
+Save-As → reload → reopen persistence check in the permanent CDP e2e
+script, but that script drives a plain browser against the Vite dev server,
+where `isTauri()` is false and the File menu (Save/Open) stays disabled —
+so that flow cannot run in this harness at all, with or without more
+effort. The persistence path is instead covered where it actually can be
+exercised: two extended `cargo test` cases in `projects.rs` proving the
+Store really saves and reloads `robot_def` (`robot_and_world_custom_roundtrip`)
+and that pre-Builder projects still load with `robot_def: None`
+(`legacy_project_json_without_new_fields_still_loads`). Stated plainly in
+the e2e script's own comments, the same way the arm-physics round's tests
+state their coverage gaps rather than silently having them.
+
+Tests: 8 new/extended files in `apps/studio/src/builder/` (round-trip +
+fixture-cross-check tests for `robotTree.ts`, real-`THREE.Group` structural
+tests for `robotThree.ts` including the cycle-recursion regression, cascade
+tests for `robotEdits.ts`, RTL component tests for `HierarchyList.tsx` and
+`BodyInspector.tsx`, and a `BuilderPanel.tsx` test that mocks
+`BuilderViewport` — jsdom can't construct a `WebGLRenderer` — to exercise
+everything else for real), 1 extended `statusText.test.ts`
+(`formatBuilderStatus`), 2 extended `projects.rs` cargo tests, 11 new
+`studio-e2e-check.mjs` checks. `tsc --noEmit` (both tsconfigs), `npm run
+test` (294 passed), `npm run build`, `cargo test` (29 passed), and the full
+`test-all.sh` gate suite (engine, firmware, Python, WASM+parity ×5, vision
+parity, packs/signing, Rust, TypeScript, dev-server check, full CDP e2e)
+all green.
