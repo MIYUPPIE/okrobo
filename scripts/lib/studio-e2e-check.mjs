@@ -477,12 +477,41 @@ try {
   const builderStageReady = await waitForCondition("!!document.querySelector('.builder-stage')", 5000);
   check("Build mode: switching in shows the empty-state stage (no robot yet)", builderStageReady);
 
+  // -- robot builder: New Robot template picker (Phase 7) -----------------
+  // A real robot only gets created here once per project (there is no
+  // "start over" affordance once robotDef is set, so this dialog is only
+  // reachable this one time in this whole e2e run) -- the rest of this
+  // section's flow (Add/Delete body, Test mode's empty-actuator-panel
+  // check) depends on starting from the single-box Blank starter exactly
+  // like every check below already assumed before this phase, so this
+  // picks Blank rather than a multi-body template. Two-Wheeled Rover's own
+  // exact body list, and that it actually drives/turns under real physics,
+  // are proven directly (not re-derived here) by robotTemplates.test.ts,
+  // TemplateDialog.test.tsx, and robotTemplates.physics.test.ts against the
+  // real compiled WASM module. This check only proves the dialog itself is
+  // wired end to end in a real browser: it lists real template data, and
+  // picking one actually creates the robot. See
+  // docs/decisions/robot-builder-templates.md.
   await page.clickText(".builder-new-robot", "/New Robot/");
+  const templateDialogShown = await waitForCondition(
+    "[...document.querySelectorAll('.dialog h3')].some(h => h.textContent === 'New robot')",
+    5000,
+  );
+  check("Build mode: + New Robot opens a template picker dialog", templateDialogShown);
+  check(
+    "Build mode: the template picker lists Blank, Two-Wheeled Rover, and Simple Arm with descriptions",
+    await page.evaluate(
+      "[...document.querySelectorAll('.template-row .project-name')].map(n => n.textContent).join(',') === 'Blank,Two-Wheeled Rover,Simple Arm' && " +
+        "[...document.querySelectorAll('.template-description')].every(d => (d.textContent ?? '').length > 0)",
+    ),
+  );
+
+  await page.clickText(".template-row .project-name", "/^Blank$/");
   const builderInspectorReady = await waitForCondition(
     "!!document.querySelector('[aria-label=\"body name\"]')",
     5000,
   );
-  check("Build mode: + New Robot creates a robot with an inspector", builderInspectorReady);
+  check("Build mode: picking Blank from the template picker creates a robot with an inspector", builderInspectorReady);
   check(
     "Build mode: 3-pane layout appears (hierarchy, stage, inspector)",
     await page.evaluate(

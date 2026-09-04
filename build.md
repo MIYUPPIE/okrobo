@@ -926,3 +926,63 @@ starter both interrupted and left to finish naturally, the drawer's absence
 back in Edit mode) — all passed on the first real-browser run, no
 flakiness. `npm run test` (348 passed across 38 files), `npm run build`,
 and the full `test-all.sh` gate suite all green.
+
+## Robot Builder Phase 7: Templates (2026-09-04)
+
+Build mode's "New Robot" flow gained a real template library instead of
+always creating the same single hardcoded box: a new picker dialog
+(`apps/studio/src/builder/TemplateDialog.tsx`, mirroring
+`apps/studio/src/dialogs.tsx`'s existing `OpenDialog` shape rather than
+inventing a new modal pattern) lists three hand-written `RobotDef`
+constants (`apps/studio/src/builder/robotTemplates.ts`) — Blank (today's
+exact starter, unchanged), Two-Wheeled Rover (a chassis on two
+continuously-rotating hinge-jointed wheels, driven by actuators), and
+Simple Arm (a base plus two hinge-jointed links, one servo actuator, one
+encoder). Deliberately does not touch two things earlier phases already
+flagged as separate, larger decisions: migrating Car/Arm/Drone onto
+`robot-def` (`docs/decisions/robot-definition-schema.md:27`), and
+joint-authoring in Build mode's UI (still Phase 2's own non-goal). See
+`docs/decisions/robot-builder-templates.md`.
+
+A real, previously-undiscovered engine bug, found and worked around at the
+template level rather than silently ignored: the rover's `velocity`-type
+actuators are the *first* time that actuator type has ever been exercised
+against real physics anywhere in this codebase (grepped: only referenced in
+type definitions and a slider-range display before this). A physically
+"realistic" wheel inertia crashed the instant any nonzero ctrl was applied
+— surfacing in the WASM/Node test environment as an opaque
+`TypeError: Cannot read properties of null (reading 'push')` inside
+`printChar`/`_fd_write`. Reproduced natively instead (a small scratch
+program linking `robot_def.cpp`/`built_robot.cpp` directly against native
+MuJoCo, sidestepping the WASM build's incomplete I/O shim that was
+swallowing MuJoCo's own diagnostic text), which revealed the real message:
+`WARNING: Nan, Inf or huge value in QACC at DOF 6. The simulation is
+unstable.` — MJCF's fixed `kv=1` velocity-actuator gain (no schema field to
+soften it) against a very low rotational inertia blows up in the first
+explicit-Euler substep, a textbook actuator/inertia stiffness mismatch, not
+a logic bug. Fixed at the template level (inertia raised ~100x past
+physical realism, verified natively to hold under a real 3-second drive and
+a real turn, then re-verified through the actual TS/WASM path) — the
+general case (any student-built robot with a `velocity` actuator on a
+low-inertia joint can hit the same instability today) is explicitly left
+open and documented, not silently patched over: fixing it generally is real
+engine work touching every existing built robot's physics, not a
+"templates" feature. A second, smaller discovery: a MuJoCo cylinder's
+symmetry axis runs along its own local Z by default, so the wheels
+initially lay flat like a puck rather than standing on edge like a wheel —
+fixed with a 90°-about-X body rotation once a physics test caught the
+resting height coming back at half the cylinder's length instead of its
+radius.
+
+Tests: `apps/studio/src/builder/robotTemplates.test.ts` (8 cases — every
+template validates with zero issues, unique ids/labels, structural shape),
+`apps/studio/src/builder/robotTemplates.physics.test.ts` (new, 3 cases
+against the real compiled WASM — the rover settles then drives forward and
+turns measurably, the arm's shoulder-actuated link moves measurably
+matching its encoder reading), `apps/studio/src/builder/TemplateDialog.test.tsx`
+(4 cases, mirroring `dialogs.test.tsx`'s own `OpenDialog` tests). 3 new
+`studio-e2e-check.mjs` checks verify the dialog's own browser wiring (lists
+real template data, picking one creates the robot) without re-deriving
+template correctness already proven by the tests above — all passed on the
+first real-browser run, no flakiness. `npm run test` (363 passed across 41
+files), `npm run build`, and the full `test-all.sh` gate suite all green.

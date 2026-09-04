@@ -8,7 +8,7 @@ import { CameraView } from "./CameraView";
 import type { RobotKind } from "./blocks/okroboBlocks";
 import { BlocksPanel, type BlocksPanelHandle } from "./BlocksPanel";
 import { BuilderPanel } from "./builder/BuilderPanel";
-import { makeDefaultRobotDef } from "./builder/robotEdits";
+import { TemplateDialog } from "./builder/TemplateDialog";
 import { parseRobotDef, validateRobotDef, type RobotDef } from "./contracts/robotDef";
 import { EngineArm } from "./engine/EngineArm";
 import { EngineDrone } from "./engine/EngineDrone";
@@ -72,7 +72,7 @@ function FlashStatusNote({ flash }: { flash: FlashStatus | null }) {
 
 type EngineStatus = "loading" | "ready" | "missing";
 type RunStatus = "idle" | "cruise" | "wall" | "program" | "python" | "error";
-type Dialog = "none" | "save-as" | "open" | "store" | "about";
+type Dialog = "none" | "save-as" | "open" | "store" | "about" | "new-robot";
 
 export default function App() {
   const [tab, setTab] = useState<CodeTab>("Blocks");
@@ -959,7 +959,7 @@ export default function App() {
             <button
               type="button"
               className="builder-new-robot"
-              onClick={() => setRobotDef(makeDefaultRobotDef())}
+              onClick={() => setDialog("new-robot")}
             >
               + New Robot
             </button>
@@ -996,6 +996,15 @@ export default function App() {
         />
       )}
       {dialog === "about" && <AboutDialog version={pkg.version} onClose={() => setDialog("none")} />}
+      {dialog === "new-robot" && (
+        <TemplateDialog
+          onPick={(picked) => {
+            setRobotDef(picked);
+            setDialog("none");
+          }}
+          onCancel={() => setDialog("none")}
+        />
+      )}
     </div>
   );
 }
