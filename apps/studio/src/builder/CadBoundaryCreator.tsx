@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Body, RobotDef } from "../contracts/robotDef";
-import type { CadPreview } from "../cad/cadClient";
-import { loft } from "../cad/cadClient";
+import type { CadEdgeOverlay, CadPreview, ShapeEdgeMesh } from "../cad/cadClient";
+import { fillet, loft, previewEdges } from "../cad/cadClient";
 import { CadProfileDimensionFields, parseProfileDraft, positiveNumber, type ProfileDraft, type ProfileShape } from "./CadProfileFields";
+import { FilletEdgeList } from "./FilletEdgeList";
+import { parseFilletPicks, type FilletPickDraft } from "./filletPicks";
 import { makeCadBody, nextBodyId } from "./robotEdits";
 import { useCadPreview } from "./useCadPreview";
 
@@ -46,6 +48,11 @@ export interface CadBoundaryCreatorProps {
   onApply: (nextRobot: RobotDef, newBodyId: string) => void;
   onCancel: () => void;
   onPreviewChange: (preview: CadPreview | null) => void;
+  /** CAD Kernel Phase 5 (Fillet + Chamfer): see CadExtrudeCreator's own
+   * doc -- identical lifted-state shape. */
+  edgePicks: FilletPickDraft[];
+  onEdgePicksChange: (next: FilletPickDraft[]) => void;
+  onEdgeOverlayChange: (overlay: CadEdgeOverlay | null) => void;
 }
 
 /** Combines the Shape select with CadProfileDimensionFields into one
@@ -71,7 +78,7 @@ function ProfileSection({ label, draft, onChange }: { label: string; draft: Prof
   );
 }
 
-export function CadBoundaryCreator({ robot, near, onApply, onCancel, onPreviewChange }: CadBoundaryCreatorProps) {
+export function CadBoundaryCreator({ robot, near, onApply, onCancel, onPreviewChange, edgePicks, onEdgePicksChange, onEdgeOverlayChange }: CadBoundaryCreatorProps) {
   const bodyId = useMemo(() => nextBodyId(robot), [robot]);
   const [draft, setDraft] = useState<Draft>(initialDraft);
 
@@ -79,9 +86,15 @@ export function CadBoundaryCreator({ robot, near, onApply, onCancel, onPreviewCh
     const parsed = parseDraft(draft);
     if (!parsed.ok) return parsed;
     const { start, end, loftHeight } = parsed.value;
-    return { ok: true, call: () => loft({ startProfile: start, endProfile: end, height: loftHeight }) };
+    if (edgePicks.length === 0) {
+      return { ok: true, call: () => loft({ startProfile: start, endProfile: end, height: loftHeight }) };
+    }
+    const picks = parseFilletPicks(edgePicks);
+    if (!picks.ok) return picks;
+    const shape = { operation: "loft" as const, startProfile: start, endProfile: end, height: loftHeight };
+    return { ok: true, call: () => fillet(shape, picks.value) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.start, draft.end, draft.loftHeight]);
+  }, [draft.start, draft.end, draft.loftHeight, edgePicks]);
 
   useEffect(() => {
     if (status === "ready" && mesh) {
@@ -91,6 +104,29 @@ export function CadBoundaryCreator({ robot, near, onApply, onCancel, onPreviewCh
       onPreviewChange(null);
     }
   }, [status, mesh, bodyId, near, onPreviewChange]);
+
+  const edgesPreview = useCadPreview<ShapeEdgeMesh>(() => {
+    const parsed = parseDraft(draft);
+    if (!parsed.ok) return parsed;
+    const shape = { operation: "loft" as const, startProfile: parsed.value.start, endProfile: parsed.value.end, height: parsed.value.loftHeight };
+    return { ok: true, call: () => previewEdges(shape) };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.start, draft.end, draft.loftHeight]);
+
+  useEffect(() => {
+    if (edgesPreview.status === "ready" && edgesPreview.mesh) {
+      const body = makeCadBody(bodyId, near, { vertices: [], faces: [] });
+      onEdgeOverlayChange({ edgeMesh: edgesPreview.mesh, position: body.transform.position, rotation: [0, 0, 0] });
+    } else if (edgesPreview.status === "error") {
+      onEdgeOverlayChange(null);
+    }
+  }, [edgesPreview.status, edgesPreview.mesh, bodyId, near, onEdgeOverlayChange]);
+
+  useEffect(() => {
+    onEdgePicksChange([]);
+    onEdgeOverlayChange(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.start, draft.end, draft.loftHeight]);
 
   const apply = () => {
     if (status !== "ready" || !mesh) return;
@@ -119,6 +155,8 @@ export function CadBoundaryCreator({ robot, near, onApply, onCancel, onPreviewCh
           />
         </label>
       </section>
+
+      {edgesPreview.status === "ready" && <FilletEdgeList edgeMesh={edgesPreview.mesh} picks={edgePicks} onChange={onEdgePicksChange} />}
 
       {status === "loading" && <p className="cad-status">computing…</p>}
       {status === "error" && <p className="cad-status error">{error}</p>}

@@ -7,17 +7,23 @@ import type { CadMesh } from "../cad/cadClient";
 // version once Revolve and Boundary needed the identical logic in the same
 // phase -- three real call sites landing together, not a hypothetical
 // future reuse. See docs/decisions/cad-kernel-revolve-boundary.md.
+//
+// Generic since CAD Kernel Phase 5 (Fillet + Chamfer): the identical
+// debounce/cancel/status lifecycle also drives the edge-overlay preview
+// (a ShapeEdgeMesh, not a CadMesh) every fillet/chamfer-capable creator
+// needs alongside its existing mesh preview. Defaults to CadMesh so every
+// pre-Phase-5 call site keeps compiling unchanged.
 
 export const CAD_PREVIEW_DEBOUNCE_MS = 400;
 
 export type CadPreviewStatus = "idle" | "loading" | "ready" | "error";
 
-export type CadPreviewParseResult = { ok: true; call: () => Promise<CadMesh> } | { ok: false; message: string };
+export type CadPreviewParseResult<T = CadMesh> = { ok: true; call: () => Promise<T> } | { ok: false; message: string };
 
-export interface UseCadPreviewResult {
+export interface UseCadPreviewResult<T = CadMesh> {
   status: CadPreviewStatus;
   error: string;
-  mesh: CadMesh | null;
+  mesh: T | null;
 }
 
 /** `parse` re-runs on every dep change. A `{ok:false}` result (the
@@ -25,10 +31,10 @@ export interface UseCadPreviewResult {
  * immediately with no debounce and no worker call. A `{ok:true}` result
  * debounces CAD_PREVIEW_DEBOUNCE_MS before calling `.call()`, discarding a
  * stale in-flight response if deps changed again before it resolved. */
-export function useCadPreview(parse: () => CadPreviewParseResult, deps: DependencyList): UseCadPreviewResult {
+export function useCadPreview<T = CadMesh>(parse: () => CadPreviewParseResult<T>, deps: DependencyList): UseCadPreviewResult<T> {
   const [status, setStatus] = useState<CadPreviewStatus>("idle");
   const [error, setError] = useState("");
-  const [mesh, setMesh] = useState<CadMesh | null>(null);
+  const [mesh, setMesh] = useState<T | null>(null);
 
   useEffect(() => {
     const parsed = parse();

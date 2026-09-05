@@ -2,8 +2,9 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
-import type { CadPreview } from "../cad/cadClient";
+import type { CadEdgeOverlay, CadPreview } from "../cad/cadClient";
 import type { RobotDef, Transform } from "../contracts/robotDef";
+import { edgeGroupDescriptor } from "./filletPicks";
 import { geometryFor, materializeRobotScene, resolveBodyId, setHighlighted } from "./robotThree";
 
 // The Robot Builder's own 3D view -- deliberately separate from
@@ -15,15 +16,17 @@ import { geometryFor, materializeRobotScene, resolveBodyId, setHighlighted } fro
 // warn against. There's also no WASM engine here (a builder robot isn't
 // simulated), so nothing to step.
 //
-// Three effects, deliberately: a mount-once effect (renderer/scene/camera/
+// Four effects, deliberately: a mount-once effect (renderer/scene/camera/
 // OrbitControls/TransformControls/render loop/picking, deps []) that must
 // never re-run -- re-running it would recreate the renderer and reset the
 // camera on every edit -- a rebuild effect (deps [robot, selectedBodyId,
 // gizmoMode, jointPick, bodyPick, suppressedBodyId]) that only touches the
-// robot's own sub-scene, and a CAD-preview effect (deps [cadPreview],
-// Robot Builder CAD Kernel Phase 2) that only touches a separate preview
-// group never added to bodyGroupByIdRef, so it can never affect raycasting
-// or the real robot's own rendering.
+// robot's own sub-scene, a CAD-preview effect (deps [cadPreview], Robot
+// Builder CAD Kernel Phase 2) that only touches a separate preview group
+// never added to bodyGroupByIdRef, and an edge-overlay effect (deps
+// [edgeOverlay], Phase 5) that touches its own separate group the same
+// way -- none of the three can affect raycasting or the real robot's own
+// rendering.
 //
 // No unit test here (matches the existing precedent -- Viewport3D.tsx has
 // none either; jsdom can't construct a real WebGLRenderer). Verified by the
@@ -67,6 +70,13 @@ export interface BuilderViewportProps {
    * avoids a confusing double-render of the original solid overlapping its
    * own cut result. */
   suppressedBodyId?: string | null;
+  /** Robot Builder CAD Kernel Phase 5 (Fillet + Chamfer): a visual-only
+   * overlay of the current shape's own pickable edges -- no raycasting of
+   * its own; the real pick path is FilletEdgeList's own DOM rows (see
+   * docs/decisions/cad-kernel-fillet-chamfer.md for why). `pickedPoints`
+   * recolors the edges already picked so a student can see which rows in
+   * that list they correspond to. */
+  edgeOverlay?: (CadEdgeOverlay & { pickedPoints: readonly [number, number, number][] }) | null;
 }
 
 const DRAG_CLICK_THRESHOLD_PX = 4;
@@ -81,6 +91,7 @@ export function BuilderViewport({
   bodyPick,
   cadPreview,
   suppressedBodyId,
+  edgeOverlay,
 }: BuilderViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -91,6 +102,7 @@ export function BuilderViewport({
   const transformControlsRef = useRef<TransformControls | null>(null);
   const bodyGroupByIdRef = useRef<Map<string, THREE.Group>>(new Map());
   const previewGroupRef = useRef<THREE.Group | null>(null);
+  const edgeOverlayGroupRef = useRef<THREE.Group | null>(null);
 
   const selectedBodyIdRef = useRef(selectedBodyId);
   const onSelectBodyRef = useRef(onSelectBody);
@@ -143,6 +155,11 @@ export function BuilderViewport({
     previewGroup.name = "cad-preview";
     scene.add(previewGroup);
     previewGroupRef.current = previewGroup;
+
+    const edgeOverlayGroup = new THREE.Group();
+    edgeOverlayGroup.name = "cad-edge-overlay";
+    scene.add(edgeOverlayGroup);
+    edgeOverlayGroupRef.current = edgeOverlayGroup;
 
     const transformControls = new TransformControls(camera, renderer.domElement);
     scene.add(transformControls.getHelper());
@@ -229,6 +246,7 @@ export function BuilderViewport({
       transformControlsRef.current = null;
       bodyGroupByIdRef.current = new Map();
       previewGroupRef.current = null;
+      edgeOverlayGroupRef.current = null;
     };
   }, []);
 
@@ -282,8 +300,47 @@ export function BuilderViewport({
     const material = new THREE.MeshStandardMaterial({ color: 0x4da6ff, transparent: true, opacity: 0.45, depthWrite: false });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(...cadPreview.position);
+    // CAD Kernel Phase 5: the target body's own current rotation (Cut,
+    // Fillet/Chamfer editing an already-rotated body in place) -- omitted
+    // by the three Boss creators, whose new bodies are always created
+    // unrotated, so this defaults to identity for them.
+    mesh.rotation.set(...(cadPreview.rotation ?? [0, 0, 0]), "XYZ");
     previewGroup.add(mesh);
   }, [cadPreview]);
+
+  // Edge-overlay effect (Robot Builder CAD Kernel Phase 5): a visual-only
+  // aid, independent of the rebuild/cadPreview effects above the same way
+  // the cadPreview effect already is -- edgeOverlayGroup is never added to
+  // bodyGroupByIdRef, so it can never be hit by the body-select raycast,
+  // and there is deliberately no raycast of its own here either (see
+  // FilletEdgeList.tsx's own doc for why the real pick path is a DOM list,
+  // not a 3D click).
+  useEffect(() => {
+    const edgeOverlayGroup = edgeOverlayGroupRef.current;
+    if (!edgeOverlayGroup) return;
+    edgeOverlayGroup.clear();
+    if (!edgeOverlay) return;
+    const { edgeMesh, position, rotation, pickedPoints } = edgeOverlay;
+    const pickedColor = new THREE.Color(0x33ff77);
+    const unpickedColor = new THREE.Color(0xffcc33);
+    for (let groupIndex = 0; groupIndex < edgeMesh.edgeGroups.length; groupIndex++) {
+      const group = edgeMesh.edgeGroups[groupIndex];
+      const points: THREE.Vector3[] = [];
+      for (let i = group.start; i < group.start + group.count; i++) {
+        points.push(new THREE.Vector3(edgeMesh.lines[i * 3], edgeMesh.lines[i * 3 + 1], edgeMesh.lines[i * 3 + 2]));
+      }
+      const descriptor = edgeGroupDescriptor(edgeMesh, groupIndex);
+      const isPicked = pickedPoints.some(
+        (p) => Math.abs(p[0] - descriptor[0]) < 1e-9 && Math.abs(p[1] - descriptor[1]) < 1e-9 && Math.abs(p[2] - descriptor[2]) < 1e-9,
+      );
+      const geometry = new THREE.BufferGeometry().setFromPoints(points);
+      const material = new THREE.LineBasicMaterial({ color: isPicked ? pickedColor : unpickedColor });
+      const line = new THREE.Line(geometry, material);
+      edgeOverlayGroup.add(line);
+    }
+    edgeOverlayGroup.position.set(...position);
+    edgeOverlayGroup.rotation.set(...rotation, "XYZ");
+  }, [edgeOverlay]);
 
   return <div ref={containerRef} className="viewport-3d builder-viewport" />;
 }

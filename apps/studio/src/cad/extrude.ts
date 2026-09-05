@@ -15,12 +15,14 @@ import {
   cut as cutDirect,
   extrudeCircle as extrudeCircleDirect,
   extrudeRectangle as extrudeRectangleDirect,
+  fillet as filletDirect,
   loft as loftDirect,
+  previewEdges as previewEdgesDirect,
   revolve as revolveDirect,
 } from "./kernel.ts";
-import type { CadMesh, CutTool, Profile } from "./kernel.ts";
+import type { CadMesh, CutTool, FilletBaseShape, FilletPick, Profile, ShapeEdgeMesh } from "./kernel.ts";
 
-export type { CadMesh, CutTool, Profile };
+export type { CadMesh, CutTool, FilletBaseShape, FilletPick, Profile, ShapeEdgeMesh };
 
 export function extrudeRectangle(options: { width: number; height: number; depth: number }): Promise<CadMesh> {
   return extrudeRectangleDirect(options.width, options.height, options.depth);
@@ -44,4 +46,14 @@ export function loft(options: { startProfile: Profile; endProfile: Profile; heig
 // conventions.
 export function cut(options: { targetMesh: CadMesh; tool: CutTool; position: readonly [number, number, number] }): Promise<CadMesh> {
   return cutDirect(options.targetMesh, options.tool, options.position);
+}
+
+// CAD Kernel Phase 5 (Fillet + Chamfer): see kernel.ts's previewEdges/
+// filletMesh for the geometry conventions.
+export function previewEdges(shape: FilletBaseShape): Promise<ShapeEdgeMesh> {
+  return previewEdgesDirect(shape);
+}
+
+export function fillet(shape: FilletBaseShape, picks: FilletPick[]): Promise<CadMesh> {
+  return filletDirect(shape, picks);
 }

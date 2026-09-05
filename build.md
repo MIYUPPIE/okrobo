@@ -1385,3 +1385,84 @@ typecheck`, `npm run build` (manifold's WASM lands as its own separate
 asset, main bundle grew by only ~11KB), and the full `test-all.sh` gate
 suite (including all new E2E checks, run for real against a live dev
 server and headless Chrome) all green.
+
+## CAD Kernel — Phase 5: Fillet + Chamfer (2026-09-05)
+
+Rounding (Fillet) and beveling (Chamfer) edges, shipped two ways: an
+optional step inside each Boss creator (Extrude/Revolve/Boundary) that
+lets a student round/bevel edges of the shape they're building before
+Apply bakes it, and a new standalone "Fillet/Chamfer" tool targeting an
+already-placed box or cylinder body -- the user chose this wider scope
+over the narrower "Boss-flow only" option via `AskUserQuestion`.
+
+The real constraint, found before planning further: `Solid.fillet()`/
+`.chamfer()` only exist on a live OpenCascade B-rep, never on `MeshShape`
+(Cut's own output) or any baked mesh -- every already-placed body has
+exactly that baked shape, no live solid behind it. So this can only
+target a fresh Boss shape mid-creation, or a body whose exact analytic
+parameters are already known (a box's `size`, a cylinder's
+`radius`/`length` -- rebuilt via replicad's own `makeBox`/`makeCylinder`
+with zero information loss, verified to match `robotThree.ts`'s own
+centered/axis conventions exactly). Sphere/cone/capsule/plane bodies and
+any already-baked `cad_mesh` body stay out of scope until a real feature
+tree exists (Phase 7).
+
+Identifying a picked edge turned out to need real verification, not
+assumption -- the obvious approach, `Shape.hashCode`, was tried and
+rejected: two independently-built, geometrically identical boxes produced
+entirely different hash sets (hashCode is tied to the OCC object
+instance, not the shape's geometry). The reliable identifier instead: a
+geometric descriptor point on the edge (a straight edge's own true
+midpoint, or an interior polyline sample for a curved one -- never a
+shared vertex, which matched 2-3 edges at once in testing), re-found via
+`EdgeFinder.near(point, tolerance)` on any freshly rebuilt, geometrically
+identical solid -- verified this survives an independent rebuild end to
+end. This keeps the kernel fully stateless, matching every other CAD
+operation shipped so far (no live solid handle kept alive across worker
+calls). Also verified: multiple edges with different values in one
+`.fillet()` call (the callback form of `RadiusConfig`), and a chained
+`.fillet(...).chamfer(...)` targeting different edges of the same solid --
+though chaining surfaced a real, documented limitation: filleting one edge
+trims/moves its immediately adjacent edges, so a chamfer recorded against
+the pristine shape can fail to find a neighbor on the already-filleted
+result (replicad throws a clear, catchable error for this; non-adjacent
+edges are unaffected). See `docs/decisions/cad-kernel-fillet-chamfer.md`.
+
+Every prior pick interaction in this codebase (Add Joint, Cut) already
+ships with a real DOM element as the canonical, E2E-tested input path --
+there's no per-edge equivalent to reuse, so this phase adds one:
+`FilletEdgeList.tsx` renders one row per edge with an Add button (picking
+via the DOM, not a 3D click); `BuilderViewport.tsx` gets a companion
+`edgeOverlay` prop -- colored lines, recolored once picked -- as a purely
+visual aid, no new raycasting layer. `useCadPreview` became generic
+(`useCadPreview<T = CadMesh>`) so the identical debounce/status lifecycle
+also drives this second, independent "pickable edges" preview every
+fillet/chamfer-capable creator needs. `CadPreview` gained an optional
+`rotation` field too -- a small, directly relevant side-fix: the ghost-
+preview effect only ever set `.position`, so editing an already-rotated
+body in place (Cut, and now this tool) rendered a visually misaligned
+ghost even though the final baked result was always correct.
+
+Tests: `extrude.test.ts` (+4 real-pipeline cases: pickable edges for a
+Boss shape and a standalone primitive, a mixed fillet+chamfer round trip,
+an oversized-radius throw caught with a readable message),
+`cadClient.test.ts` (+2 mocked wiring), `filletPicks.test.ts` (new, 8
+cases), `FilletEdgeList.test.tsx` (new, 6 cases), the three Boss creators'
+own test suites extended (+3 fillet-flow cases each, existing cases
+re-verified passing), `CadFilletChamferEditor.test.tsx` (new, 8 cases:
+unsupported-type message, box/cylinder happy paths, pick/apply/cancel),
+`BuilderPanel.test.tsx` (+3: the new tool's pick/apply/cancel flow,
+mutual exclusivity now covering nine tools). 4 new `studio-e2e-check.mjs`
+checks -- an embedded fillet inside Extrude, then the standalone tool on
+a fresh plain box body with one fillet and one chamfer on deliberately
+non-adjacent edges. Two real bugs found and fixed while first running
+those for real, both in the *test script* rather than the app: a
+hardcoded target body id ("body-4") that drifted once earlier Boss
+sections in the same continuous document had already claimed that id
+(fixed by reading the newly-added body's id back from the DOM instead of
+assuming it), and the adjacent-edge fillet+chamfer limitation itself
+(fixed by picking two edges that don't share a vertex). `npm run test`
+(534 passed across 57 files), `npm run typecheck`, `npm run build` (no
+new WASM asset -- fillet/chamfer only ever needs OpenCascade), and the
+full `test-all.sh` gate suite (including the new E2E checks, run for real
+against a live dev server and headless Chrome) all green.

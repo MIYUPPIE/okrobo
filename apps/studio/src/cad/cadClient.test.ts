@@ -123,4 +123,29 @@ describe("cadClient", () => {
     expect(stubApi.cut).toHaveBeenCalledWith(targetMesh, tool, [0.03, 0, 0]);
     expect(mesh).toEqual({ vertices: [7, 8, 9], faces: [2, 2, 2] });
   });
+
+  // CAD Kernel Phase 5 (Fillet + Chamfer).
+  it("delegates previewEdges to the wrapped API with the shape and resolves its result", async () => {
+    const edgeMesh = { lines: [0, 0, 0, 1, 0, 0], edgeGroups: [{ start: 0, count: 2, edgeId: 1 }] };
+    const stubApi = { previewEdges: vi.fn().mockResolvedValue(edgeMesh) };
+    wrapMock.mockReturnValue(stubApi);
+    const { previewEdges } = await import("./cadClient");
+
+    const shape = { operation: "box" as const, size: [0.1, 0.06, 0.04] as [number, number, number] };
+    const result = await previewEdges(shape);
+    expect(stubApi.previewEdges).toHaveBeenCalledWith(shape);
+    expect(result).toEqual(edgeMesh);
+  });
+
+  it("delegates fillet to the wrapped API with the shape and picks and resolves its result", async () => {
+    const stubApi = { fillet: vi.fn().mockResolvedValue({ vertices: [1, 2, 3], faces: [0, 0, 0] }) };
+    wrapMock.mockReturnValue(stubApi);
+    const { fillet } = await import("./cadClient");
+
+    const shape = { operation: "cylinder" as const, radius: 0.03, length: 0.08 };
+    const picks = [{ point: [0.03, 0, 0] as [number, number, number], operation: "fillet" as const, value: 0.005 }];
+    const mesh = await fillet(shape, picks);
+    expect(stubApi.fillet).toHaveBeenCalledWith(shape, picks);
+    expect(mesh).toEqual({ vertices: [1, 2, 3], faces: [0, 0, 0] });
+  });
 });

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Body, RobotDef } from "../contracts/robotDef";
-import type { CadPreview } from "../cad/cadClient";
-import { revolve } from "../cad/cadClient";
+import type { CadEdgeOverlay, CadPreview, ShapeEdgeMesh } from "../cad/cadClient";
+import { fillet, previewEdges, revolve } from "../cad/cadClient";
 import { CadProfileDimensionFields, parseProfileDraft, positiveNumber, type ProfileDraft, type ProfileShape } from "./CadProfileFields";
+import { FilletEdgeList } from "./FilletEdgeList";
+import { parseFilletPicks, type FilletPickDraft } from "./filletPicks";
 import { makeCadBody, nextBodyId } from "./robotEdits";
 import { useCadPreview } from "./useCadPreview";
 
@@ -62,9 +64,14 @@ export interface CadRevolveCreatorProps {
   onApply: (nextRobot: RobotDef, newBodyId: string) => void;
   onCancel: () => void;
   onPreviewChange: (preview: CadPreview | null) => void;
+  /** CAD Kernel Phase 5 (Fillet + Chamfer): see CadExtrudeCreator's own
+   * doc -- identical lifted-state shape. */
+  edgePicks: FilletPickDraft[];
+  onEdgePicksChange: (next: FilletPickDraft[]) => void;
+  onEdgeOverlayChange: (overlay: CadEdgeOverlay | null) => void;
 }
 
-export function CadRevolveCreator({ robot, near, onApply, onCancel, onPreviewChange }: CadRevolveCreatorProps) {
+export function CadRevolveCreator({ robot, near, onApply, onCancel, onPreviewChange, edgePicks, onEdgePicksChange, onEdgeOverlayChange }: CadRevolveCreatorProps) {
   const bodyId = useMemo(() => nextBodyId(robot), [robot]);
   const [draft, setDraft] = useState<Draft>(initialDraft);
   const setProfile = (profile: ProfileDraft) => setDraft((d) => ({ ...d, profile }));
@@ -72,9 +79,15 @@ export function CadRevolveCreator({ robot, near, onApply, onCancel, onPreviewCha
   const { status, error, mesh } = useCadPreview(() => {
     const parsed = parseDraft(draft);
     if (!parsed.ok) return parsed;
-    return { ok: true, call: () => revolve({ profile: parsed.value.profile, offset: parsed.value.offset, angleDeg: parsed.value.angleDeg }) };
+    if (edgePicks.length === 0) {
+      return { ok: true, call: () => revolve({ profile: parsed.value.profile, offset: parsed.value.offset, angleDeg: parsed.value.angleDeg }) };
+    }
+    const picks = parseFilletPicks(edgePicks);
+    if (!picks.ok) return picks;
+    const shape = { operation: "revolve" as const, profile: parsed.value.profile, offset: parsed.value.offset, angleDeg: parsed.value.angleDeg };
+    return { ok: true, call: () => fillet(shape, picks.value) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.profile, draft.offset, draft.angleDeg]);
+  }, [draft.profile, draft.offset, draft.angleDeg, edgePicks]);
 
   useEffect(() => {
     if (status === "ready" && mesh) {
@@ -84,6 +97,29 @@ export function CadRevolveCreator({ robot, near, onApply, onCancel, onPreviewCha
       onPreviewChange(null);
     }
   }, [status, mesh, bodyId, near, onPreviewChange]);
+
+  const edgesPreview = useCadPreview<ShapeEdgeMesh>(() => {
+    const parsed = parseDraft(draft);
+    if (!parsed.ok) return parsed;
+    const shape = { operation: "revolve" as const, profile: parsed.value.profile, offset: parsed.value.offset, angleDeg: parsed.value.angleDeg };
+    return { ok: true, call: () => previewEdges(shape) };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.profile, draft.offset, draft.angleDeg]);
+
+  useEffect(() => {
+    if (edgesPreview.status === "ready" && edgesPreview.mesh) {
+      const body = makeCadBody(bodyId, near, { vertices: [], faces: [] });
+      onEdgeOverlayChange({ edgeMesh: edgesPreview.mesh, position: body.transform.position, rotation: [0, 0, 0] });
+    } else if (edgesPreview.status === "error") {
+      onEdgeOverlayChange(null);
+    }
+  }, [edgesPreview.status, edgesPreview.mesh, bodyId, near, onEdgeOverlayChange]);
+
+  useEffect(() => {
+    onEdgePicksChange([]);
+    onEdgeOverlayChange(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.profile, draft.offset, draft.angleDeg]);
 
   const apply = () => {
     if (status !== "ready" || !mesh) return;
@@ -141,6 +177,8 @@ export function CadRevolveCreator({ robot, near, onApply, onCancel, onPreviewCha
           </label>
         </div>
       </section>
+
+      {edgesPreview.status === "ready" && <FilletEdgeList edgeMesh={edgesPreview.mesh} picks={edgePicks} onChange={onEdgePicksChange} />}
 
       {status === "loading" && <p className="cad-status">computing…</p>}
       {status === "error" && <p className="cad-status error">{error}</p>}

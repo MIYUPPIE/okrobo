@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Body, RobotDef } from "../contracts/robotDef";
-import type { CadPreview } from "../cad/cadClient";
-import { extrudeCircle, extrudeRectangle } from "../cad/cadClient";
+import type { CadEdgeOverlay, CadPreview, ShapeEdgeMesh } from "../cad/cadClient";
+import { extrudeCircle, extrudeRectangle, fillet, previewEdges } from "../cad/cadClient";
 import { CadProfileDimensionFields, parseProfileDraft, positiveNumber, type ProfileDraft, type ProfileShape } from "./CadProfileFields";
+import { FilletEdgeList } from "./FilletEdgeList";
+import { parseFilletPicks, type FilletPickDraft } from "./filletPicks";
 import { makeCadBody, nextBodyId } from "./robotEdits";
 import { useCadPreview } from "./useCadPreview";
 
@@ -60,9 +62,15 @@ export interface CadExtrudeCreatorProps {
    * (or null while invalid/erroring) plus the exact position the body will
    * land at -- BuilderViewport reads this back through BuilderPanel. */
   onPreviewChange: (preview: CadPreview | null) => void;
+  /** CAD Kernel Phase 5 (Fillet + Chamfer): the edges picked so far on
+   * this creator's own fresh shape, lifted to BuilderPanel the same way
+   * cadPreview is -- see docs/decisions/cad-kernel-fillet-chamfer.md. */
+  edgePicks: FilletPickDraft[];
+  onEdgePicksChange: (next: FilletPickDraft[]) => void;
+  onEdgeOverlayChange: (overlay: CadEdgeOverlay | null) => void;
 }
 
-export function CadExtrudeCreator({ robot, near, onApply, onCancel, onPreviewChange }: CadExtrudeCreatorProps) {
+export function CadExtrudeCreator({ robot, near, onApply, onCancel, onPreviewChange, edgePicks, onEdgePicksChange, onEdgeOverlayChange }: CadExtrudeCreatorProps) {
   const bodyId = useMemo(() => nextBodyId(robot), [robot]);
   const [draft, setDraft] = useState<Draft>(initialDraft);
   const setProfile = (profile: ProfileDraft) => setDraft((d) => ({ ...d, profile }));
@@ -70,13 +78,19 @@ export function CadExtrudeCreator({ robot, near, onApply, onCancel, onPreviewCha
   const { status, error, mesh } = useCadPreview(() => {
     const parsed = parseDraft(draft);
     if (!parsed.ok) return parsed;
-    const call = () =>
-      parsed.value.profile.type === "rectangle"
-        ? extrudeRectangle({ width: parsed.value.profile.width, height: parsed.value.profile.height, depth: parsed.value.depth })
-        : extrudeCircle({ radius: parsed.value.profile.radius, depth: parsed.value.depth });
-    return { ok: true, call };
+    if (edgePicks.length === 0) {
+      const call = () =>
+        parsed.value.profile.type === "rectangle"
+          ? extrudeRectangle({ width: parsed.value.profile.width, height: parsed.value.profile.height, depth: parsed.value.depth })
+          : extrudeCircle({ radius: parsed.value.profile.radius, depth: parsed.value.depth });
+      return { ok: true, call };
+    }
+    const picks = parseFilletPicks(edgePicks);
+    if (!picks.ok) return picks;
+    const shape = { operation: "extrude" as const, profile: parsed.value.profile, depth: parsed.value.depth };
+    return { ok: true, call: () => fillet(shape, picks.value) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.profile, draft.depth]);
+  }, [draft.profile, draft.depth, edgePicks]);
 
   // Only reacts on a real settle (ready/error) -- skips "loading" so the
   // previous preview stays visible during a recompute instead of flickering
@@ -89,6 +103,37 @@ export function CadExtrudeCreator({ robot, near, onApply, onCancel, onPreviewCha
       onPreviewChange(null);
     }
   }, [status, mesh, bodyId, near, onPreviewChange]);
+
+  // CAD Kernel Phase 5: a second, independent preview -- this shape's own
+  // pickable edges, recomputed only from the profile/dims (never from
+  // edgePicks, so picking an edge never itself triggers a rebuild of the
+  // overlay it's picked from).
+  const edgesPreview = useCadPreview<ShapeEdgeMesh>(() => {
+    const parsed = parseDraft(draft);
+    if (!parsed.ok) return parsed;
+    const shape = { operation: "extrude" as const, profile: parsed.value.profile, depth: parsed.value.depth };
+    return { ok: true, call: () => previewEdges(shape) };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.profile, draft.depth]);
+
+  useEffect(() => {
+    if (edgesPreview.status === "ready" && edgesPreview.mesh) {
+      const body = makeCadBody(bodyId, near, { vertices: [], faces: [] });
+      onEdgeOverlayChange({ edgeMesh: edgesPreview.mesh, position: body.transform.position, rotation: [0, 0, 0] });
+    } else if (edgesPreview.status === "error") {
+      onEdgeOverlayChange(null);
+    }
+  }, [edgesPreview.status, edgesPreview.mesh, bodyId, near, onEdgeOverlayChange]);
+
+  // Dimensions aren't locked behind a toggle -- changing them just clears
+  // any picks (a stale pick's descriptor point won't match any edge of the
+  // new shape anyway; this keeps the visible list/overlay in sync with
+  // that, rather than leaving stale rows around).
+  useEffect(() => {
+    onEdgePicksChange([]);
+    onEdgeOverlayChange(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.profile, draft.depth]);
 
   const apply = () => {
     if (status !== "ready" || !mesh) return;
@@ -128,6 +173,8 @@ export function CadExtrudeCreator({ robot, near, onApply, onCancel, onPreviewCha
           </label>
         </div>
       </section>
+
+      {edgesPreview.status === "ready" && <FilletEdgeList edgeMesh={edgesPreview.mesh} picks={edgePicks} onChange={onEdgePicksChange} />}
 
       {status === "loading" && <p className="cad-status">computing…</p>}
       {status === "error" && <p className="cad-status error">{error}</p>}

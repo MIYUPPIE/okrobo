@@ -15,14 +15,22 @@ import { CAD_PREVIEW_DEBOUNCE_MS } from "./useCadPreview";
 
 const extrudeRectangleMock = vi.fn();
 const extrudeCircleMock = vi.fn();
+const previewEdgesMock = vi.fn();
+const filletMock = vi.fn();
 vi.mock("../cad/cadClient", () => ({
   extrudeRectangle: (...args: unknown[]) => extrudeRectangleMock(...args),
   extrudeCircle: (...args: unknown[]) => extrudeCircleMock(...args),
+  previewEdges: (...args: unknown[]) => previewEdgesMock(...args),
+  fillet: (...args: unknown[]) => filletMock(...args),
 }));
+
+const noEdges = { lines: [] as number[], edgeGroups: [] as { start: number; count: number; edgeId: number }[] };
 
 beforeEach(() => {
   extrudeRectangleMock.mockReset();
   extrudeCircleMock.mockReset();
+  previewEdgesMock.mockReset().mockResolvedValue(noEdges);
+  filletMock.mockReset();
 });
 
 afterEach(() => {
@@ -60,7 +68,7 @@ async function advanceTimers(ms: number) {
 
 describe("CadExtrudeCreator", () => {
   it("defaults to a rectangle profile with width/height/depth fields", () => {
-    render(<CadExtrudeCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} />);
+    render(<CadExtrudeCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} edgePicks={[]} onEdgePicksChange={() => {}} onEdgeOverlayChange={() => {}} />);
     expect(screen.getByLabelText("cad profile")).toHaveValue("rectangle");
     expect(screen.getByLabelText("cad width")).toHaveValue(0.05);
     expect(screen.getByLabelText("cad height")).toHaveValue(0.05);
@@ -69,7 +77,7 @@ describe("CadExtrudeCreator", () => {
   });
 
   it("switching to circle swaps width/height for radius", () => {
-    render(<CadExtrudeCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} />);
+    render(<CadExtrudeCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} edgePicks={[]} onEdgePicksChange={() => {}} onEdgeOverlayChange={() => {}} />);
     fireEvent.change(screen.getByLabelText("cad profile"), { target: { value: "circle" } });
     expect(screen.getByLabelText("cad radius")).toBeInTheDocument();
     expect(screen.queryByLabelText("cad width")).not.toBeInTheDocument();
@@ -80,7 +88,7 @@ describe("CadExtrudeCreator", () => {
     vi.useFakeTimers();
     let resolveCall: (result: typeof mesh) => void = () => {};
     extrudeRectangleMock.mockReturnValue(new Promise((resolve) => { resolveCall = resolve; }));
-    render(<CadExtrudeCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} />);
+    render(<CadExtrudeCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} edgePicks={[]} onEdgePicksChange={() => {}} onEdgeOverlayChange={() => {}} />);
 
     await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
     expect(screen.getByText("computing…")).toBeInTheDocument();
@@ -95,7 +103,7 @@ describe("CadExtrudeCreator", () => {
   it("shows the error message and keeps Apply disabled when the worker rejects", async () => {
     vi.useFakeTimers();
     extrudeRectangleMock.mockRejectedValue(new Error("degenerate profile"));
-    render(<CadExtrudeCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} />);
+    render(<CadExtrudeCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} edgePicks={[]} onEdgePicksChange={() => {}} onEdgeOverlayChange={() => {}} />);
 
     await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
     expect(screen.getByText("degenerate profile")).toBeInTheDocument();
@@ -104,7 +112,7 @@ describe("CadExtrudeCreator", () => {
 
   it("rejects a zero width locally without ever calling the worker", async () => {
     vi.useFakeTimers();
-    render(<CadExtrudeCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} />);
+    render(<CadExtrudeCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} edgePicks={[]} onEdgePicksChange={() => {}} onEdgeOverlayChange={() => {}} />);
     fireEvent.change(screen.getByLabelText("cad width"), { target: { value: "0" } });
 
     await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
@@ -118,7 +126,7 @@ describe("CadExtrudeCreator", () => {
     extrudeRectangleMock.mockResolvedValue(mesh);
     const onApply = vi.fn();
     const robot = makeRobot();
-    render(<CadExtrudeCreator robot={robot} near={robot.bodies[0]} onApply={onApply} onCancel={() => {}} onPreviewChange={() => {}} />);
+    render(<CadExtrudeCreator robot={robot} near={robot.bodies[0]} onApply={onApply} onCancel={() => {}} onPreviewChange={() => {}} edgePicks={[]} onEdgePicksChange={() => {}} onEdgeOverlayChange={() => {}} />);
 
     await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
@@ -136,7 +144,7 @@ describe("CadExtrudeCreator", () => {
   it("Cancel calls onCancel without calling onApply", () => {
     const onApply = vi.fn();
     const onCancel = vi.fn();
-    render(<CadExtrudeCreator robot={makeRobot()} near={null} onApply={onApply} onCancel={onCancel} onPreviewChange={() => {}} />);
+    render(<CadExtrudeCreator robot={makeRobot()} near={null} onApply={onApply} onCancel={onCancel} onPreviewChange={() => {}} edgePicks={[]} onEdgePicksChange={() => {}} onEdgeOverlayChange={() => {}} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onCancel).toHaveBeenCalledTimes(1);
@@ -147,7 +155,7 @@ describe("CadExtrudeCreator", () => {
     vi.useFakeTimers();
     extrudeRectangleMock.mockResolvedValue(mesh);
     const onPreviewChange = vi.fn();
-    render(<CadExtrudeCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={onPreviewChange} />);
+    render(<CadExtrudeCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={onPreviewChange} edgePicks={[]} onEdgePicksChange={() => {}} onEdgeOverlayChange={() => {}} />);
 
     await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
     expect(onPreviewChange).toHaveBeenLastCalledWith({ mesh, position: [0.1, 0, 0] });
@@ -155,5 +163,81 @@ describe("CadExtrudeCreator", () => {
     fireEvent.change(screen.getByLabelText("cad width"), { target: { value: "0" } });
     await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
     expect(onPreviewChange).toHaveBeenLastCalledWith(null);
+  });
+
+  // CAD Kernel Phase 5 (Fillet + Chamfer).
+  const edges = { lines: [0, 0, 0, 10, 0, 0], edgeGroups: [{ start: 0, count: 2, edgeId: 1 }] };
+
+  it("shows an Edges section with a real edge once the base shape's own edge preview settles", async () => {
+    vi.useFakeTimers();
+    extrudeRectangleMock.mockResolvedValue(mesh);
+    previewEdgesMock.mockResolvedValue(edges);
+    render(<CadExtrudeCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} edgePicks={[]} onEdgePicksChange={() => {}} onEdgeOverlayChange={() => {}} />);
+
+    await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+    expect(screen.getByText("Edge 1")).toBeInTheDocument();
+    expect(previewEdgesMock).toHaveBeenCalledWith({ operation: "extrude", profile: { type: "rectangle", width: 0.05, height: 0.05 }, depth: 0.02 });
+  });
+
+  it("reports the edge overlay positioned exactly where the ghost preview lands", async () => {
+    vi.useFakeTimers();
+    extrudeRectangleMock.mockResolvedValue(mesh);
+    previewEdgesMock.mockResolvedValue(edges);
+    const onEdgeOverlayChange = vi.fn();
+    const robot = makeRobot();
+    render(
+      <CadExtrudeCreator robot={robot} near={robot.bodies[0]} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} edgePicks={[]} onEdgePicksChange={() => {}} onEdgeOverlayChange={onEdgeOverlayChange} />,
+    );
+
+    await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+    expect(onEdgeOverlayChange).toHaveBeenLastCalledWith({ edgeMesh: edges, position: [0.1, 0, 0], rotation: [0, 0, 0] });
+  });
+
+  it("once edges are picked, calls fillet (not extrudeRectangle) with the shape and parsed picks", async () => {
+    vi.useFakeTimers();
+    extrudeRectangleMock.mockResolvedValue(mesh);
+    previewEdgesMock.mockResolvedValue(edges);
+    filletMock.mockResolvedValue({ vertices: [9, 9, 9], faces: [0, 0, 0] });
+    const { rerender } = render(
+      <CadExtrudeCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} edgePicks={[]} onEdgePicksChange={() => {}} onEdgeOverlayChange={() => {}} />,
+    );
+    await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+    extrudeRectangleMock.mockClear();
+
+    const picked = [{ point: [5, 0, 0] as [number, number, number], operation: "fillet" as const, value: "0.005" }];
+    rerender(
+      <CadExtrudeCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} edgePicks={picked} onEdgePicksChange={() => {}} onEdgeOverlayChange={() => {}} />,
+    );
+
+    await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+    expect(filletMock).toHaveBeenCalledWith(
+      { operation: "extrude", profile: { type: "rectangle", width: 0.05, height: 0.05 }, depth: 0.02 },
+      [{ point: [5, 0, 0], operation: "fillet", value: 0.005 }],
+    );
+    expect(extrudeRectangleMock).not.toHaveBeenCalled();
+  });
+
+  it("changing a dimension clears the picks and the edge overlay", async () => {
+    vi.useFakeTimers();
+    extrudeRectangleMock.mockResolvedValue(mesh);
+    previewEdgesMock.mockResolvedValue(edges);
+    const onEdgePicksChange = vi.fn();
+    const onEdgeOverlayChange = vi.fn();
+    render(
+      <CadExtrudeCreator
+        robot={makeRobot()}
+        near={null}
+        onApply={() => {}}
+        onCancel={() => {}}
+        onPreviewChange={() => {}}
+        edgePicks={[{ point: [5, 0, 0], operation: "fillet", value: "0.005" }]}
+        onEdgePicksChange={onEdgePicksChange}
+        onEdgeOverlayChange={onEdgeOverlayChange}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("cad width"), { target: { value: "0.07" } });
+    expect(onEdgePicksChange).toHaveBeenCalledWith([]);
+    expect(onEdgeOverlayChange).toHaveBeenCalledWith(null);
   });
 });

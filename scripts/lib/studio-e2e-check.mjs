@@ -971,6 +971,93 @@ try {
     await waitForCondition(`document.querySelectorAll('.hierarchy-row').length === ${bodyCountBeforeCuts}`, 5000),
   );
 
+  // -- robot builder: Fillet + Chamfer (CAD Kernel Phase 5) ---------------
+  // Continues from the Cut section above: body-2 is now a cad_mesh part,
+  // the sole body in the document. First, Extrude a fresh box with one
+  // embedded fillet -- proving the Boss-flow edge-picking path (pick an
+  // edge of a not-yet-baked shape via the real DOM "Edges" list, not a 3D
+  // click; see docs/decisions/cad-kernel-fillet-chamfer.md for why). Then
+  // the standalone Fillet/Chamfer tool targets a fresh plain box body (+
+  // Add body, not an already-cad_mesh one) with one fillet and one
+  // chamfer, proving the existing-primitive-body path.
+  const bodyCountBeforeFillet = await page.evaluate("document.querySelectorAll('.hierarchy-row').length");
+
+  await page.evalClickText(".builder-toolbar button", "/^Extrude$/");
+  check(
+    "Build mode: Extrude shows the New CAD part form",
+    await waitForCondition("document.querySelector('.builder-inspector h4')?.textContent === 'New CAD part'", 5000),
+  );
+  check(
+    "Build mode: the Edges section appears once the base shape's own edge preview settles",
+    await waitForCondition("!!document.querySelector('.fillet-edge-list')", 10000),
+  );
+  await page.evalClickText(".fillet-edge-row button", "/^Add$/");
+  check(
+    "Build mode: picking an edge (via the DOM list, not a 3D click) shows its Operation/Value controls",
+    await waitForCondition('!!document.querySelector(\'[aria-label="edge 1 operation"]\')', 5000),
+  );
+  check(
+    "Build mode: the fillet computes a real preview through the warm CAD worker (Apply enables)",
+    await waitForCondition("!document.querySelector('.cad-extrude-creator .inspector-actions button.primary')?.disabled", 10000),
+  );
+  await page.evalClickText(".inspector-actions button", "/^Apply$/");
+  check(
+    "Build mode: Extrude with an embedded fillet commits a new cad_mesh body",
+    await waitForCondition(`document.querySelectorAll('.hierarchy-row').length === ${bodyCountBeforeFillet} + 1`, 5000),
+  );
+
+  // Extrude/Revolve/Boundary above each already added their own new body
+  // (this is one continuous document, not reset between sections -- see
+  // the Cut section's own comment above), so the fresh box's own id here
+  // is whatever nextBodyId lands on next, not a fixed "body-N" -- read it
+  // back from the newly appended (always-last) hierarchy row rather than
+  // hardcoding a number that would silently drift as earlier sections
+  // change.
+  await page.evalClickText(".builder-add-body", "/Add body/");
+  const rowsAfterAddBody = await page.evaluate("[...document.querySelectorAll('.hierarchy-row')].map((r) => r.textContent)");
+  const bodyCountAfterAddBody = rowsAfterAddBody.length;
+  check("Build mode: + Add body grows the hierarchy by one plain box body", bodyCountAfterAddBody === bodyCountBeforeFillet + 2);
+  const freshBoxId = rowsAfterAddBody[rowsAfterAddBody.length - 1];
+
+  await page.evalClickText(".builder-toolbar button", "/^Fillet\\/Chamfer$/");
+  check(
+    "Build mode: Fillet/Chamfer enters the picking tool with a hint",
+    await waitForCondition("document.querySelector('.joint-pick-hint')?.textContent === 'Click the body to fillet or chamfer.'", 5000),
+  );
+  await page.clickText(".hierarchy-row", `/^${freshBoxId}$/`);
+  check(
+    "Build mode: picking a box body shows the Fillet/Chamfer editor",
+    await waitForCondition("document.querySelector('.builder-inspector h4')?.textContent === 'Fillet / Chamfer'", 5000),
+  );
+  check(
+    "Build mode: the target's own edges preview settles (Edges section appears)",
+    await waitForCondition("!!document.querySelector('.fillet-edge-list')", 10000),
+  );
+  // Edge 1 and Edge 6 -- deliberately non-adjacent (don't share a vertex).
+  // Mixing fillet and chamfer on two edges that DO share a vertex is a
+  // real, documented limitation (see docs/decisions/cad-kernel-fillet-chamfer.md):
+  // filleting one edge trims/moves its immediate neighbors, so a chamfer
+  // recorded against the pristine shape can no longer find them on the
+  // already-filleted result. Verified empirically which of a box's 12
+  // edges are safe to combine.
+  await page.evalClickText(".fillet-edge-row:nth-child(1) button", "/^Add$/"); // Edge 1 -> fillet (the default operation)
+  await page.evalClickText(".fillet-edge-row:nth-child(6) button", "/^Add$/"); // Edge 6 -> changed to chamfer below
+  await page.setSelectValue('[aria-label="edge 6 operation"]', "chamfer");
+  check(
+    "Build mode: one fillet and one chamfer compute a real combined preview (Apply enables)",
+    await waitForCondition("!document.querySelector('.cad-extrude-creator .inspector-actions button.primary')?.disabled", 10000),
+  );
+  await page.evalClickText(".inspector-actions button", "/^Apply$/");
+  check(
+    "Build mode: Fillet/Chamfer commits with no new body added (geometry replaced in place)",
+    await waitForCondition(`document.querySelectorAll('.hierarchy-row').length === ${bodyCountAfterAddBody}`, 5000),
+  );
+  await page.evalClickText(".hierarchy-row", `/^${freshBoxId}$/`);
+  check(
+    "Build mode: the fresh box really became a cad_mesh body -- Shape is now locked to CAD part",
+    await waitForCondition("document.querySelector('.inspector-mesh-note')?.textContent?.includes('CAD part')", 5000),
+  );
+
   await page.clickText(".mode-toggle button", "/^Simulate$/");
   const backToSimulate = await waitForCondition(
     "!!document.querySelector('.sidebar') && !!document.querySelector('.viewport-3d canvas')",

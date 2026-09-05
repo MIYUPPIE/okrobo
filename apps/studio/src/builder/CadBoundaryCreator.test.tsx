@@ -6,11 +6,21 @@ import { CadBoundaryCreator } from "./CadBoundaryCreator";
 import { CAD_PREVIEW_DEBOUNCE_MS } from "./useCadPreview";
 
 const loftMock = vi.fn();
+const previewEdgesMock = vi.fn();
+const filletMock = vi.fn();
 vi.mock("../cad/cadClient", () => ({
   loft: (...args: unknown[]) => loftMock(...args),
+  previewEdges: (...args: unknown[]) => previewEdgesMock(...args),
+  fillet: (...args: unknown[]) => filletMock(...args),
 }));
 
-beforeEach(() => loftMock.mockReset());
+const noEdges = { lines: [] as number[], edgeGroups: [] as { start: number; count: number; edgeId: number }[] };
+
+beforeEach(() => {
+  loftMock.mockReset();
+  previewEdgesMock.mockReset().mockResolvedValue(noEdges);
+  filletMock.mockReset();
+});
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -42,7 +52,7 @@ async function advanceTimers(ms: number) {
 
 describe("CadBoundaryCreator", () => {
   it("defaults to a circle Start profile and a rectangle End profile", () => {
-    render(<CadBoundaryCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} />);
+    render(<CadBoundaryCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} edgePicks={[]} onEdgePicksChange={() => {}} onEdgeOverlayChange={() => {}} />);
     expect(screen.getByLabelText("cad start shape")).toHaveValue("circle");
     expect(screen.getByLabelText("cad start radius")).toHaveValue(0.03);
     expect(screen.getByLabelText("cad end shape")).toHaveValue("rectangle");
@@ -52,7 +62,7 @@ describe("CadBoundaryCreator", () => {
   });
 
   it("switching the Start profile to rectangle swaps its own fields, independently of End", () => {
-    render(<CadBoundaryCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} />);
+    render(<CadBoundaryCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} edgePicks={[]} onEdgePicksChange={() => {}} onEdgeOverlayChange={() => {}} />);
     fireEvent.change(screen.getByLabelText("cad start shape"), { target: { value: "rectangle" } });
     expect(screen.getByLabelText("cad start width")).toBeInTheDocument();
     expect(screen.queryByLabelText("cad start radius")).not.toBeInTheDocument();
@@ -64,7 +74,7 @@ describe("CadBoundaryCreator", () => {
   it("shows loading then ready once the worker resolves, enabling Apply, calling loft with both profiles and height", async () => {
     vi.useFakeTimers();
     loftMock.mockResolvedValue(mesh);
-    render(<CadBoundaryCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} />);
+    render(<CadBoundaryCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} edgePicks={[]} onEdgePicksChange={() => {}} onEdgeOverlayChange={() => {}} />);
 
     expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
     await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
@@ -78,7 +88,7 @@ describe("CadBoundaryCreator", () => {
 
   it("rejects a zero Start radius locally, without calling the worker", async () => {
     vi.useFakeTimers();
-    render(<CadBoundaryCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} />);
+    render(<CadBoundaryCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} edgePicks={[]} onEdgePicksChange={() => {}} onEdgeOverlayChange={() => {}} />);
     fireEvent.change(screen.getByLabelText("cad start radius"), { target: { value: "0" } });
 
     await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
@@ -92,7 +102,7 @@ describe("CadBoundaryCreator", () => {
     loftMock.mockResolvedValue(mesh);
     const onApply = vi.fn();
     const robot = makeRobot();
-    render(<CadBoundaryCreator robot={robot} near={robot.bodies[0]} onApply={onApply} onCancel={() => {}} onPreviewChange={() => {}} />);
+    render(<CadBoundaryCreator robot={robot} near={robot.bodies[0]} onApply={onApply} onCancel={() => {}} onPreviewChange={() => {}} edgePicks={[]} onEdgePicksChange={() => {}} onEdgeOverlayChange={() => {}} />);
 
     await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
@@ -106,10 +116,76 @@ describe("CadBoundaryCreator", () => {
   it("Cancel calls onCancel without calling onApply", () => {
     const onApply = vi.fn();
     const onCancel = vi.fn();
-    render(<CadBoundaryCreator robot={makeRobot()} near={null} onApply={onApply} onCancel={onCancel} onPreviewChange={() => {}} />);
+    render(<CadBoundaryCreator robot={makeRobot()} near={null} onApply={onApply} onCancel={onCancel} onPreviewChange={() => {}} edgePicks={[]} onEdgePicksChange={() => {}} onEdgeOverlayChange={() => {}} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onApply).not.toHaveBeenCalled();
+  });
+
+  // CAD Kernel Phase 5 (Fillet + Chamfer).
+  const edges = { lines: [0, 0, 0, 10, 0, 0], edgeGroups: [{ start: 0, count: 2, edgeId: 1 }] };
+
+  it("shows an Edges section once the base shape's own edge preview settles", async () => {
+    vi.useFakeTimers();
+    loftMock.mockResolvedValue(mesh);
+    previewEdgesMock.mockResolvedValue(edges);
+    render(<CadBoundaryCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} edgePicks={[]} onEdgePicksChange={() => {}} onEdgeOverlayChange={() => {}} />);
+
+    await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+    expect(screen.getByText("Edge 1")).toBeInTheDocument();
+  });
+
+  it("once edges are picked, calls fillet (not loft) with the shape and parsed picks", async () => {
+    vi.useFakeTimers();
+    loftMock.mockResolvedValue(mesh);
+    previewEdgesMock.mockResolvedValue(edges);
+    filletMock.mockResolvedValue({ vertices: [9, 9, 9], faces: [0, 0, 0] });
+    const { rerender } = render(
+      <CadBoundaryCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} edgePicks={[]} onEdgePicksChange={() => {}} onEdgeOverlayChange={() => {}} />,
+    );
+    await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+    loftMock.mockClear();
+
+    const picked = [{ point: [5, 0, 0] as [number, number, number], operation: "chamfer" as const, value: "0.005" }];
+    rerender(
+      <CadBoundaryCreator robot={makeRobot()} near={null} onApply={() => {}} onCancel={() => {}} onPreviewChange={() => {}} edgePicks={picked} onEdgePicksChange={() => {}} onEdgeOverlayChange={() => {}} />,
+    );
+
+    await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+    expect(filletMock).toHaveBeenCalledWith(
+      {
+        operation: "loft",
+        startProfile: { type: "circle", radius: 0.03 },
+        endProfile: { type: "rectangle", width: 0.05, height: 0.05 },
+        height: 0.08,
+      },
+      [{ point: [5, 0, 0], operation: "chamfer", value: 0.005 }],
+    );
+    expect(loftMock).not.toHaveBeenCalled();
+  });
+
+  it("changing a dimension clears the picks and the edge overlay", async () => {
+    vi.useFakeTimers();
+    loftMock.mockResolvedValue(mesh);
+    previewEdgesMock.mockResolvedValue(edges);
+    const onEdgePicksChange = vi.fn();
+    const onEdgeOverlayChange = vi.fn();
+    render(
+      <CadBoundaryCreator
+        robot={makeRobot()}
+        near={null}
+        onApply={() => {}}
+        onCancel={() => {}}
+        onPreviewChange={() => {}}
+        edgePicks={[{ point: [5, 0, 0], operation: "fillet", value: "0.005" }]}
+        onEdgePicksChange={onEdgePicksChange}
+        onEdgeOverlayChange={onEdgeOverlayChange}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("cad loft height"), { target: { value: "0.1" } });
+    expect(onEdgePicksChange).toHaveBeenCalledWith([]);
+    expect(onEdgeOverlayChange).toHaveBeenCalledWith(null);
   });
 });

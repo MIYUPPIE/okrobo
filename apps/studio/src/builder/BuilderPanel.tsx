@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BlocksPanel } from "../BlocksPanel";
 import { setBuiltRobotFields } from "../blocks/okroboBlocks";
-import type { CadPreview } from "../cad/cadClient";
+import type { CadEdgeOverlay, CadPreview } from "../cad/cadClient";
 import { validateRobotDef, type RobotDef, type Transform } from "../contracts/robotDef";
 import type { WorldDef } from "../contracts/worldDef";
 import { EngineBuiltRobot } from "../engine/EngineBuiltRobot";
@@ -16,9 +16,11 @@ import { CadBoundaryCreator } from "./CadBoundaryCreator";
 import { CadBoundaryCutCreator } from "./CadBoundaryCutCreator";
 import { CadExtrudeCreator } from "./CadExtrudeCreator";
 import { CadExtrudedCutCreator } from "./CadExtrudedCutCreator";
+import { CadFilletChamferEditor } from "./CadFilletChamferEditor";
 import { CadRevolveCreator } from "./CadRevolveCreator";
 import { CadRevolvedCutCreator } from "./CadRevolvedCutCreator";
 import { exportRobotDef } from "./exportRobot";
+import type { FilletPickDraft } from "./filletPicks";
 import { HierarchyList } from "./HierarchyList";
 import { JointCreator } from "./JointCreator";
 import { makeDefaultBody, nextBodyId, removeBody } from "./robotEdits";
@@ -55,15 +57,22 @@ type ProgramStatus = "idle" | "running" | "error";
  * "revolve"/"boundary" are the Boss CAD part creation tools (Robot Builder
  * CAD Kernel Phases 2-3); "extruded-cut"/"revolved-cut"/"boundary-cut" are
  * their Phase 4 boolean-subtraction counterparts, each first requiring a
- * single existing-body pick (see cutTargetId below) before showing their
- * own creator panel. */
-type BuilderTool = "transform" | "add-joint" | "extrude" | "revolve" | "boundary" | "extruded-cut" | "revolved-cut" | "boundary-cut";
+ * single existing-body pick (see pickTargetId below) before showing their
+ * own creator panel; "fillet-chamfer" (Phase 5) is a fourth single-pick
+ * tool of that same shape, targeting an existing box/cylinder body. */
+type BuilderTool = "transform" | "add-joint" | "extrude" | "revolve" | "boundary" | "extruded-cut" | "revolved-cut" | "boundary-cut" | "fillet-chamfer";
 interface JointDraft {
   parentId: string;
   childId?: string;
 }
 
 const CUT_TOOLS: ReadonlySet<BuilderTool> = new Set(["extruded-cut", "revolved-cut", "boundary-cut"]);
+/** Every tool that needs a single existing-body pick before it can show
+ * its own creator/editor panel -- Cut's three tools plus Fillet/Chamfer's
+ * one. Drives the shared bodyPick/suppressedBodyId wiring; CUT_TOOLS
+ * itself stays narrower, for the handful of things still genuinely
+ * Cut-specific (hint copy, which creator to render). */
+const TARGET_PICK_TOOLS: ReadonlySet<BuilderTool> = new Set([...CUT_TOOLS, "fillet-chamfer"]);
 
 export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   const [selectedBodyId, setSelectedBodyId] = useState<string | null>(robot.bodies[0]?.id ?? null);
@@ -71,11 +80,17 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   const [builderTool, setBuilderTool] = useState<BuilderTool>("transform");
   const [jointDraft, setJointDraft] = useState<JointDraft | null>(null);
   const [cadPreview, setCadPreview] = useState<CadPreview | null>(null);
-  // Robot Builder CAD Kernel Phase 4 (Cut): the existing body a Cut tool is
-  // targeting. null while still picking (bodyPick is wired into the
-  // viewport/hierarchy then); once set, the matching Cut creator replaces
-  // the picking hint.
-  const [cutTargetId, setCutTargetId] = useState<string | null>(null);
+  // Robot Builder CAD Kernel Phase 4 (Cut) / Phase 5 (Fillet + Chamfer):
+  // the existing body one of the four TARGET_PICK_TOOLS is targeting. null
+  // while still picking (bodyPick is wired into the viewport/hierarchy
+  // then); once set, the matching creator/editor replaces the picking hint.
+  const [pickTargetId, setPickTargetId] = useState<string | null>(null);
+  // Robot Builder CAD Kernel Phase 5: edges picked so far, lifted here the
+  // same way cadPreview already is -- shared by the three Boss creators
+  // (their own fresh, not-yet-baked shape) and CadFilletChamferEditor (an
+  // existing box/cylinder body).
+  const [filletPicks, setFilletPicks] = useState<FilletPickDraft[]>([]);
+  const [edgeOverlay, setEdgeOverlay] = useState<CadEdgeOverlay | null>(null);
   // Bumped only on a gizmo commit (not on the inspector's own Apply), so
   // BodyInspector resyncs its draft when a drag moved the body it's
   // showing -- mirrors App.tsx's existing worldEpoch convention.
@@ -102,7 +117,8 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   const errorCount = issues.filter((i) => i.severity === "error").length;
   const selectedBody = selectedBodyId ? (robot.bodies.find((b) => b.id === selectedBodyId) ?? null) : null;
   const isCutTool = CUT_TOOLS.has(builderTool);
-  const isCadTool = isCutTool || builderTool === "extrude" || builderTool === "revolve" || builderTool === "boundary";
+  const isTargetPickTool = TARGET_PICK_TOOLS.has(builderTool);
+  const isCadTool = isTargetPickTool || builderTool === "extrude" || builderTool === "revolve" || builderTool === "boundary";
 
   useEffect(() => {
     if (builderMode !== "test") return;
@@ -190,16 +206,22 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   const toggleExtrudeTool = () => {
     setBuilderTool((current) => (current === "extrude" ? "transform" : "extrude"));
     setCadPreview(null);
+    setFilletPicks([]);
+    setEdgeOverlay(null);
   };
 
   const toggleRevolveTool = () => {
     setBuilderTool((current) => (current === "revolve" ? "transform" : "revolve"));
     setCadPreview(null);
+    setFilletPicks([]);
+    setEdgeOverlay(null);
   };
 
   const toggleBoundaryTool = () => {
     setBuilderTool((current) => (current === "boundary" ? "transform" : "boundary"));
     setCadPreview(null);
+    setFilletPicks([]);
+    setEdgeOverlay(null);
   };
 
   // Shared by all three Boss CAD tools (Extrude/Revolve/Boundary) -- their
@@ -210,16 +232,20 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
     onChange(next);
     setBuilderTool("transform");
     setCadPreview(null);
+    setFilletPicks([]);
+    setEdgeOverlay(null);
     setSelectedBodyId(newBodyId);
   };
 
   const cancelCadTool = () => {
     setBuilderTool("transform");
     setCadPreview(null);
-    setCutTargetId(null);
+    setPickTargetId(null);
+    setFilletPicks([]);
+    setEdgeOverlay(null);
   };
 
-  /** Makes all eight tools mutually exclusive by construction: a tool's own
+  /** Makes all nine tools mutually exclusive by construction: a tool's own
    * toolbar button never disables itself (so clicking it again toggles
    * back to "transform"), only a *different* exclusive tool being active. */
   const otherCadToolActive = (own: BuilderTool) => builderTool !== "transform" && builderTool !== own;
@@ -227,34 +253,48 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   const toggleExtrudedCutTool = () => {
     setBuilderTool((current) => (current === "extruded-cut" ? "transform" : "extruded-cut"));
     setCadPreview(null);
-    setCutTargetId(null);
+    setPickTargetId(null);
   };
 
   const toggleRevolvedCutTool = () => {
     setBuilderTool((current) => (current === "revolved-cut" ? "transform" : "revolved-cut"));
     setCadPreview(null);
-    setCutTargetId(null);
+    setPickTargetId(null);
   };
 
   const toggleBoundaryCutTool = () => {
     setBuilderTool((current) => (current === "boundary-cut" ? "transform" : "boundary-cut"));
     setCadPreview(null);
-    setCutTargetId(null);
+    setPickTargetId(null);
   };
 
-  /** Single-body pick for any of the three Cut tools -- no parent-then-
-   * child two-step, unlike handleJointPick. Shared by BuilderViewport's
+  const toggleFilletChamferTool = () => {
+    setBuilderTool((current) => (current === "fillet-chamfer" ? "transform" : "fillet-chamfer"));
+    setCadPreview(null);
+    setPickTargetId(null);
+    setFilletPicks([]);
+    setEdgeOverlay(null);
+  };
+
+  /** Single-body pick for any of the four TARGET_PICK_TOOLS -- no parent-
+   * then-child two-step, unlike handleJointPick. Shared by BuilderViewport's
    * bodyPick prop and HierarchyList's own rows, the same "two real input
    * paths" precedent Add Joint already established. */
-  const handleCutTargetPick = (bodyId: string) => setCutTargetId(bodyId);
+  const handleTargetPick = (bodyId: string) => {
+    setPickTargetId(bodyId);
+    setFilletPicks([]);
+    setEdgeOverlay(null);
+  };
 
-  /** Shared by all three Cut tools -- no new body id to select (the target
-   * body's own id is unchanged), unlike applyCadBody. */
-  const applyCutResult = (next: RobotDef) => {
+  /** Shared by all four TARGET_PICK_TOOLS -- no new body id to select (the
+   * target body's own id is unchanged), unlike applyCadBody. */
+  const applyTargetEditResult = (next: RobotDef) => {
     onChange(next);
     setBuilderTool("transform");
     setCadPreview(null);
-    setCutTargetId(null);
+    setPickTargetId(null);
+    setFilletPicks([]);
+    setEdgeOverlay(null);
   };
 
   // Robot Builder Phase 6: mirrors App.tsx's own run()/stop() shape for the
@@ -327,8 +367,8 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
         </div>
         <HierarchyList
           robot={robot}
-          selectedBodyId={builderTool === "add-joint" ? (jointDraft?.parentId ?? null) : isCutTool ? cutTargetId : selectedBodyId}
-          onSelect={builderTool === "add-joint" ? handleJointPick : isCutTool && cutTargetId === null ? handleCutTargetPick : setSelectedBodyId}
+          selectedBodyId={builderTool === "add-joint" ? (jointDraft?.parentId ?? null) : isTargetPickTool ? pickTargetId : selectedBodyId}
+          onSelect={builderTool === "add-joint" ? handleJointPick : isTargetPickTool && pickTargetId === null ? handleTargetPick : setSelectedBodyId}
         />
         {builderMode === "edit" && (
           <button type="button" className="builder-add-body" onClick={addBody}>
@@ -346,9 +386,10 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
             onTransformBody={transformBody}
             gizmoMode={gizmoMode}
             jointPick={builderTool === "add-joint" ? { parentId: jointDraft?.parentId ?? null, onPick: handleJointPick } : undefined}
-            bodyPick={isCutTool && cutTargetId === null ? { selectedId: null, onPick: handleCutTargetPick } : undefined}
+            bodyPick={isTargetPickTool && pickTargetId === null ? { selectedId: null, onPick: handleTargetPick } : undefined}
             cadPreview={isCadTool ? cadPreview : null}
-            suppressedBodyId={isCutTool ? cutTargetId : null}
+            suppressedBodyId={isTargetPickTool ? pickTargetId : null}
+            edgeOverlay={isCadTool && edgeOverlay ? { ...edgeOverlay, pickedPoints: filletPicks.map((p) => p.point) } : null}
           />
           <div className="builder-toolbar">
             <button
@@ -424,11 +465,20 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
             >
               Boundary Cut
             </button>
+            <button
+              type="button"
+              className={builderTool === "fillet-chamfer" ? "active" : ""}
+              disabled={robot.bodies.length === 0 || otherCadToolActive("fillet-chamfer")}
+              onClick={toggleFilletChamferTool}
+            >
+              Fillet/Chamfer
+            </button>
           </div>
           {builderTool === "add-joint" && !jointDraft?.childId && (
             <p className="joint-pick-hint">{jointDraft ? "Click the child body." : "Click the parent body."}</p>
           )}
-          {isCutTool && cutTargetId === null && <p className="joint-pick-hint">Click the body to cut.</p>}
+          {isCutTool && pickTargetId === null && <p className="joint-pick-hint">Click the body to cut.</p>}
+          {builderTool === "fillet-chamfer" && pickTargetId === null && <p className="joint-pick-hint">Click the body to fillet or chamfer.</p>}
         </div>
       ) : (
         <div className="builder-stage">
@@ -536,6 +586,9 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
               onApply={applyCadBody}
               onCancel={cancelCadTool}
               onPreviewChange={setCadPreview}
+              edgePicks={filletPicks}
+              onEdgePicksChange={setFilletPicks}
+              onEdgeOverlayChange={setEdgeOverlay}
             />
           ) : builderTool === "revolve" ? (
             <CadRevolveCreator
@@ -544,6 +597,9 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
               onApply={applyCadBody}
               onCancel={cancelCadTool}
               onPreviewChange={setCadPreview}
+              edgePicks={filletPicks}
+              onEdgePicksChange={setFilletPicks}
+              onEdgeOverlayChange={setEdgeOverlay}
             />
           ) : builderTool === "boundary" ? (
             <CadBoundaryCreator
@@ -552,13 +608,27 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
               onApply={applyCadBody}
               onCancel={cancelCadTool}
               onPreviewChange={setCadPreview}
+              edgePicks={filletPicks}
+              onEdgePicksChange={setFilletPicks}
+              onEdgeOverlayChange={setEdgeOverlay}
             />
-          ) : builderTool === "extruded-cut" && cutTargetId ? (
-            <CadExtrudedCutCreator robot={robot} targetBodyId={cutTargetId} onApply={applyCutResult} onCancel={cancelCadTool} onPreviewChange={setCadPreview} />
-          ) : builderTool === "revolved-cut" && cutTargetId ? (
-            <CadRevolvedCutCreator robot={robot} targetBodyId={cutTargetId} onApply={applyCutResult} onCancel={cancelCadTool} onPreviewChange={setCadPreview} />
-          ) : builderTool === "boundary-cut" && cutTargetId ? (
-            <CadBoundaryCutCreator robot={robot} targetBodyId={cutTargetId} onApply={applyCutResult} onCancel={cancelCadTool} onPreviewChange={setCadPreview} />
+          ) : builderTool === "extruded-cut" && pickTargetId ? (
+            <CadExtrudedCutCreator robot={robot} targetBodyId={pickTargetId} onApply={applyTargetEditResult} onCancel={cancelCadTool} onPreviewChange={setCadPreview} />
+          ) : builderTool === "revolved-cut" && pickTargetId ? (
+            <CadRevolvedCutCreator robot={robot} targetBodyId={pickTargetId} onApply={applyTargetEditResult} onCancel={cancelCadTool} onPreviewChange={setCadPreview} />
+          ) : builderTool === "boundary-cut" && pickTargetId ? (
+            <CadBoundaryCutCreator robot={robot} targetBodyId={pickTargetId} onApply={applyTargetEditResult} onCancel={cancelCadTool} onPreviewChange={setCadPreview} />
+          ) : builderTool === "fillet-chamfer" && pickTargetId ? (
+            <CadFilletChamferEditor
+              robot={robot}
+              targetBodyId={pickTargetId}
+              onApply={applyTargetEditResult}
+              onCancel={cancelCadTool}
+              onPreviewChange={setCadPreview}
+              edgePicks={filletPicks}
+              onEdgePicksChange={setFilletPicks}
+              onEdgeOverlayChange={setEdgeOverlay}
+            />
           ) : selectedBody && builderTool === "transform" ? (
             <BodyInspector
               key={`${selectedBody.id}:${transformEpoch}`}
@@ -573,7 +643,9 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
                 ? "Pick a parent and a child body in the 3D view."
                 : isCutTool
                   ? "Pick a body to cut in the 3D view."
-                  : "Select a body to edit it."}
+                  : builderTool === "fillet-chamfer"
+                    ? "Pick a body to fillet or chamfer in the 3D view."
+                    : "Select a body to edit it."}
             </p>
           )
         ) : builtRobot ? (

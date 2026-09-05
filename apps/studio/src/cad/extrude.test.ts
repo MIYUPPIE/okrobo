@@ -5,7 +5,23 @@
 // EngineBuiltRobot.test.ts already treats its own WASM engine load.
 
 import { describe, expect, it } from "vitest";
-import { cut, extrudeCircle, extrudeRectangle, loft, revolve } from "./extrude";
+import { cut, extrudeCircle, extrudeRectangle, fillet, loft, previewEdges, revolve, type ShapeEdgeMesh } from "./extrude";
+
+// A group's own true midpoint (2-point straight edge) or an interior
+// polyline sample (many-point curved edge) -- never a shared vertex,
+// mirroring kernel.ts's own applyFilletPicks doc. Kept test-local rather
+// than imported from builder/filletPicks.ts (this module's own consumer),
+// which would invert this app's cad -> builder dependency direction.
+function edgeGroupDescriptor(edgeMesh: ShapeEdgeMesh, groupIndex: number): [number, number, number] {
+  const group = edgeMesh.edgeGroups[groupIndex];
+  if (group.count === 2) {
+    const a = group.start * 3;
+    const b = (group.start + 1) * 3;
+    return [(edgeMesh.lines[a] + edgeMesh.lines[b]) / 2, (edgeMesh.lines[a + 1] + edgeMesh.lines[b + 1]) / 2, (edgeMesh.lines[a + 2] + edgeMesh.lines[b + 2]) / 2];
+  }
+  const mid = (group.start + Math.floor(group.count / 2)) * 3;
+  return [edgeMesh.lines[mid], edgeMesh.lines[mid + 1], edgeMesh.lines[mid + 2]];
+}
 
 function meshRanges(mesh: { vertices: number[] }) {
   const xs = [];
@@ -261,6 +277,96 @@ describe("cut", () => {
       });
       expect(loftCut.vertices.length).toBeGreaterThan(0);
       expect(loftCut.faces.length % 3).toBe(0);
+    },
+    15_000,
+  );
+});
+
+// CAD Kernel Phase 5 (Fillet + Chamfer). Real pipeline, no mocks -- see
+// docs/decisions/cad-kernel-fillet-chamfer.md for the empirically verified
+// edge-identification approach (a geometric descriptor point + near(),
+// not Shape.hashCode, which isn't stable across independent rebuilds).
+describe("previewEdges", () => {
+  it(
+    "exports a real, pickable edge list for a Boss (extrude) shape",
+    async () => {
+      const edges = await previewEdges({ operation: "extrude", profile: { type: "rectangle", width: 0.1, height: 0.06 }, depth: 0.04 });
+      expect(edges.edgeGroups.length).toBe(12); // a box has exactly 12 edges
+      expect(edges.lines.length).toBeGreaterThan(0);
+      expect(edges.lines.length % 3).toBe(0);
+    },
+    30_000,
+  );
+
+  it(
+    "exports a real edge list for a standalone box/cylinder primitive shape",
+    async () => {
+      const boxEdges = await previewEdges({ operation: "box", size: [0.1, 0.06, 0.04] });
+      expect(boxEdges.edgeGroups.length).toBe(12);
+
+      const cylEdges = await previewEdges({ operation: "cylinder", radius: 0.03, length: 0.08 });
+      expect(cylEdges.edgeGroups.length).toBe(3); // seam + two circular rims
+      // The two rims are real curves (many polyline points); the seam is a
+      // straight 2-point segment.
+      const counts = cylEdges.edgeGroups.map((g) => g.count).sort((a, b) => a - b);
+      expect(counts[0]).toBe(2);
+      expect(counts[1]).toBeGreaterThan(2);
+      expect(counts[2]).toBeGreaterThan(2);
+    },
+    15_000,
+  );
+});
+
+describe("fillet", () => {
+  it(
+    "rounds one edge and bevels another with different values in a single call",
+    async () => {
+      const shape = { operation: "extrude" as const, profile: { type: "rectangle" as const, width: 0.1, height: 0.06 }, depth: 0.04 };
+      const edges = await previewEdges(shape);
+      const base = await extrudeRectangle({ width: 0.1, height: 0.06, depth: 0.04 });
+
+      const result = await fillet(shape, [
+        { point: edgeGroupDescriptor(edges, 0), operation: "fillet", value: 0.01 },
+        { point: edgeGroupDescriptor(edges, 5), operation: "chamfer", value: 0.005 },
+      ]);
+
+      expect(result.vertices.length).toBeGreaterThan(base.vertices.length); // real added geometry from both operations
+      expect(result.faces.length % 3).toBe(0);
+      const vertexCount = result.vertices.length / 3;
+      for (const index of result.faces) {
+        expect(index).toBeGreaterThanOrEqual(0);
+        expect(index).toBeLessThan(vertexCount);
+      }
+      // Outer extent is unaffected by rounding/beveling corners -- still
+      // bounded by the original box dimensions.
+      const { x, y } = meshRanges(result);
+      expect(x[1] - x[0])
+        .toBeLessThanOrEqual(0.1 + 1e-6);
+      expect(y[1] - y[0])
+        .toBeLessThanOrEqual(0.06 + 1e-6);
+    },
+    30_000,
+  );
+
+  it(
+    "rounds the rim of a standalone cylinder primitive body",
+    async () => {
+      const shape = { operation: "cylinder" as const, radius: 0.03, length: 0.08 };
+      const edges = await previewEdges(shape);
+      const rimIndex = edges.edgeGroups.findIndex((g) => g.count > 2);
+      const result = await fillet(shape, [{ point: edgeGroupDescriptor(edges, rimIndex), operation: "fillet", value: 0.01 }]);
+      expect(result.vertices.length).toBeGreaterThan(0);
+      expect(result.faces.length % 3).toBe(0);
+    },
+    15_000,
+  );
+
+  it(
+    "a fillet radius too large for its edge throws a catchable error",
+    async () => {
+      const shape = { operation: "box" as const, size: [0.1, 0.06, 0.04] as [number, number, number] };
+      const edges = await previewEdges(shape);
+      await expect(fillet(shape, [{ point: edgeGroupDescriptor(edges, 0), operation: "fillet", value: 10 }])).rejects.toBeTruthy();
     },
     15_000,
   );

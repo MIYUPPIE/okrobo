@@ -15,7 +15,7 @@
 // "replicad" at all this phase -- see the decision doc for why that keeps
 // the CAD kernel's ~20MB WASM entirely out of the app's main bundle.
 
-import { importSTLAsMesh, setManifold, setOC, sketchCircle, sketchRectangle, type Shape3D } from "replicad";
+import { importSTLAsMesh, makeBox, makeCylinder, setManifold, setOC, sketchCircle, sketchRectangle, type Edge, type Shape3D, type ShapeEdgeMesh } from "replicad";
 import type { OpenCascadeInstance } from "replicad-opencascadejs";
 import opencascade from "replicad-opencascadejs";
 import ManifoldModule from "manifold-3d";
@@ -25,6 +25,13 @@ export interface CadMesh {
   vertices: number[];
   faces: number[];
 }
+
+// CAD Kernel Phase 5 (Fillet + Chamfer): replicad's own edge-export shape
+// is already exactly what a "pickable edges" overlay needs ({lines,
+// edgeGroups}) -- no renaming needed here the way CadMesh renames
+// ShapeMesh's own `triangles` to `faces`, so it's re-exported as-is rather
+// than duplicated.
+export type { ShapeEdgeMesh };
 
 export interface LoadOCOptions {
   locateFile?: (path: string, prefix: string) => string;
@@ -193,32 +200,41 @@ function meshToStlBlob(vertices: number[], faces: number[]): Blob {
   return new Blob([text], { type: "model/stl" });
 }
 
-/** CAD Kernel Phase 4: the cutting tool's own shape -- one variant per
- * Boss operation (Extruded/Revolved/Boundary Cut), carrying exactly the
- * params extrudeMesh/revolveMesh/loftMesh already take. */
-export type CutTool =
+/** CAD Kernel Phase 4/5: a Boss-style operation's own params -- one variant
+ * per Boss tool (Extrude/Revolve/Boundary), carrying exactly what
+ * extrudeMesh/revolveMesh/loftMesh already take. Originally named CutTool
+ * (Phase 4, the cutting tool's own shape); Phase 5's Fillet/Chamfer needs
+ * the identical union as one of FilletBaseShape's own variants (a fresh
+ * Boss shape can be filleted before it's baked), so it's extracted under
+ * this more general name -- CutTool stays as an alias, Cut's own public
+ * shape is unchanged. */
+export type BossOperation =
   | { operation: "extrude"; profile: Profile; depth: number }
   | { operation: "revolve"; profile: Profile; offset: number; angleDeg: number }
   | { operation: "loft"; startProfile: Profile; endProfile: Profile; height: number };
 
-/** Builds the tool as a live solid, stopping one step before
- * extrudeMesh/revolveMesh/loftMesh's own `.mesh()` + delete -- cutMesh
- * still needs to translate and meshShape() it. Caller owns disposal. */
-function buildToolSolid(tool: CutTool): Shape3D {
-  if (tool.operation === "extrude") {
-    const sketch = makeProfileSketch(tool.profile);
-    const solid = sketch.extrude(tool.depth, { origin: [0, 0, -tool.depth / 2] });
+export type CutTool = BossOperation;
+
+/** Builds a Boss operation as a live solid, stopping one step before
+ * extrudeMesh/revolveMesh/loftMesh's own `.mesh()` + delete -- callers
+ * that need to keep operating on the live solid (cutMesh's translate +
+ * meshShape(), Phase 5's fillet/chamfer) do that step themselves. Caller
+ * owns disposal. */
+function buildBossSolid(op: BossOperation): Shape3D {
+  if (op.operation === "extrude") {
+    const sketch = makeProfileSketch(op.profile);
+    const solid = sketch.extrude(op.depth, { origin: [0, 0, -op.depth / 2] });
     sketch.delete();
     return solid;
   }
-  if (tool.operation === "revolve") {
-    const sketch = makeProfileSketch(tool.profile, { origin: [tool.offset, 0, 0] });
-    const solid = sketch.revolve([0, 1, 0], { angle: tool.angleDeg, origin: [0, 0, 0] });
+  if (op.operation === "revolve") {
+    const sketch = makeProfileSketch(op.profile, { origin: [op.offset, 0, 0] });
+    const solid = sketch.revolve([0, 1, 0], { angle: op.angleDeg, origin: [0, 0, 0] });
     sketch.delete();
     return solid;
   }
-  const start = makeProfileSketch(tool.startProfile);
-  const end = makeProfileSketch(tool.endProfile, { plane: "XY", origin: [0, 0, tool.height] });
+  const start = makeProfileSketch(op.startProfile);
+  const end = makeProfileSketch(op.endProfile, { plane: "XY", origin: [0, 0, op.height] });
   const solid = start.loftWith(end, { ruled: false });
   start.delete();
   end.delete();
@@ -250,7 +266,7 @@ function buildToolSolid(tool: CutTool): Shape3D {
  * each object's last use rather than all at the end. */
 export async function cutMesh(targetMesh: CadMesh, tool: CutTool, position: readonly [number, number, number]): Promise<CadMesh> {
   const targetMeshShape = await importSTLAsMesh(meshToStlBlob(targetMesh.vertices, targetMesh.faces));
-  const untranslatedTool = buildToolSolid(tool);
+  const untranslatedTool = buildBossSolid(tool);
   const translatedTool = untranslatedTool.translate(position[0], position[1], position[2]);
   untranslatedTool.delete();
   const toolMeshShape = translatedTool.meshShape(DEFAULT_MESH_OPTIONS);
@@ -299,4 +315,137 @@ export async function loft(startProfile: Profile, endProfile: Profile, height: n
 export async function cut(targetMesh: CadMesh, tool: CutTool, position: readonly [number, number, number]): Promise<CadMesh> {
   await Promise.all([loadOC(), loadManifold()]);
   return cutMesh(targetMesh, tool, position);
+}
+
+/** CAD Kernel Phase 5 (Fillet + Chamfer): the shape a fillet/chamfer can
+ * target -- either a fresh Boss operation (filleted before it's ever
+ * baked) or a box/cylinder rebuilt exactly from its own analytic
+ * parameters (a body already placed in the document, if its Geometry
+ * happens to be one of these two types). Sphere has no edges at all;
+ * cone/capsule would need a real profile-revolve reconstruction for one
+ * marginal rim edge each -- not worth it this phase (see
+ * docs/decisions/cad-kernel-fillet-chamfer.md). Box/cylinder verified
+ * empirically to reconstruct with the exact same centered/axis convention
+ * robotThree.ts's geometryFor already renders them with (box centered on
+ * all 3 axes; cylinder centered on Y, three.js's own default, no rotation
+ * applied there) -- zero approximation, zero axis-mismatch risk. */
+export type FilletBaseShape = BossOperation | { operation: "box"; size: [number, number, number] } | { operation: "cylinder"; radius: number; length: number };
+
+function buildFilletBaseSolid(shape: FilletBaseShape): Shape3D {
+  if (shape.operation === "box") {
+    const [sx, sy, sz] = shape.size;
+    return makeBox([-sx / 2, -sy / 2, -sz / 2], [sx / 2, sy / 2, sz / 2]);
+  }
+  if (shape.operation === "cylinder") {
+    return makeCylinder(shape.radius, shape.length, [0, -shape.length / 2, 0], [0, 1, 0]);
+  }
+  return buildBossSolid(shape);
+}
+
+/** One edge to round (fillet) or bevel (chamfer), identified by a
+ * geometric descriptor point rather than the edge object itself or its
+ * hashCode -- verified empirically that `Shape.hashCode` is NOT stable
+ * across independent rebuilds of an identical solid (two separately-built,
+ * geometrically identical boxes produced entirely different hash sets),
+ * while a point on the edge (its true midpoint for a straight edge, any
+ * interior polyline sample for a curved one -- never a shared vertex,
+ * which is ambiguous between adjacent edges) reliably re-finds the same
+ * edge via `EdgeFinder.near()` on a freshly rebuilt solid. `value` is the
+ * fillet radius or chamfer distance. */
+export interface FilletPick {
+  point: [number, number, number];
+  operation: "fillet" | "chamfer";
+  value: number;
+}
+
+/** Applies every pick to `solid`, fillets first then chamfers (chained --
+ * verified this works when both target different, non-adjacent edges of
+ * the same base solid). Tolerance is derived from the solid's own
+ * bounding-box diagonal rather than a hardcoded absolute distance, so
+ * matching stays reliable whether the shape is a 0.02-unit part or a
+ * 10-unit one. Skips either call entirely when its own pick list is
+ * empty, rather than relying on an untested "radius always null" no-op
+ * path. Caller owns disposing the returned shape; `solid` itself is left
+ * untouched (fillet/chamfer both return a new shape) and still needs its
+ * own disposal by the caller too.
+ *
+ * Known limitation, verified empirically (see
+ * docs/decisions/cad-kernel-fillet-chamfer.md): mixing a fillet and a
+ * chamfer on two edges that share a vertex can fail with replicad's own
+ * "Could not chamfer, no edge was selected" -- filleting the first edge
+ * trims/moves its immediate neighbors (the blend surface replaces the
+ * shared corner), so a chamfer descriptor recorded against the pristine
+ * shape can no longer find that neighbor on the already-filleted result.
+ * Non-adjacent picks are unaffected. This surfaces through the same
+ * generic error-message path every other opaque WASM exception already
+ * does -- no special handling added for it. */
+function applyFilletPicks(solid: Shape3D, picks: FilletPick[]): Shape3D {
+  const bounds = solid.boundingBox.bounds;
+  const diagonal = Math.hypot(bounds[1][0] - bounds[0][0], bounds[1][1] - bounds[0][1], bounds[1][2] - bounds[0][2]);
+  const tolerance = Math.max(diagonal * 0.005, 1e-6);
+
+  const radiusFor = (targetOperation: FilletPick["operation"]) => {
+    const matching = picks.filter((p) => p.operation === targetOperation);
+    if (matching.length === 0) return null;
+    return (edge: Edge) => {
+      const point = edge.pointAt(0.5).toTuple();
+      const hit = matching.find((p) => Math.hypot(point[0] - p.point[0], point[1] - p.point[1], point[2] - p.point[2]) < tolerance);
+      return hit ? hit.value : null;
+    };
+  };
+
+  let current = solid;
+  const filletRadius = radiusFor("fillet");
+  if (filletRadius) {
+    const next = current.fillet(filletRadius);
+    if (current !== solid) current.delete();
+    current = next;
+  }
+  const chamferRadius = radiusFor("chamfer");
+  if (chamferRadius) {
+    const next = current.chamfer(chamferRadius);
+    if (current !== solid) current.delete();
+    current = next;
+  }
+  return current;
+}
+
+/** Assumes loadOC() has already resolved. See previewEdges's own doc. */
+export function previewEdgesMesh(shape: FilletBaseShape): ShapeEdgeMesh {
+  const solid = buildFilletBaseSolid(shape);
+  try {
+    return solid.meshEdges();
+  } finally {
+    solid.delete();
+  }
+}
+
+/** Full pipeline (load OC, build the base shape, export its edges as
+ * pickable lines) for direct Node use -- the same base shape a
+ * fillet/chamfer call targets, before any picks are applied. Used to
+ * render the "Edges" list/3D overlay a student picks from. */
+export async function previewEdges(shape: FilletBaseShape): Promise<ShapeEdgeMesh> {
+  await loadOC();
+  return previewEdgesMesh(shape);
+}
+
+/** Assumes loadOC() has already resolved. See fillet's own doc. */
+export function filletMesh(shape: FilletBaseShape, picks: FilletPick[]): CadMesh {
+  const base = buildFilletBaseSolid(shape);
+  const result = applyFilletPicks(base, picks);
+  if (result !== base) base.delete();
+  try {
+    const mesh = result.mesh(DEFAULT_MESH_OPTIONS);
+    return { vertices: mesh.vertices, faces: mesh.triangles };
+  } finally {
+    result.delete();
+  }
+}
+
+/** Full pipeline (load OC, then build+fillet/chamfer+mesh) for direct Node
+ * use. Only needs OpenCascade -- fillet/chamfer are live-B-rep operations,
+ * Manifold (Cut's own mesh-boolean engine) never enters into this at all. */
+export async function fillet(shape: FilletBaseShape, picks: FilletPick[]): Promise<CadMesh> {
+  await loadOC();
+  return filletMesh(shape, picks);
 }

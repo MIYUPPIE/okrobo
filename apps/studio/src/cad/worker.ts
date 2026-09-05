@@ -23,12 +23,16 @@ import {
   cutMesh,
   extrudeCircleMesh,
   extrudeRectangleMesh,
+  filletMesh,
   loftMesh,
   loadManifold,
   loadOC,
+  previewEdgesMesh,
   revolveMesh,
   type CadMesh,
   type CutTool,
+  type FilletBaseShape,
+  type FilletPick,
   type Profile,
 } from "./kernel.ts";
 
@@ -55,6 +59,16 @@ const api = {
   async cut(targetMesh: CadMesh, tool: CutTool, position: readonly [number, number, number]) {
     await Promise.all([loadOC({ locateFile: () => wasmUrl }), loadManifold({ locateFile: () => manifoldWasmUrl })]);
     return cutMesh(targetMesh, tool, position);
+  },
+  // CAD Kernel Phase 5 (Fillet + Chamfer): OpenCascade only, no Manifold --
+  // fillet/chamfer are live-B-rep operations, not mesh booleans.
+  async previewEdges(shape: FilletBaseShape) {
+    await loadOC({ locateFile: () => wasmUrl });
+    return previewEdgesMesh(shape);
+  },
+  async fillet(shape: FilletBaseShape, picks: FilletPick[]) {
+    await loadOC({ locateFile: () => wasmUrl });
+    return filletMesh(shape, picks);
   },
 };
 
