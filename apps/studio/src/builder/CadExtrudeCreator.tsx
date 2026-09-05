@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Body, RobotDef } from "../contracts/robotDef";
-import type { CadMesh, CadPreview } from "../cad/cadClient";
+import type { CadPreview } from "../cad/cadClient";
 import { extrudeCircle, extrudeRectangle } from "../cad/cadClient";
 import { makeCadBody, nextBodyId } from "./robotEdits";
+import { useCadPreview } from "./useCadPreview";
 
 // Build mode's CAD part creation panel (Robot Builder CAD Kernel Phase 2:
 // Sketch UI) -- shown in the inspector slot in place of BodyInspector while
@@ -17,10 +18,7 @@ import { makeCadBody, nextBodyId } from "./robotEdits";
 // canvas exists anywhere in this codebase). See
 // docs/decisions/cad-kernel-sketch-ui.md.
 
-export const CAD_PREVIEW_DEBOUNCE_MS = 400;
-
 type Profile = "rectangle" | "circle";
-type Status = "idle" | "loading" | "ready" | "error";
 
 interface Draft {
   profile: Profile;
@@ -90,56 +88,35 @@ export interface CadExtrudeCreatorProps {
 export function CadExtrudeCreator({ robot, near, onApply, onCancel, onPreviewChange }: CadExtrudeCreatorProps) {
   const bodyId = useMemo(() => nextBodyId(robot), [robot]);
   const [draft, setDraft] = useState<Draft>(initialDraft);
-  const [status, setStatus] = useState<Status>("idle");
-  const [error, setError] = useState("");
-  const [candidateMesh, setCandidateMesh] = useState<CadMesh | null>(null);
 
   const setField = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
 
-  useEffect(() => {
+  const { status, error, mesh } = useCadPreview(() => {
     const parsed = parseDraft(draft);
-    if (!parsed.ok) {
-      setStatus("error");
-      setError(parsed.message);
-      setCandidateMesh(null);
-      onPreviewChange(null);
-      return;
-    }
-
-    let cancelled = false;
-    setStatus("loading");
-    const timer = setTimeout(() => {
-      const call =
-        parsed.value.profile === "rectangle"
-          ? extrudeRectangle({ width: parsed.value.width, height: parsed.value.height, depth: parsed.value.depth })
-          : extrudeCircle({ radius: parsed.value.radius, depth: parsed.value.depth });
-      call
-        .then((mesh) => {
-          if (cancelled) return;
-          setCandidateMesh(mesh);
-          setStatus("ready");
-          const body = makeCadBody(bodyId, near, mesh);
-          onPreviewChange({ mesh, position: body.transform.position });
-        })
-        .catch((err: unknown) => {
-          if (cancelled) return;
-          setStatus("error");
-          setError(err instanceof Error ? err.message : String(err));
-          setCandidateMesh(null);
-          onPreviewChange(null);
-        });
-    }, CAD_PREVIEW_DEBOUNCE_MS);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
+    if (!parsed.ok) return parsed;
+    const call = () =>
+      parsed.value.profile === "rectangle"
+        ? extrudeRectangle({ width: parsed.value.width, height: parsed.value.height, depth: parsed.value.depth })
+        : extrudeCircle({ radius: parsed.value.radius, depth: parsed.value.depth });
+    return { ok: true, call };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.profile, draft.width, draft.height, draft.radius, draft.depth, bodyId, near]);
+  }, [draft.profile, draft.width, draft.height, draft.radius, draft.depth]);
+
+  // Only reacts on a real settle (ready/error) -- skips "loading" so the
+  // previous preview stays visible during a recompute instead of flickering
+  // to nothing on every keystroke.
+  useEffect(() => {
+    if (status === "ready" && mesh) {
+      const body = makeCadBody(bodyId, near, mesh);
+      onPreviewChange({ mesh, position: body.transform.position });
+    } else if (status === "error") {
+      onPreviewChange(null);
+    }
+  }, [status, mesh, bodyId, near, onPreviewChange]);
 
   const apply = () => {
-    if (status !== "ready" || !candidateMesh) return;
-    const body = makeCadBody(bodyId, near, candidateMesh);
+    if (status !== "ready" || !mesh) return;
+    const body = makeCadBody(bodyId, near, mesh);
     onApply({ ...robot, bodies: [...robot.bodies, body] }, body.id);
   };
 

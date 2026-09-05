@@ -855,6 +855,62 @@ try {
   );
   await page.evalClickText(".inspector-actions button", "/^Cancel$/");
 
+  // -- robot builder: Revolve + Boundary (CAD Kernel Phase 3) -------------
+  // The worker/WASM are already warm from the Extrude checks above (the
+  // same memoized cadClient.ts Worker instance is reused), so these need
+  // no long cold-load poll -- a real, if faster, round trip through the
+  // same real replicad/OpenCascade pipeline. See
+  // docs/decisions/cad-kernel-revolve-boundary.md.
+  const bodyCountBeforeRevolve = await page.evaluate("document.querySelectorAll('.hierarchy-row').length");
+  await page.evalClickText(".builder-toolbar button", "/^Revolve$/");
+  const revolveFormShown = await waitForCondition(
+    "document.querySelector('.builder-inspector h4')?.textContent === 'New CAD part (Revolve)'",
+    5000,
+  );
+  check("Build mode: Revolve opens the CAD part creation form", revolveFormShown);
+
+  const revolvePreviewReady = await waitForCondition(
+    "!document.querySelector('.cad-extrude-creator .inspector-actions button.primary')?.disabled",
+    10000,
+  );
+  check("Build mode: the default profile computes a real torus/ring preview through the warm CAD worker (Apply enables)", revolvePreviewReady);
+
+  await page.evalClickText(".inspector-actions button", "/^Apply$/");
+  const revolveApplied = await waitForCondition(
+    `document.querySelectorAll('.hierarchy-row').length === ${bodyCountBeforeRevolve} + 1`,
+    5000,
+  );
+  check("Build mode: Apply commits a real revolved cad_mesh body into the document", revolveApplied);
+  check(
+    "Build mode: the revolved body round-trips as a real, schema-valid cad_mesh body",
+    await waitForCondition("document.querySelector('.inspector-mesh-note')?.textContent?.includes('CAD part')", 5000),
+  );
+
+  const bodyCountBeforeBoundary = await page.evaluate("document.querySelectorAll('.hierarchy-row').length");
+  await page.evalClickText(".builder-toolbar button", "/^Boundary$/");
+  const boundaryFormShown = await waitForCondition(
+    "document.querySelector('.builder-inspector h4')?.textContent === 'New CAD part (Boundary)'",
+    5000,
+  );
+  check("Build mode: Boundary opens the CAD part creation form", boundaryFormShown);
+
+  const boundaryPreviewReady = await waitForCondition(
+    "!document.querySelector('.cad-extrude-creator .inspector-actions button.primary')?.disabled",
+    10000,
+  );
+  check("Build mode: the default Start/End profiles compute a real lofted preview through the warm CAD worker (Apply enables)", boundaryPreviewReady);
+
+  await page.evalClickText(".inspector-actions button", "/^Apply$/");
+  const boundaryApplied = await waitForCondition(
+    `document.querySelectorAll('.hierarchy-row').length === ${bodyCountBeforeBoundary} + 1`,
+    5000,
+  );
+  check("Build mode: Apply commits a real lofted cad_mesh body into the document", boundaryApplied);
+  check(
+    "Build mode: the lofted body round-trips as a real, schema-valid cad_mesh body",
+    await waitForCondition("document.querySelector('.inspector-mesh-note')?.textContent?.includes('CAD part')", 5000),
+  );
+
   await page.clickText(".mode-toggle button", "/^Simulate$/");
   const backToSimulate = await waitForCondition(
     "!!document.querySelector('.sidebar') && !!document.querySelector('.viewport-3d canvas')",

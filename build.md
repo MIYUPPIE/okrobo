@@ -1251,3 +1251,67 @@ the first place. `npm run test` (424 passed across 47 files), `npm run
 typecheck`, `npm run build`, and the full `test-all.sh` gate suite
 (including the new CAD E2E checks, run for real against a live dev server
 and headless Chrome) all green.
+
+## CAD Kernel — Phase 3: Revolve + Boundary (2026-09-05)
+
+Two more real CAD operations in Build mode, reusing every piece of Phase
+2's infrastructure (the `cad_mesh` contract, the comlink Worker, the live-
+preview mechanism): **Revolve** (a profile swept around the world Y axis --
+a lathe operation, e.g. a torus from a circle profile, a ring from a
+rectangle one) and **Boundary** (a solid lofted between an independently-
+chosen Start and End profile -- e.g. a circle blending into a rectangle).
+See `docs/decisions/cad-kernel-revolve-boundary.md`.
+
+Both operations were empirically verified against the real replicad/
+OpenCascade kernel before writing the implementation plan, the same
+discipline that found the MuJoCo mesh-injection technique in Phase 1. Two
+real, non-obvious gotchas surfaced this way, not from documentation:
+
+- **Revolve's own `origin` config must be explicit.** Left at its
+  documented default ("the sketch origin"), it resolves to the *offset
+  point itself* -- the revolution axis then runs straight through the
+  profile's center, self-intersecting for a full 360deg sweep, and threw a
+  real (opaquely reported) WASM exception the first time it was tried.
+  `revolveMesh` (`apps/studio/src/cad/kernel.ts`) now always passes
+  `origin: [0,0,0]` explicitly. `CadRevolveCreator.tsx` also rejects an
+  `offset` smaller than the profile's own half-extent client-side, before
+  ever calling the worker -- that configuration is always self-
+  intersecting for the same reason.
+- **`loftWith`'s doc comment claims it deletes its own input sketches** --
+  verified directly (calling `.delete()` on them again afterward never
+  throws and the resulting solid stays usable either way), so `loftMesh`
+  deletes both explicitly regardless, matching `extrudeMesh`/`revolveMesh`'s
+  own consistent cleanup posture.
+
+`CadExtrudeCreator.tsx`'s own debounce/cancel/status lifecycle (~25 lines)
+was extracted into a new shared hook, `apps/studio/src/builder/useCadPreview.ts`,
+once Revolve and Boundary needed the identical logic in the same phase --
+three real call sites landing together, not a hypothetical future reuse.
+`CadExtrudeCreator` was retrofitted to use it too; its own test suite
+re-ran unchanged afterward, confirming a pure internal refactor with no
+external behavior change. `CadBoundaryCreator.tsx` allows its Start and End
+profiles to be independently Rectangle or Circle -- the kernel cost of a
+cross-shape loft is zero, so there was no reason to restrict it to
+matching shapes.
+
+Tests: `extrude.test.ts` (+5 real-pipeline cases: a torus, a solid-of-
+revolution edge case, a partial-angle revolve, and two lofts -- rectangle-
+to-circle and circle-to-circle, all against the real kernel, no mocks),
+`cadClient.test.ts` (+2 mocked-wiring cases), `useCadPreview.test.ts` (new,
+4 cases including a stale-response race), `CadRevolveCreator.test.tsx` /
+`CadBoundaryCreator.test.tsx` (new, 7 and 6 cases respectively, mirroring
+`CadExtrudeCreator.test.tsx`'s own fireEvent+fake-timer technique),
+`BuilderPanel.test.tsx` (+7: two new toolbar tools, three-way CAD-tool
+mutual exclusivity, Apply/Cancel wiring for each). 8 new
+`studio-e2e-check.mjs` checks (Revolve and Boundary each opening their own
+form, computing a real preview through the already-warm CAD worker, Apply
+landing a real schema-valid `cad_mesh` body). One more real bug found and
+fixed while first running those for real: a coordinate-based click
+immediately following a just-clicked Cancel/Apply raced the re-render and
+missed -- the same class of bug Phase 2 already found once, fixed the same
+way (an eval-based click instead of a coordinate-based one). `npm run
+test` (455 passed across 50 files), `npm run typecheck`, `npm run build`
+(bundle chunks stay the same shape as Phase 2 -- worker/WASM separate from
+the main bundle, which grew by only ~8KB), and the full `test-all.sh` gate
+suite (including all new E2E checks, run for real against a live dev
+server and headless Chrome) all green.

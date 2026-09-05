@@ -12,7 +12,9 @@ import { ProgramStoppedError } from "../program/ProgramRunner";
 import { ActuatorPanel } from "./ActuatorPanel";
 import { BodyInspector } from "./BodyInspector";
 import { BuilderViewport, type GizmoMode } from "./BuilderViewport";
+import { CadBoundaryCreator } from "./CadBoundaryCreator";
 import { CadExtrudeCreator } from "./CadExtrudeCreator";
+import { CadRevolveCreator } from "./CadRevolveCreator";
 import { exportRobotDef } from "./exportRobot";
 import { HierarchyList } from "./HierarchyList";
 import { JointCreator } from "./JointCreator";
@@ -46,10 +48,11 @@ type TestStatus = "loading" | "ready" | "missing" | "error";
 type ProgramTab = "Blocks" | "Python" | "C++";
 type ProgramStatus = "idle" | "running" | "error";
 /** "transform" is the ordinary select-and-gizmo tool; "add-joint" is the
- * joint-authoring tool (parent-then-child viewport picking); "extrude" is
- * the CAD part creation tool (Robot Builder CAD Kernel Phase 2), named for
- * the actual CAD operation it performs (Extruded Boss). */
-type BuilderTool = "transform" | "add-joint" | "extrude";
+ * joint-authoring tool (parent-then-child viewport picking); "extrude"/
+ * "revolve"/"boundary" are the CAD part creation tools (Robot Builder CAD
+ * Kernel Phases 2-3), each named for the actual CAD operation it performs
+ * (Extruded Boss, a lathe revolve, a loft). */
+type BuilderTool = "transform" | "add-joint" | "extrude" | "revolve" | "boundary";
 interface JointDraft {
   parentId: string;
   childId?: string;
@@ -175,6 +178,20 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
     setCadPreview(null);
   };
 
+  const toggleRevolveTool = () => {
+    setBuilderTool((current) => (current === "revolve" ? "transform" : "revolve"));
+    setCadPreview(null);
+  };
+
+  const toggleBoundaryTool = () => {
+    setBuilderTool((current) => (current === "boundary" ? "transform" : "boundary"));
+    setCadPreview(null);
+  };
+
+  // Shared by all three CAD tools (Extrude/Revolve/Boundary) -- their
+  // onApply/onCancel shape is identical regardless of which operation
+  // produced the mesh, so one pair of handlers serves all three rather
+  // than three near-duplicate copies.
   const applyCadBody = (next: RobotDef, newBodyId: string) => {
     onChange(next);
     setBuilderTool("transform");
@@ -182,10 +199,15 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
     setSelectedBodyId(newBodyId);
   };
 
-  const cancelExtrude = () => {
+  const cancelCadTool = () => {
     setBuilderTool("transform");
     setCadPreview(null);
   };
+
+  /** Makes all five tools mutually exclusive by construction: a tool's own
+   * toolbar button never disables itself (so clicking it again toggles
+   * back to "transform"), only a *different* exclusive tool being active. */
+  const otherCadToolActive = (own: BuilderTool) => builderTool !== "transform" && builderTool !== own;
 
   // Robot Builder Phase 6: mirrors App.tsx's own run()/stop() shape for the
   // Car/Arm/Drone pipeline -- abort-if-already-running, arm(), set status,
@@ -276,7 +298,7 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
             onTransformBody={transformBody}
             gizmoMode={gizmoMode}
             jointPick={builderTool === "add-joint" ? { parentId: jointDraft?.parentId ?? null, onPick: handleJointPick } : undefined}
-            cadPreview={builderTool === "extrude" ? cadPreview : null}
+            cadPreview={builderTool === "extrude" || builderTool === "revolve" || builderTool === "boundary" ? cadPreview : null}
           />
           <div className="builder-toolbar">
             <button
@@ -298,7 +320,7 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
             <button
               type="button"
               className={builderTool === "add-joint" ? "active" : ""}
-              disabled={robot.bodies.length < 2 || builderTool === "extrude"}
+              disabled={robot.bodies.length < 2 || otherCadToolActive("add-joint")}
               title={robot.bodies.length < 2 ? "Add a second body first" : undefined}
               onClick={toggleJointTool}
             >
@@ -307,10 +329,26 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
             <button
               type="button"
               className={builderTool === "extrude" ? "active" : ""}
-              disabled={robot.bodies.length === 0 || builderTool === "add-joint"}
+              disabled={robot.bodies.length === 0 || otherCadToolActive("extrude")}
               onClick={toggleExtrudeTool}
             >
               Extrude
+            </button>
+            <button
+              type="button"
+              className={builderTool === "revolve" ? "active" : ""}
+              disabled={robot.bodies.length === 0 || otherCadToolActive("revolve")}
+              onClick={toggleRevolveTool}
+            >
+              Revolve
+            </button>
+            <button
+              type="button"
+              className={builderTool === "boundary" ? "active" : ""}
+              disabled={robot.bodies.length === 0 || otherCadToolActive("boundary")}
+              onClick={toggleBoundaryTool}
+            >
+              Boundary
             </button>
           </div>
           {builderTool === "add-joint" && !jointDraft?.childId && (
@@ -421,7 +459,23 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
               robot={robot}
               near={selectedBody ?? robot.bodies[robot.bodies.length - 1] ?? null}
               onApply={applyCadBody}
-              onCancel={cancelExtrude}
+              onCancel={cancelCadTool}
+              onPreviewChange={setCadPreview}
+            />
+          ) : builderTool === "revolve" ? (
+            <CadRevolveCreator
+              robot={robot}
+              near={selectedBody ?? robot.bodies[robot.bodies.length - 1] ?? null}
+              onApply={applyCadBody}
+              onCancel={cancelCadTool}
+              onPreviewChange={setCadPreview}
+            />
+          ) : builderTool === "boundary" ? (
+            <CadBoundaryCreator
+              robot={robot}
+              near={selectedBody ?? robot.bodies[robot.bodies.length - 1] ?? null}
+              onApply={applyCadBody}
+              onCancel={cancelCadTool}
               onPreviewChange={setCadPreview}
             />
           ) : selectedBody && builderTool === "transform" ? (

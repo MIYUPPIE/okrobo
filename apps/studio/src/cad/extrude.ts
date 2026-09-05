@@ -11,10 +11,15 @@
 // would otherwise jank the main thread, route these functions through
 // ./worker.ts's comlink-wrapped client instead.
 
-import { extrudeCircle as extrudeCircleDirect, extrudeRectangle as extrudeRectangleDirect } from "./kernel.ts";
-import type { CadMesh } from "./kernel.ts";
+import {
+  extrudeCircle as extrudeCircleDirect,
+  extrudeRectangle as extrudeRectangleDirect,
+  loft as loftDirect,
+  revolve as revolveDirect,
+} from "./kernel.ts";
+import type { CadMesh, Profile } from "./kernel.ts";
 
-export type { CadMesh };
+export type { CadMesh, Profile };
 
 export function extrudeRectangle(options: { width: number; height: number; depth: number }): Promise<CadMesh> {
   return extrudeRectangleDirect(options.width, options.height, options.depth);
@@ -22,4 +27,14 @@ export function extrudeRectangle(options: { width: number; height: number; depth
 
 export function extrudeCircle(options: { radius: number; depth: number }): Promise<CadMesh> {
   return extrudeCircleDirect(options.radius, options.depth);
+}
+
+// CAD Kernel Phase 3 (Revolve + Boundary): see kernel.ts's revolveMesh/
+// loftMesh for the geometry conventions.
+export function revolve(options: { profile: Profile; offset: number; angleDeg: number }): Promise<CadMesh> {
+  return revolveDirect(options.profile, options.offset, options.angleDeg);
+}
+
+export function loft(options: { startProfile: Profile; endProfile: Profile; height: number }): Promise<CadMesh> {
+  return loftDirect(options.startProfile, options.endProfile, options.height);
 }

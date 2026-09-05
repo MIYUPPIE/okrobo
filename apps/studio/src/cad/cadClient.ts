@@ -7,10 +7,10 @@
 // docs/decisions/cad-kernel-sketch-ui.md.
 
 import { wrap, type Remote } from "comlink";
-import type { CadMesh } from "./kernel.ts";
+import type { CadMesh, Profile } from "./kernel.ts";
 import type { CadWorkerApi } from "./worker.ts";
 
-export type { CadMesh };
+export type { CadMesh, Profile };
 
 export interface CadPreview {
   mesh: CadMesh;
@@ -39,4 +39,15 @@ export async function extrudeRectangle(options: { width: number; height: number;
 export async function extrudeCircle(options: { radius: number; depth: number }): Promise<CadMesh> {
   const api = await getApi();
   return api.extrudeCircle(options.radius, options.depth);
+}
+
+// CAD Kernel Phase 3 (Revolve + Boundary).
+export async function revolve(options: { profile: Profile; offset: number; angleDeg: number }): Promise<CadMesh> {
+  const api = await getApi();
+  return api.revolve(options.profile, options.offset, options.angleDeg);
+}
+
+export async function loft(options: { startProfile: Profile; endProfile: Profile; height: number }): Promise<CadMesh> {
+  const api = await getApi();
+  return api.loft(options.startProfile, options.endProfile, options.height);
 }

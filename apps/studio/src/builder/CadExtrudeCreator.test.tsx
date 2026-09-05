@@ -10,7 +10,8 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RobotDef } from "../contracts/robotDef";
-import { CadExtrudeCreator, CAD_PREVIEW_DEBOUNCE_MS } from "./CadExtrudeCreator";
+import { CadExtrudeCreator } from "./CadExtrudeCreator";
+import { CAD_PREVIEW_DEBOUNCE_MS } from "./useCadPreview";
 
 const extrudeRectangleMock = vi.fn();
 const extrudeCircleMock = vi.fn();

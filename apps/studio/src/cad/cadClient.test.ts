@@ -87,4 +87,27 @@ describe("cadClient", () => {
 
     await expect(extrudeRectangle({ width: 0, height: 0.1, depth: 0.1 })).rejects.toThrow("degenerate profile");
   });
+
+  // CAD Kernel Phase 3 (Revolve + Boundary).
+  it("delegates revolve to the wrapped API with the parsed args and resolves its result", async () => {
+    const stubApi = { revolve: vi.fn().mockResolvedValue({ vertices: [1, 2, 3], faces: [0, 0, 0] }) };
+    wrapMock.mockReturnValue(stubApi);
+    const { revolve } = await import("./cadClient");
+
+    const mesh = await revolve({ profile: { type: "circle", radius: 0.02 }, offset: 0.05, angleDeg: 360 });
+    expect(stubApi.revolve).toHaveBeenCalledWith({ type: "circle", radius: 0.02 }, 0.05, 360);
+    expect(mesh).toEqual({ vertices: [1, 2, 3], faces: [0, 0, 0] });
+  });
+
+  it("delegates loft to the wrapped API with the parsed args and resolves its result", async () => {
+    const stubApi = { loft: vi.fn().mockResolvedValue({ vertices: [4, 5, 6], faces: [1, 1, 1] }) };
+    wrapMock.mockReturnValue(stubApi);
+    const { loft } = await import("./cadClient");
+
+    const startProfile = { type: "rectangle" as const, width: 0.06, height: 0.06 };
+    const endProfile = { type: "circle" as const, radius: 0.02 };
+    const mesh = await loft({ startProfile, endProfile, height: 0.08 });
+    expect(stubApi.loft).toHaveBeenCalledWith(startProfile, endProfile, 0.08);
+    expect(mesh).toEqual({ vertices: [4, 5, 6], faces: [1, 1, 1] });
+  });
 });

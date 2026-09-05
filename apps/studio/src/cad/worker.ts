@@ -18,7 +18,7 @@
 
 import { expose } from "comlink";
 import wasmUrl from "replicad-opencascadejs/wasm?url";
-import { extrudeCircleMesh, extrudeRectangleMesh, loadOC } from "./kernel.ts";
+import { extrudeCircleMesh, extrudeRectangleMesh, loftMesh, loadOC, revolveMesh, type Profile } from "./kernel.ts";
 
 const api = {
   async extrudeRectangle(width: number, height: number, depth: number) {
@@ -28,6 +28,15 @@ const api = {
   async extrudeCircle(radius: number, depth: number) {
     await loadOC({ locateFile: () => wasmUrl });
     return extrudeCircleMesh(radius, depth);
+  },
+  // CAD Kernel Phase 3 (Revolve + Boundary).
+  async revolve(profile: Profile, offset: number, angleDeg: number) {
+    await loadOC({ locateFile: () => wasmUrl });
+    return revolveMesh(profile, offset, angleDeg);
+  },
+  async loft(startProfile: Profile, endProfile: Profile, height: number) {
+    await loadOC({ locateFile: () => wasmUrl });
+    return loftMesh(startProfile, endProfile, height);
   },
 };
 

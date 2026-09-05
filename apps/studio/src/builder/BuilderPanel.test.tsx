@@ -75,6 +75,53 @@ vi.mock("./CadExtrudeCreator", () => ({
     </div>
   ),
 }));
+// Same reasoning as the CadExtrudeCreator stub above -- CadRevolveCreator/
+// CadBoundaryCreator's own async pipelines are tested for real in their
+// own test files (Robot Builder CAD Kernel Phase 3).
+vi.mock("./CadRevolveCreator", () => ({
+  CadRevolveCreator: (props: { robot: RobotDef; onApply: (next: RobotDef, id: string) => void; onCancel: () => void }) => (
+    <div data-testid="cad-revolve-creator-stub">
+      <button
+        onClick={() => {
+          const newBody = {
+            id: "body-2",
+            name: "body-2",
+            transform: { position: [0, 0, 0] as [number, number, number], rotation_rpy: [0, 0, 0] as [number, number, number] },
+            mass: 0.05,
+            inertia: { ixx: 0.0001, iyy: 0.0001, izz: 0.0001 },
+            visual: { type: "cad_mesh" as const, vertices: [0, 0, 0], faces: [0, 0, 0] },
+          };
+          props.onApply({ ...props.robot, bodies: [...props.robot.bodies, newBody] }, newBody.id);
+        }}
+      >
+        stub apply
+      </button>
+      <button onClick={props.onCancel}>stub cancel</button>
+    </div>
+  ),
+}));
+vi.mock("./CadBoundaryCreator", () => ({
+  CadBoundaryCreator: (props: { robot: RobotDef; onApply: (next: RobotDef, id: string) => void; onCancel: () => void }) => (
+    <div data-testid="cad-boundary-creator-stub">
+      <button
+        onClick={() => {
+          const newBody = {
+            id: "body-2",
+            name: "body-2",
+            transform: { position: [0, 0, 0] as [number, number, number], rotation_rpy: [0, 0, 0] as [number, number, number] },
+            mass: 0.05,
+            inertia: { ixx: 0.0001, iyy: 0.0001, izz: 0.0001 },
+            visual: { type: "cad_mesh" as const, vertices: [0, 0, 0], faces: [0, 0, 0] },
+          };
+          props.onApply({ ...props.robot, bodies: [...props.robot.bodies, newBody] }, newBody.id);
+        }}
+      >
+        stub apply
+      </button>
+      <button onClick={props.onCancel}>stub cancel</button>
+    </div>
+  ),
+}));
 // jsdom has no ResizeObserver and can't lay out real SVG, both of which
 // Blockly.inject needs -- same reason BuilderViewport/TestViewport are
 // mocked above. BlocksPanel is only ever exercised for real via the
@@ -283,6 +330,98 @@ describe("BuilderPanel", () => {
 
     await user.click(screen.getByRole("button", { name: "stub cancel" }));
     expect(screen.getByTestId("builder-viewport-stub")).toHaveAttribute("data-cad-preview", "");
+  });
+
+  it("Extrude/Revolve/Boundary disable each other, not just Move/Rotate/Add Joint", async () => {
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Revolve" }));
+    expect(screen.getByRole("button", { name: "Extrude" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Boundary" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Revolve" })).not.toBeDisabled(); // never disables itself
+
+    await user.click(screen.getByRole("button", { name: "stub cancel" }));
+    expect(screen.getByRole("button", { name: "Extrude" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Boundary" })).not.toBeDisabled();
+  });
+
+  it("Revolve shows the CadRevolveCreator stub and hides BodyInspector", async () => {
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={() => {}} />);
+
+    const revolve = screen.getByRole("button", { name: "Revolve" });
+    await user.click(revolve);
+    expect(revolve).toHaveClass("active");
+    expect(screen.getByTestId("cad-revolve-creator-stub")).toBeInTheDocument();
+    expect(screen.queryByLabelText("body name")).not.toBeInTheDocument();
+  });
+
+  it("Revolve: Apply from the stub grows the document by one body, selects it, and returns to the transform tool", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={onChange} />);
+
+    await user.click(screen.getByRole("button", { name: "Revolve" }));
+    await user.click(screen.getByRole("button", { name: "stub apply" }));
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next: RobotDef = onChange.mock.calls[0][0];
+    expect(next.bodies).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "Revolve" })).not.toHaveClass("active");
+    expect(screen.getByTestId("builder-viewport-stub")).toHaveAttribute("data-selected", "body-2");
+  });
+
+  it("Revolve: Cancel from the stub returns to the transform tool without calling onChange", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={onChange} />);
+
+    await user.click(screen.getByRole("button", { name: "Revolve" }));
+    await user.click(screen.getByRole("button", { name: "stub cancel" }));
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Revolve" })).not.toHaveClass("active");
+    expect(screen.queryByTestId("cad-revolve-creator-stub")).not.toBeInTheDocument();
+  });
+
+  it("Boundary shows the CadBoundaryCreator stub and hides BodyInspector", async () => {
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={() => {}} />);
+
+    const boundary = screen.getByRole("button", { name: "Boundary" });
+    await user.click(boundary);
+    expect(boundary).toHaveClass("active");
+    expect(screen.getByTestId("cad-boundary-creator-stub")).toBeInTheDocument();
+    expect(screen.queryByLabelText("body name")).not.toBeInTheDocument();
+  });
+
+  it("Boundary: Apply from the stub grows the document by one body, selects it, and returns to the transform tool", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={onChange} />);
+
+    await user.click(screen.getByRole("button", { name: "Boundary" }));
+    await user.click(screen.getByRole("button", { name: "stub apply" }));
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next: RobotDef = onChange.mock.calls[0][0];
+    expect(next.bodies).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "Boundary" })).not.toHaveClass("active");
+    expect(screen.getByTestId("builder-viewport-stub")).toHaveAttribute("data-selected", "body-2");
+  });
+
+  it("Boundary: Cancel from the stub returns to the transform tool without calling onChange", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={onChange} />);
+
+    await user.click(screen.getByRole("button", { name: "Boundary" }));
+    await user.click(screen.getByRole("button", { name: "stub cancel" }));
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Boundary" })).not.toHaveClass("active");
+    expect(screen.queryByTestId("cad-boundary-creator-stub")).not.toBeInTheDocument();
   });
 
   it("disables Test mode while the document has an error", () => {
