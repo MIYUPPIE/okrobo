@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BlocksPanel } from "../BlocksPanel";
 import { setBuiltRobotFields } from "../blocks/okroboBlocks";
+import type { CadPreview } from "../cad/cadClient";
 import { validateRobotDef, type RobotDef, type Transform } from "../contracts/robotDef";
 import type { WorldDef } from "../contracts/worldDef";
 import { EngineBuiltRobot } from "../engine/EngineBuiltRobot";
@@ -11,6 +12,7 @@ import { ProgramStoppedError } from "../program/ProgramRunner";
 import { ActuatorPanel } from "./ActuatorPanel";
 import { BodyInspector } from "./BodyInspector";
 import { BuilderViewport, type GizmoMode } from "./BuilderViewport";
+import { CadExtrudeCreator } from "./CadExtrudeCreator";
 import { exportRobotDef } from "./exportRobot";
 import { HierarchyList } from "./HierarchyList";
 import { JointCreator } from "./JointCreator";
@@ -44,8 +46,10 @@ type TestStatus = "loading" | "ready" | "missing" | "error";
 type ProgramTab = "Blocks" | "Python" | "C++";
 type ProgramStatus = "idle" | "running" | "error";
 /** "transform" is the ordinary select-and-gizmo tool; "add-joint" is the
- * joint-authoring tool (parent-then-child viewport picking). */
-type BuilderTool = "transform" | "add-joint";
+ * joint-authoring tool (parent-then-child viewport picking); "extrude" is
+ * the CAD part creation tool (Robot Builder CAD Kernel Phase 2), named for
+ * the actual CAD operation it performs (Extruded Boss). */
+type BuilderTool = "transform" | "add-joint" | "extrude";
 interface JointDraft {
   parentId: string;
   childId?: string;
@@ -56,6 +60,7 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
   const [builderTool, setBuilderTool] = useState<BuilderTool>("transform");
   const [jointDraft, setJointDraft] = useState<JointDraft | null>(null);
+  const [cadPreview, setCadPreview] = useState<CadPreview | null>(null);
   // Bumped only on a gizmo commit (not on the inspector's own Apply), so
   // BodyInspector resyncs its draft when a drag moved the body it's
   // showing -- mirrors App.tsx's existing worldEpoch convention.
@@ -165,6 +170,23 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
     setJointDraft(null);
   };
 
+  const toggleExtrudeTool = () => {
+    setBuilderTool((current) => (current === "extrude" ? "transform" : "extrude"));
+    setCadPreview(null);
+  };
+
+  const applyCadBody = (next: RobotDef, newBodyId: string) => {
+    onChange(next);
+    setBuilderTool("transform");
+    setCadPreview(null);
+    setSelectedBodyId(newBodyId);
+  };
+
+  const cancelExtrude = () => {
+    setBuilderTool("transform");
+    setCadPreview(null);
+  };
+
   // Robot Builder Phase 6: mirrors App.tsx's own run()/stop() shape for the
   // Car/Arm/Drone pipeline -- abort-if-already-running, arm(), set status,
   // runProgram().then/.catch/.finally, zero every actuator on the way out
@@ -254,12 +276,13 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
             onTransformBody={transformBody}
             gizmoMode={gizmoMode}
             jointPick={builderTool === "add-joint" ? { parentId: jointDraft?.parentId ?? null, onPick: handleJointPick } : undefined}
+            cadPreview={builderTool === "extrude" ? cadPreview : null}
           />
           <div className="builder-toolbar">
             <button
               type="button"
               className={gizmoMode === "translate" ? "active" : ""}
-              disabled={builderTool === "add-joint"}
+              disabled={builderTool !== "transform"}
               onClick={() => setGizmoMode("translate")}
             >
               Move
@@ -267,7 +290,7 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
             <button
               type="button"
               className={gizmoMode === "rotate" ? "active" : ""}
-              disabled={builderTool === "add-joint"}
+              disabled={builderTool !== "transform"}
               onClick={() => setGizmoMode("rotate")}
             >
               Rotate
@@ -275,11 +298,19 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
             <button
               type="button"
               className={builderTool === "add-joint" ? "active" : ""}
-              disabled={robot.bodies.length < 2}
+              disabled={robot.bodies.length < 2 || builderTool === "extrude"}
               title={robot.bodies.length < 2 ? "Add a second body first" : undefined}
               onClick={toggleJointTool}
             >
               Add Joint
+            </button>
+            <button
+              type="button"
+              className={builderTool === "extrude" ? "active" : ""}
+              disabled={robot.bodies.length === 0 || builderTool === "add-joint"}
+              onClick={toggleExtrudeTool}
+            >
+              Extrude
             </button>
           </div>
           {builderTool === "add-joint" && !jointDraft?.childId && (
@@ -384,6 +415,14 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
               childId={jointDraft.childId}
               onApply={applyJoint}
               onCancel={() => setJointDraft(null)}
+            />
+          ) : builderTool === "extrude" ? (
+            <CadExtrudeCreator
+              robot={robot}
+              near={selectedBody ?? robot.bodies[robot.bodies.length - 1] ?? null}
+              onApply={applyCadBody}
+              onCancel={cancelExtrude}
+              onPreviewChange={setCadPreview}
             />
           ) : selectedBody && builderTool === "transform" ? (
             <BodyInspector

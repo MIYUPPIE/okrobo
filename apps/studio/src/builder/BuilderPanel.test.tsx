@@ -17,12 +17,14 @@ vi.mock("./BuilderViewport", () => ({
     robot: RobotDef;
     selectedBodyId: string | null;
     jointPick?: { parentId: string | null; onPick: (id: string) => void };
+    cadPreview?: { mesh: unknown; position: unknown } | null;
   }) => (
     <div
       data-testid="builder-viewport-stub"
       data-selected={props.selectedBodyId ?? ""}
       data-body-count={props.robot.bodies.length}
       data-joint-parent={props.jointPick?.parentId ?? ""}
+      data-cad-preview={props.cadPreview ? "1" : ""}
     >
       {/* Real BuilderViewport picks a body by raycasting a 3D click; this
        * stub exposes the same "click a body" interaction as plain buttons
@@ -38,6 +40,40 @@ vi.mock("./BuilderViewport", () => ({
 }));
 vi.mock("./TestViewport", () => ({
   TestViewport: () => <div data-testid="test-viewport-stub" />,
+}));
+// CadExtrudeCreator's own async debounced worker pipeline is tested for
+// real in CadExtrudeCreator.test.tsx -- this stub keeps BuilderPanel's own
+// tests focused on tool-switching/wiring (Apply/Cancel plumbing, preview
+// pass-through) rather than re-testing those internals.
+vi.mock("./CadExtrudeCreator", () => ({
+  CadExtrudeCreator: (props: {
+    robot: RobotDef;
+    onApply: (next: RobotDef, id: string) => void;
+    onCancel: () => void;
+    onPreviewChange: (preview: { mesh: unknown; position: unknown } | null) => void;
+  }) => (
+    <div data-testid="cad-extrude-creator-stub">
+      <button
+        onClick={() => {
+          const newBody = {
+            id: "body-2",
+            name: "body-2",
+            transform: { position: [0, 0, 0] as [number, number, number], rotation_rpy: [0, 0, 0] as [number, number, number] },
+            mass: 0.05,
+            inertia: { ixx: 0.0001, iyy: 0.0001, izz: 0.0001 },
+            visual: { type: "cad_mesh" as const, vertices: [0, 0, 0], faces: [0, 0, 0] },
+          };
+          props.onApply({ ...props.robot, bodies: [...props.robot.bodies, newBody] }, newBody.id);
+        }}
+      >
+        stub apply
+      </button>
+      <button onClick={() => props.onPreviewChange({ mesh: { vertices: [0, 0, 0], faces: [0, 0, 0] }, position: [0.1, 0, 0] })}>
+        stub preview
+      </button>
+      <button onClick={props.onCancel}>stub cancel</button>
+    </div>
+  ),
 }));
 // jsdom has no ResizeObserver and can't lay out real SVG, both of which
 // Blockly.inject needs -- same reason BuilderViewport/TestViewport are
@@ -176,6 +212,77 @@ describe("BuilderPanel", () => {
     expect(onChange).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Add Joint" })).toHaveClass("active"); // still in the tool
     expect(screen.getByText("Click the parent body.")).toBeInTheDocument();
+  });
+
+  it("Extrude shows the CadExtrudeCreator stub and hides BodyInspector", async () => {
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={() => {}} />);
+
+    const extrude = screen.getByRole("button", { name: "Extrude" });
+    expect(extrude).not.toBeDisabled();
+    await user.click(extrude);
+    expect(extrude).toHaveClass("active");
+    expect(screen.getByTestId("cad-extrude-creator-stub")).toBeInTheDocument();
+    expect(screen.queryByLabelText("body name")).not.toBeInTheDocument();
+  });
+
+  it("Move/Rotate/Add Joint disable while Extrude is active, and re-enable on Cancel", async () => {
+    const user = userEvent.setup();
+    const base = makeRobot();
+    const robot: RobotDef = { ...base, bodies: [...base.bodies, { id: "wheel", name: "Wheel", transform: identity, mass: 0.1, inertia }] };
+    render(<BuilderPanel robot={robot} onChange={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Extrude" }));
+    expect(screen.getByRole("button", { name: "Move" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Rotate" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add Joint" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "stub cancel" }));
+    expect(screen.getByRole("button", { name: "Move" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Rotate" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add Joint" })).not.toBeDisabled();
+  });
+
+  it("Extrude: Apply from the stub grows the document by one body, selects it, and returns to the transform tool", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={onChange} />);
+
+    await user.click(screen.getByRole("button", { name: "Extrude" }));
+    await user.click(screen.getByRole("button", { name: "stub apply" }));
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next: RobotDef = onChange.mock.calls[0][0];
+    expect(next.bodies).toHaveLength(2);
+    expect(next.bodies[1]).toMatchObject({ id: "body-2", visual: { type: "cad_mesh" } });
+    expect(screen.queryByRole("button", { name: "Extrude" })).not.toHaveClass("active");
+    expect(screen.getByTestId("builder-viewport-stub")).toHaveAttribute("data-selected", "body-2");
+  });
+
+  it("Extrude: Cancel from the stub returns to the transform tool without calling onChange", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={onChange} />);
+
+    await user.click(screen.getByRole("button", { name: "Extrude" }));
+    await user.click(screen.getByRole("button", { name: "stub cancel" }));
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Extrude" })).not.toHaveClass("active");
+    expect(screen.queryByTestId("cad-extrude-creator-stub")).not.toBeInTheDocument();
+  });
+
+  it("Extrude: a live preview from the stub reaches BuilderViewport, and clears once the tool exits", async () => {
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Extrude" }));
+    expect(screen.getByTestId("builder-viewport-stub")).toHaveAttribute("data-cad-preview", "");
+    await user.click(screen.getByRole("button", { name: "stub preview" }));
+    expect(screen.getByTestId("builder-viewport-stub")).toHaveAttribute("data-cad-preview", "1");
+
+    await user.click(screen.getByRole("button", { name: "stub cancel" }));
+    expect(screen.getByTestId("builder-viewport-stub")).toHaveAttribute("data-cad-preview", "");
   });
 
   it("disables Test mode while the document has an error", () => {

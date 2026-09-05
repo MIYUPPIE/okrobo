@@ -1196,3 +1196,58 @@ passed across 45 files), `npm run typecheck`, `npm run build`,
 `ctest` (13/13), `python3 -m pytest` (189 passed), the WASM/parity gate,
 and the full `test-all.sh` gate suite (including the browser E2E suite)
 all green.
+
+## CAD Kernel — Phase 2: Sketch UI (2026-09-05)
+
+Build mode can now create a real `cad_mesh` body for the first time --
+Phase 1 shipped the whole kernel/geometry/render/collider pipeline with
+deliberately zero UI. A new "Extrude" toolbar tool opens `CadExtrudeCreator`
+(`apps/studio/src/builder/CadExtrudeCreator.tsx`): pick a profile (Rectangle
+or Circle -- the only two the kernel supports), type exact dimensions,
+watch a live 3D preview update as you type, click Apply. Researched first
+(zero 2D canvas/drag-drawing precedent anywhere in this codebase, same
+finding the joints decision doc already made for drag-and-drop) and
+presented the resulting fork directly to the user -- a freeform 2D sketch
+surface vs. a parametric dimensions form -- who chose the parametric form.
+See `docs/decisions/cad-kernel-sketch-ui.md`.
+
+This is the first time the real browser Worker + real OpenCascade WASM
+(`apps/studio/src/cad/worker.ts`, built in Phase 1 specifically for this)
+gets exercised by anything other than a direct Node call. A new
+`cadClient.ts` lazily constructs exactly one Worker, memoized for the
+session -- confirmed via a real production build that the worker chunk
+(~274KB) and the WASM asset (~23MB) both land separately from the main
+bundle, which grew by only ~9KB from Phase 1's build. The live preview
+(`BuilderViewport.tsx`'s new third effect) renders a separate, never-
+raycast-reachable ghost mesh built from the same `geometryFor` `cad_mesh`
+branch Phase 1 already shipped, positioned via the same `makeCadBody`
+helper (`robotEdits.ts`) Apply itself uses -- so a part can never visually
+"jump" between preview and Applied. Every numeric field is validated
+client-side before ever calling the worker (OpenCascade throws on
+degenerate input like zero width), so a bad value shows an inline error
+instantly with no debounce wait.
+
+Tests: `cadClient.test.ts` (5 cases, the first mocked-`Worker`+comlink test
+in this repo -- a real browser Worker doesn't exist under vitest),
+`robotEdits.test.ts` (+4: `makeCadBody`), `CadExtrudeCreator.test.tsx` (8
+cases, using `vi.useFakeTimers()` + `fireEvent` rather than `userEvent` to
+sidestep a known userEvent-v14/fake-timer interaction, plus `act()`-wrapped
+timer advances so React actually flushes the debounced worker call's own
+state updates before each assertion), `BuilderPanel.test.tsx` (+5: tool
+mutual exclusivity, Apply/Cancel wiring, preview pass-through, via a new
+`CadExtrudeCreator` stub mirroring the existing `BuilderViewport`/
+`TestViewport` stubs). 7 new `studio-e2e-check.mjs` checks -- the one place
+the real Worker + real OpenCascade WASM gets driven through actual UI
+interaction, run against a real dev server and a real headless browser: a
+cold rectangle extrude (~30s WASM+Worker spin-up budgeted), a warm circle
+extrude, Apply landing a real schema-valid `cad_mesh` body, and a
+degenerate-input rejection that never touches the worker at all. One real
+bug found and fixed while first running these for real (not assumed): a
+coordinate-based `clickText` immediately following Apply's own DOM
+mutation raced the re-render and intermittently missed -- removed
+entirely once traced back to Apply already auto-selecting the new body
+(mirroring "+ Add body"'s own behavior), so no click was needed there in
+the first place. `npm run test` (424 passed across 47 files), `npm run
+typecheck`, `npm run build`, and the full `test-all.sh` gate suite
+(including the new CAD E2E checks, run for real against a live dev server
+and headless Chrome) all green.

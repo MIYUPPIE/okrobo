@@ -6,6 +6,7 @@ import { parseRobotDef, validateRobotDef, type Issue, type Transform } from "../
 import {
   computeJointOrigin,
   issuesIntroducedBy,
+  makeCadBody,
   makeDefaultBody,
   makeDefaultRobotDef,
   nextBodyId,
@@ -53,6 +54,38 @@ describe("makeDefaultBody", () => {
     const robot = makeDefaultRobotDef();
     const newId = nextBodyId(robot);
     robot.bodies.push(makeDefaultBody(newId, robot.bodies[0]));
+    expect(validateRobotDef(robot)).toEqual([
+      expect.objectContaining({ rule: "robot-multiple-root-bodies", element_id: newId }),
+    ]);
+  });
+});
+
+describe("makeCadBody", () => {
+  const mesh = { vertices: [0, 0, 0, 0.1, 0, 0, 0, 0.1, 0], faces: [0, 1, 2] };
+
+  it("positions 0.1m from a reference body, mirroring makeDefaultBody", () => {
+    const near = makeDefaultRobotDef().bodies[0];
+    const body = makeCadBody("body-2", near, mesh);
+    expect(body.transform.position).toEqual([near.transform.position[0] + 0.1, near.transform.position[1], near.transform.position[2]]);
+  });
+
+  it("positions at the origin offset when there's no reference body", () => {
+    const body = makeCadBody("body-1", null, mesh);
+    expect(body.transform.position).toEqual([0.1, 0, 0]);
+  });
+
+  it("sets visual and collision to the given cad_mesh geometry with the expected mass/inertia defaults", () => {
+    const body = makeCadBody("body-1", null, mesh);
+    expect(body.visual).toEqual({ type: "cad_mesh", vertices: mesh.vertices, faces: mesh.faces });
+    expect(body.collision).toEqual({ type: "cad_mesh", vertices: mesh.vertices, faces: mesh.faces });
+    expect(body.mass).toBe(0.05);
+    expect(body.inertia).toEqual({ ixx: 0.0001, iyy: 0.0001, izz: 0.0001 });
+  });
+
+  it("is well-formed on its own -- valid geometry, only the expected extra-root warning once added", () => {
+    const robot = makeDefaultRobotDef();
+    const newId = nextBodyId(robot);
+    robot.bodies.push(makeCadBody(newId, robot.bodies[0], mesh));
     expect(validateRobotDef(robot)).toEqual([
       expect.objectContaining({ rule: "robot-multiple-root-bodies", element_id: newId }),
     ]);

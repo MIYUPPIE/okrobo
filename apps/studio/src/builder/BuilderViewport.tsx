@@ -2,8 +2,9 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
+import type { CadPreview } from "../cad/cadClient";
 import type { RobotDef, Transform } from "../contracts/robotDef";
-import { materializeRobotScene, resolveBodyId, setHighlighted } from "./robotThree";
+import { geometryFor, materializeRobotScene, resolveBodyId, setHighlighted } from "./robotThree";
 
 // The Robot Builder's own 3D view -- deliberately separate from
 // Viewport3D.tsx (which stays untouched for the fixed Car/Arm/Drone
@@ -14,11 +15,14 @@ import { materializeRobotScene, resolveBodyId, setHighlighted } from "./robotThr
 // warn against. There's also no WASM engine here (a builder robot isn't
 // simulated), so nothing to step.
 //
-// Two effects, deliberately: a mount-once effect (renderer/scene/camera/
+// Three effects, deliberately: a mount-once effect (renderer/scene/camera/
 // OrbitControls/TransformControls/render loop/picking, deps []) that must
 // never re-run -- re-running it would recreate the renderer and reset the
-// camera on every edit -- and a rebuild effect (deps [robot, selectedBodyId,
-// gizmoMode]) that only touches the robot's own sub-scene.
+// camera on every edit -- a rebuild effect (deps [robot, selectedBodyId,
+// gizmoMode]) that only touches the robot's own sub-scene, and a CAD-preview
+// effect (deps [cadPreview], Robot Builder CAD Kernel Phase 2) that only
+// touches a separate preview group never added to bodyGroupByIdRef, so it
+// can never affect raycasting or the real robot's own rendering.
 //
 // No unit test here (matches the existing precedent -- Viewport3D.tsx has
 // none either; jsdom can't construct a real WebGLRenderer). Verified by the
@@ -43,11 +47,16 @@ export interface BuilderViewportProps {
    * the whole time -- dragging bodies and picking a joint pair are two
    * different things to be doing at once. */
   jointPick?: { parentId: string | null; onPick: (bodyId: string) => void };
+  /** Extrude tool (Robot Builder CAD Kernel Phase 2). A live preview of the
+   * CAD body being authored -- not yet part of `robot` -- rendered as a
+   * separate, semi-transparent ghost mesh, positioned where the body would
+   * actually land if Applied. */
+  cadPreview?: CadPreview | null;
 }
 
 const DRAG_CLICK_THRESHOLD_PX = 4;
 
-export function BuilderViewport({ robot, selectedBodyId, onSelectBody, onTransformBody, gizmoMode, jointPick }: BuilderViewportProps) {
+export function BuilderViewport({ robot, selectedBodyId, onSelectBody, onTransformBody, gizmoMode, jointPick, cadPreview }: BuilderViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Populated by the mount effect; read by the rebuild effect and by the
@@ -56,6 +65,7 @@ export function BuilderViewport({ robot, selectedBodyId, onSelectBody, onTransfo
   const robotRootRef = useRef<THREE.Group | null>(null);
   const transformControlsRef = useRef<TransformControls | null>(null);
   const bodyGroupByIdRef = useRef<Map<string, THREE.Group>>(new Map());
+  const previewGroupRef = useRef<THREE.Group | null>(null);
 
   const selectedBodyIdRef = useRef(selectedBodyId);
   const onSelectBodyRef = useRef(onSelectBody);
@@ -101,6 +111,11 @@ export function BuilderViewport({ robot, selectedBodyId, onSelectBody, onTransfo
     const robotRoot = new THREE.Group();
     scene.add(robotRoot);
     robotRootRef.current = robotRoot;
+
+    const previewGroup = new THREE.Group();
+    previewGroup.name = "cad-preview";
+    scene.add(previewGroup);
+    previewGroupRef.current = previewGroup;
 
     const transformControls = new TransformControls(camera, renderer.domElement);
     scene.add(transformControls.getHelper());
@@ -181,6 +196,7 @@ export function BuilderViewport({ robot, selectedBodyId, onSelectBody, onTransfo
       robotRootRef.current = null;
       transformControlsRef.current = null;
       bodyGroupByIdRef.current = new Map();
+      previewGroupRef.current = null;
     };
   }, []);
 
@@ -213,6 +229,23 @@ export function BuilderViewport({ robot, selectedBodyId, onSelectBody, onTransfo
     if (selectedGroup) transformControls.attach(selectedGroup);
     else transformControls.detach();
   }, [robot, selectedBodyId, gizmoMode, jointPick]);
+
+  // CAD-preview effect (Robot Builder CAD Kernel Phase 2): deliberately
+  // independent of the rebuild effect above -- previewGroup is never added
+  // to bodyGroupByIdRef, so it structurally cannot be hit by the raycast
+  // that resolves clicks to a real body id, and this effect never touches
+  // robotRoot/transformControls either.
+  useEffect(() => {
+    const previewGroup = previewGroupRef.current;
+    if (!previewGroup) return;
+    previewGroup.clear();
+    if (!cadPreview) return;
+    const geometry = geometryFor({ type: "cad_mesh", vertices: cadPreview.mesh.vertices, faces: cadPreview.mesh.faces });
+    const material = new THREE.MeshStandardMaterial({ color: 0x4da6ff, transparent: true, opacity: 0.45, depthWrite: false });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(...cadPreview.position);
+    previewGroup.add(mesh);
+  }, [cadPreview]);
 
   return <div ref={containerRef} className="viewport-3d builder-viewport" />;
 }

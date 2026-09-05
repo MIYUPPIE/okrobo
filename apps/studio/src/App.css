@@ -1429,6 +1429,20 @@ body {
   background: rgba(232, 179, 74, 0.1);
 }
 
+/* Robot Builder CAD Kernel Phase 2: CadExtrudeCreator's async worker-call
+ * status line -- mirrors .body-issue's own font-size/padding/radius. */
+.cad-status {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: #9aa4b2;
+}
+
+.cad-status.error {
+  color: #ff7a7a;
+  background: rgba(255, 122, 122, 0.1);
+}
+
 .inspector-actions {
   display: flex;
   align-items: center;

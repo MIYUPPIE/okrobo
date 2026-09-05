@@ -5,7 +5,7 @@
 // numeric utilities (no scene graph, no rendering) -- still no React.
 
 import * as THREE from "three";
-import type { Body, Issue, RobotDef, Transform } from "../contracts/robotDef";
+import type { Body, Geometry, Issue, RobotDef, Transform } from "../contracts/robotDef";
 
 const DEFAULT_STARTER_COLOR: [number, number, number] = [0.3, 0.5, 0.9];
 const DEFAULT_BODY_COLOR: [number, number, number] = [0.6, 0.6, 0.6];
@@ -59,6 +59,36 @@ export function makeDefaultBody(id: string, near: Body | null): Body {
     collision: { type: "box", size: [0.05, 0.05, 0.05] },
     mass: 0.1,
     inertia: { ixx: 0.0005, iyy: 0.0005, izz: 0.0005 },
+    material: { color: DEFAULT_BODY_COLOR },
+  };
+}
+
+const CAD_BODY_MASS = 0.05;
+const CAD_BODY_INERTIA = { ixx: 0.0001, iyy: 0.0001, izz: 0.0001 };
+
+type CadMeshGeometry = Extract<Geometry, { type: "cad_mesh" }>;
+
+/** Mirrors makeDefaultBody's exact positioning convention (0.1m along +x
+ * from `near`, or the origin) for a CAD-kernel-authored mesh body (Robot
+ * Builder CAD Kernel Phase 2) instead of a default box. Takes a structural
+ * {vertices, faces} shape, not a cad/kernel.ts CadMesh -- this module stays
+ * cad-kernel-agnostic, same as its own "pure... still no React" framing.
+ * Mass/inertia default to the same values
+ * scripts/generate-cad-examples.mjs's cad-l-bracket.json example uses --
+ * a reasonable small-part default, still editable afterward via
+ * BodyInspector's ordinary Mass & inertia fields (only Shape is locked for
+ * a cad_mesh body). See docs/decisions/cad-kernel-sketch-ui.md. */
+export function makeCadBody(id: string, near: Body | null, mesh: Pick<CadMeshGeometry, "vertices" | "faces">): Body {
+  const base = near?.transform.position ?? [0, 0, 0];
+  const geometry: Geometry = { type: "cad_mesh", vertices: mesh.vertices, faces: mesh.faces };
+  return {
+    id,
+    name: id,
+    transform: { position: [base[0] + 0.1, base[1], base[2]], rotation_rpy: [0, 0, 0] },
+    visual: geometry,
+    collision: geometry,
+    mass: CAD_BODY_MASS,
+    inertia: CAD_BODY_INERTIA,
     material: { color: DEFAULT_BODY_COLOR },
   };
 }

@@ -779,6 +779,82 @@ try {
     await page.evaluate("!document.querySelector('.builder-program-drawer')"),
   );
 
+  // -- robot builder: Extrude (CAD Kernel Phase 2: Sketch UI) -------------
+  // The one place the real browser Worker + real OpenCascade WASM
+  // (apps/studio/src/cad/{cadClient,worker,kernel}.ts) gets exercised
+  // through actual UI interaction -- every layer above (CadExtrudeCreator's
+  // own debounce/validation logic, BuilderPanel's tool-switching wiring) is
+  // proven with mocks in CadExtrudeCreator.test.tsx/BuilderPanel.test.tsx
+  // on purpose. Runs here (one clean body, zero validation errors, back in
+  // Edit mode after Test mode's own checks above) rather than earlier in
+  // the Add Joint section, since Test mode requires zero error-severity
+  // issues and an unattached second body would introduce one; nothing below
+  // re-enters Test mode. See docs/decisions/cad-kernel-sketch-ui.md.
+  await page.clickText(".builder-toolbar button", "/^Extrude$/");
+  const cadFormShown = await waitForCondition(
+    "document.querySelector('.builder-inspector h4')?.textContent === 'New CAD part'",
+    5000,
+  );
+  check("Build mode: Extrude opens the CAD part creation form", cadFormShown);
+
+  // Cold: first-ever load of the ~23MB OpenCascade WASM through a real
+  // Worker in this browser tab. extrude.test.ts's own direct-call gate test
+  // already budgets 30s for a cold load; a real Worker adds its own spin-up
+  // and same-origin fetch overhead on top of that.
+  const rectanglePreviewReady = await waitForCondition(
+    "!document.querySelector('.cad-extrude-creator .inspector-actions button.primary')?.disabled",
+    45000,
+  );
+  check("Build mode: the default rectangle profile computes a real preview through the CAD worker (Apply enables)", rectanglePreviewReady);
+
+  await page.setSelectValue('[aria-label="cad profile"]', "circle");
+  const circleFieldsSwapped = await waitForCondition(
+    "!!document.querySelector('[aria-label=\"cad radius\"]') && !document.querySelector('[aria-label=\"cad width\"]')",
+    5000,
+  );
+  check("Build mode: switching profile to Circle swaps in the radius field", circleFieldsSwapped);
+
+  // Warm now -- OpenCascade is already loaded in the worker.
+  const circlePreviewReady = await waitForCondition(
+    "!document.querySelector('.cad-extrude-creator .inspector-actions button.primary')?.disabled",
+    8000,
+  );
+  check("Build mode: the Circle profile computes a real preview through the same warm CAD worker", circlePreviewReady);
+
+  const bodyCountBeforeApply = await page.evaluate("document.querySelectorAll('.hierarchy-row').length");
+  await page.evalClickText(".inspector-actions button", "/^Apply$/");
+  const cadBodyApplied = await waitForCondition(
+    `document.querySelectorAll('.hierarchy-row').length === ${bodyCountBeforeApply} + 1`,
+    5000,
+  );
+  check("Build mode: Apply commits a real cad_mesh body into the document", cadBodyApplied);
+
+  // No click needed: Apply already auto-selects the new body (mirroring
+  // "+ Add body"'s own select-on-create UX, checked above) -- a coordinate-
+  // based clickText right after Apply's own DOM mutation is exactly the
+  // race cdp.mjs's evalClick docstring warns about, and this doesn't need it.
+  const cadPartNoteShown = await waitForCondition(
+    "document.querySelector('.inspector-mesh-note')?.textContent?.includes('CAD part')",
+    5000,
+  );
+  check("Build mode: the newly Applied body round-trips as a real, schema-valid cad_mesh body", cadPartNoteShown);
+
+  // Fast and deterministic: no worker round-trip should ever happen for a
+  // degenerate dimension, so this needs no long poll.
+  await page.clickText(".builder-toolbar button", "/^Extrude$/");
+  await waitForCondition("document.querySelector('.builder-inspector h4')?.textContent === 'New CAD part'", 5000);
+  await page.setInputValue('[aria-label="cad width"]', "0");
+  const degenerateRejectedLocally = await waitForCondition(
+    "document.querySelector('.cad-status.error')?.textContent === 'Width must be greater than 0'",
+    2000,
+  );
+  check(
+    "Build mode: a zero-width rectangle is rejected client-side, Apply never enables",
+    degenerateRejectedLocally &&
+      (await page.evaluate("document.querySelector('.cad-extrude-creator .inspector-actions button.primary')?.disabled")),
+  );
+  await page.evalClickText(".inspector-actions button", "/^Cancel$/");
+
   await page.clickText(".mode-toggle button", "/^Simulate$/");
   const backToSimulate = await waitForCondition(
     "!!document.querySelector('.sidebar') && !!document.querySelector('.viewport-3d canvas')",
