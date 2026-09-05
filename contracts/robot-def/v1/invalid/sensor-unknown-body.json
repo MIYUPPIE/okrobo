@@ -1,0 +1,10 @@
+{
+  "id": "invalid-fixture",
+  "name": "sensor-unknown-body",
+  "bodies": [
+    { "id": "base", "name": "Base", "mass": 1.0, "inertia": { "ixx": 0.01, "iyy": 0.01, "izz": 0.01 } }
+  ],
+  "sensors": [
+    { "id": "s1", "name": "Sensor 1", "type": "camera", "body": "ghost" }
+  ]
+}

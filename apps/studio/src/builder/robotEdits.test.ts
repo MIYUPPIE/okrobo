@@ -13,7 +13,7 @@ import {
   removeBody,
 } from "./robotEdits";
 
-const EXAMPLES_DIR = join(process.cwd(), "..", "..", "contracts", "robot-def", "v0", "examples");
+const EXAMPLES_DIR = join(process.cwd(), "..", "..", "contracts", "robot-def", "v1", "examples");
 const loadTwoLinkArm = () => parseRobotDef(JSON.parse(readFileSync(join(EXAMPLES_DIR, "two-link-arm.json"), "utf8")));
 
 describe("makeDefaultRobotDef", () => {

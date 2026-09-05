@@ -16,7 +16,14 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "isolatedModules": true,
-    "noEmit": true
+    "noEmit": true,
+    // Only src/cad/*.ts use this (an explicit ".ts" specifier so
+    // scripts/generate-cad-examples.mjs can import that module graph
+    // directly under plain Node, whose loader has no ".js"-to-".ts"
+    // rewriting -- see docs/decisions/cad-kernel-foundation.md). Safe
+    // project-wide: noEmit is already set, and every other file keeps
+    // importing without extensions as before.
+    "allowImportingTsExtensions": true
   },
   "include": ["src"],
   "exclude": ["src/**/*.test.ts", "src/program/testEngine.ts"]

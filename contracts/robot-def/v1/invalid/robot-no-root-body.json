@@ -1,0 +1,12 @@
+{
+  "id": "invalid-fixture",
+  "name": "robot-no-root-body",
+  "bodies": [
+    { "id": "a", "name": "A", "mass": 1.0, "inertia": { "ixx": 0.01, "iyy": 0.01, "izz": 0.01 } },
+    { "id": "b", "name": "B", "mass": 1.0, "inertia": { "ixx": 0.01, "iyy": 0.01, "izz": 0.01 } }
+  ],
+  "joints": [
+    { "id": "joint1", "name": "Joint 1", "type": "fixed", "parent": "a", "child": "b" },
+    { "id": "joint2", "name": "Joint 2", "type": "fixed", "parent": "b", "child": "a" }
+  ]
+}

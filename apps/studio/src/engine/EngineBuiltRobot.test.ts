@@ -10,7 +10,7 @@ import type { WorldDef } from "../contracts/worldDef";
 import { EngineBuiltRobot } from "./EngineBuiltRobot";
 import { loadEngine } from "./loader";
 
-const EXAMPLES_DIR = join(process.cwd(), "..", "..", "contracts", "robot-def", "v0", "examples");
+const EXAMPLES_DIR = join(process.cwd(), "..", "..", "contracts", "robot-def", "v1", "examples");
 const loadExample = (name: string): RobotDef =>
   parseRobotDef(JSON.parse(readFileSync(join(EXAMPLES_DIR, `${name}.json`), "utf8")));
 

@@ -75,6 +75,12 @@ function geometryDraft(geometry: Geometry | undefined): Pick<Draft, "geometryTyp
       return { geometryType: "plane", ...GEOMETRY_DEFAULTS, planeW: String(geometry.size[0]), planeH: String(geometry.size[1]) };
     case "mesh":
       return { geometryType: "mesh", ...GEOMETRY_DEFAULTS, meshPath: geometry.path };
+    case "cad_mesh":
+      // Baked CAD-kernel output (v1) -- not editable as numeric fields any
+      // more than an external mesh file is; see the "not editable here"
+      // note below, extended to cover this type too. No Build-mode
+      // authoring UI for CAD parts exists yet (docs/decisions/cad-kernel-foundation.md).
+      return { geometryType: "cad_mesh", ...GEOMETRY_DEFAULTS };
   }
 }
 
@@ -96,7 +102,7 @@ function toDraft(body: Body): Draft {
   };
 }
 
-function draftToGeometry(draft: Draft): Geometry | undefined {
+function draftToGeometry(draft: Draft, existing: Geometry | undefined): Geometry | undefined {
   switch (draft.geometryType) {
     case "none":
       return undefined;
@@ -114,11 +120,16 @@ function draftToGeometry(draft: Draft): Geometry | undefined {
       return { type: "plane", size: [num(draft.planeW), num(draft.planeH)] };
     case "mesh":
       return { type: "mesh", path: draft.meshPath, scale: [1, 1, 1] };
+    case "cad_mesh":
+      // Baked CAD-kernel data has no scalar draft fields to reconstruct
+      // from (see geometryDraft above) -- Apply preserves it unchanged,
+      // the same "not editable here" treatment the mesh type gets.
+      return existing;
   }
 }
 
 function draftToBody(draft: Draft, existing: Body): Body {
-  const geometry = draftToGeometry(draft);
+  const geometry = draftToGeometry(draft, existing.visual);
   return {
     ...existing,
     name: draft.name,
@@ -227,7 +238,7 @@ export function BodyInspector({ robot, bodyId, onApply, onRequestDelete }: BodyI
             aria-label="body geometry type"
             value={draft.geometryType}
             onChange={(e) => setField("geometryType", e.target.value as GeometryType)}
-            disabled={draft.geometryType === "mesh"}
+            disabled={draft.geometryType === "mesh" || draft.geometryType === "cad_mesh"}
           >
             <option value="none">none</option>
             <option value="box">box</option>
@@ -238,6 +249,15 @@ export function BodyInspector({ robot, bodyId, onApply, onRequestDelete }: BodyI
             <option value="plane">plane</option>
           </select>
         </label>
+
+        {draft.geometryType === "cad_mesh" && (
+          <div className="inspector-mesh-note">
+            <p className="inspector-note">CAD part — baked mesh, not editable here.</p>
+            <button type="button" onClick={() => setField("geometryType", "box")}>
+              change to box
+            </button>
+          </div>
+        )}
 
         {draft.geometryType === "mesh" && (
           <div className="inspector-mesh-note">

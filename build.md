@@ -1116,3 +1116,83 @@ hint text, parent/child picking via real `HierarchyList` rows, the form
 appearing, Apply actually restructuring the tree) -- all passed on the
 first real-browser run. `npm run test` (394 passed across 44 files),
 `npm run build`, and the full `test-all.sh` gate suite all green.
+
+## CAD Kernel — Phase 1: Foundation (2026-09-05)
+
+First slice of the CAD initiative the user asked for after Joint Authoring
+shipped: real parametric CAD solid modeling (Extruded/Revolved/Boundary
+Boss & Cut, Chamfer, Draft, Shell, Fillet), scoped across 7 phases with the
+user explicitly choosing "Full CAD kernel (OpenCascade.js)" over a
+primitive-only approximation. This phase ships only Extrude, end to end,
+with **no sketch UI and no Build-mode changes at all** -- kernel
+integration, a new `cad_mesh` geometry variant, a real three.js render, a
+real MuJoCo collider, and one offline-authored example. See
+`docs/decisions/cad-kernel-foundation.md` for the full reasoning; summary
+below.
+
+Adopted [replicad](https://github.com/sgenoud/replicad) (MIT), a
+high-level wrapper around `opencascade.js` (the WASM port of OpenCascade,
+LGPL-2.1) purpose-built for sketch -> extrude/revolve/loft ->
+fillet/chamfer/shell/draft. `contracts/robot-def` forks `v0` -> `v1` (v0's
+own contract.md states a real frozen-once-shipped policy, unlike
+`pack.json`'s in-place Phase 8 extension) -- all three mirrors
+(`apps/studio/src/contracts/robotDef.ts`, `runtime/python/okrobo/robot_def.py`,
+`engine/src/robot_def.{hpp,cpp}`) moved to v1 together, adding one new
+`Geometry` variant: `cad_mesh` (flat, baked `vertices`/`faces` arrays, no
+live feature tree yet -- that's Phase 7).
+
+The one real technical risk -- getting a physics-collidable mesh into
+MuJoCo's WASM build with no filesystem -- was resolved by empirical proof,
+not assumption. Research flagged the STL-decoder-plugin/VFS-file path as
+carrying an unverified static-linking risk; instead, a native scratch C++
+program (compiled against `tools/mujoco/build-native/lib/libmujoco.a`)
+proved `mjs_addMesh`/`mjs_setName`/`mjs_setFloat(uservert)`/`mjs_setInt(userface)`,
+called on the `mjSpec*` between the engine's existing `mj_parseXMLString`
+and `mj_compile` calls, compiles a `<geom type="mesh">` with **no**
+`<asset>` block at all. `built_robot.cpp`'s new `AddCadMesh` is that exact
+technique, shipping now; its own gate test drops a hand-authored 8-vertex
+box mesh under real gravity and confirms it settles at the *same* resting
+height (0.04 m) a native box geometry of the same size would -- proof of a
+real convex-hull collider, not a placeholder (which would settle at a
+different, wrong height).
+
+`cad_mesh` support was extended to world-def objects too (not just robot
+bodies) -- not optional, since `world_def.cpp`/`worldDef.ts`/`built_robot.cpp`
+all reuse `robot_def.hpp`'s shared `GeometryType` enum in `-Werror`
+switches with no `default:` case; adding the new enum value forced a real
+decision at every one of them, the same way TypeScript's own exhaustiveness
+checking already forced `BodyInspector.tsx`/`robotThree.ts` earlier in this
+phase.
+
+`replicad`/`opencascade.js` (~23 MB WASM) stays entirely out of the main
+app bundle -- confirmed via a real `npm run build`, whose output chunk list
+has no trace of it, since nothing in the running app's import graph
+reaches the new `apps/studio/src/cad/` directory yet. `kernel.ts` holds
+the real sketch/extrude/mesh logic (portable to Node and a browser
+Worker); `worker.ts` is a real, ready `comlink`-exposed Worker entry point
+for Phase 2's eventual sketch UI, unused today; `extrude.ts` (the plan's
+promised public API) calls the kernel directly rather than through the
+worker, since nothing in a live tab needs off-main-thread isolation yet --
+and a direct call is what makes it runnable under plain Node (the offline
+authoring script, `scripts/generate-cad-examples.mjs`) and testable under
+vitest's `node` environment.
+
+That script actually ran the real kernel and produced
+`contracts/robot-def/v1/examples/cad-l-bracket.json` -- two real extruded
+slabs welded with a fixed joint, not a canned fixture -- and the new
+example round-trips cleanly through all three language mirrors (added
+explicitly to Python's and C++'s hardcoded example lists; TypeScript picks
+it up automatically since it globs the whole `examples/` directory).
+
+Tests: `robotDef.test.ts` (+cad_mesh geometry suite, 4 cases: round-trip,
+non-multiple-of-3 rejection, out-of-range face index, non-numeric throw),
+`robotThree.test.ts` (+1: `cad_mesh` produces a real `BufferGeometry`, not
+the mesh-placeholder box), `test_robot_def.py`/`test_robot_def.cpp`
+(mirrored cad_mesh suites + the new example), `test_built_robot.cpp` (+1:
+the real-collider settling proof), `extrude.test.ts` (2 cases against the
+*real* replicad/OpenCascade pipeline -- no mocks -- asserting non-degenerate
+mesh bounds for a box and a cylinder extrusion). `npm run test` (402
+passed across 45 files), `npm run typecheck`, `npm run build`,
+`ctest` (13/13), `python3 -m pytest` (189 passed), the WASM/parity gate,
+and the full `test-all.sh` gate suite (including the browser E2E suite)
+all green.

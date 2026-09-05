@@ -1,6 +1,8 @@
-"""Reference model for the OKROBO robot definition v0 (Robot Builder Phase 1).
+"""Reference model for the OKROBO robot definition v1 (Robot Builder Phase 1;
+v1 adds cad_mesh geometry for the CAD Kernel initiative -- see
+docs/decisions/cad-kernel-foundation.md).
 
-This is the executable spec for contracts/robot-def/v0: the same role
+This is the executable spec for contracts/robot-def/v1: the same role
 _sim.py plays for kinematics. TypeScript (apps/studio/src/contracts/robotDef.ts)
 and C++ (engine/src/robot_def.{hpp,cpp}) are hand-mirrored to match. Change
 this file only together with the contract and the other two mirrors.
@@ -76,8 +78,20 @@ class MeshGeometry:
     type: str = "mesh"
 
 
+@dataclass
+class CadMeshGeometry:
+    """A baked, frozen mesh authored by the CAD kernel pipeline (Robot
+    Builder CAD Kernel Phase 1) -- flat vertex/face arrays, in this body's
+    own frame. No live feature tree yet; see
+    docs/decisions/cad-kernel-foundation.md."""
+
+    vertices: tuple  # flat (x0, y0, z0, x1, y1, z1, ...), meters
+    faces: tuple  # flat triangulated vertex-index triples
+    type: str = "cad_mesh"
+
+
 Geometry = Union[
-    BoxGeometry, SphereGeometry, CylinderGeometry, CapsuleGeometry, ConeGeometry, PlaneGeometry, MeshGeometry
+    BoxGeometry, SphereGeometry, CylinderGeometry, CapsuleGeometry, ConeGeometry, PlaneGeometry, MeshGeometry, CadMeshGeometry
 ]
 
 # ---- bodies ----
@@ -269,6 +283,13 @@ def parse_geometry(data: dict | None) -> Geometry | None:
     if kind == "mesh":
         scale = tuple(float(v) for v in data.get("scale", (1.0, 1.0, 1.0)))
         return MeshGeometry(path=str(data["path"]), scale=scale)
+    if kind == "cad_mesh":
+        vertices = tuple(float(v) for v in data["vertices"])
+        faces_data = data["faces"]
+        if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in faces_data):
+            raise ValueError("robot-def: cad_mesh geometry needs a non-negative integer faces array")
+        faces = tuple(int(v) for v in faces_data)
+        return CadMeshGeometry(vertices=vertices, faces=faces)
     raise ValueError(f"robot-def: unknown geometry type {kind!r}")
 
 
@@ -388,6 +409,8 @@ def geometry_to_dict(g: Geometry) -> dict:
         return {"type": "plane", "size": list(g.size)}
     if isinstance(g, MeshGeometry):
         return {"type": "mesh", "path": g.path, "scale": list(g.scale)}
+    if isinstance(g, CadMeshGeometry):
+        return {"type": "cad_mesh", "vertices": list(g.vertices), "faces": list(g.faces)}
     raise ValueError(f"robot-def: unknown geometry {g!r}")
 
 
@@ -472,6 +495,14 @@ def _geometry_is_valid(geometry: Geometry) -> bool:
         return geometry.radius > 0 and geometry.length > 0
     if isinstance(geometry, MeshGeometry):
         return bool(geometry.path)
+    if isinstance(geometry, CadMeshGeometry):
+        return (
+            len(geometry.vertices) > 0
+            and len(geometry.vertices) % 3 == 0
+            and len(geometry.faces) > 0
+            and len(geometry.faces) % 3 == 0
+            and all(index < len(geometry.vertices) // 3 for index in geometry.faces)
+        )
     return True
 
 

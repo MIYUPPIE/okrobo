@@ -22,6 +22,11 @@ export default defineConfig({
     // not a website, so bundle weight is not a paged-load concern.
     chunkSizeWarningLimit: 6000,
   },
+  // replicad/opencascade.js (CAD Kernel Phase 1) load only inside
+  // src/cad/worker.ts, a real ES module Worker -- the reference replicad
+  // app's own config, needed for `?url`-imported .wasm to resolve inside a
+  // worker context. See docs/decisions/cad-kernel-foundation.md.
+  worker: { format: "es" },
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],

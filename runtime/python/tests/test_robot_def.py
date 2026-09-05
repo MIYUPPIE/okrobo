@@ -1,15 +1,17 @@
-"""Gate tests for the robot-def v0 reference model and validator.
+"""Gate tests for the robot-def v1 reference model and validator.
 Mirrors engine/tests/test_robot_def.cpp and apps/studio/src/contracts/robotDef.test.ts:
-all three read the same fixtures under contracts/robot-def/v0/."""
+all three read the same fixtures under contracts/robot-def/v1/ (v1's own
+examples/invalid include v0's fixtures verbatim, since v1 is a strict
+additive superset -- see docs/decisions/cad-kernel-foundation.md)."""
 
 import json
 from pathlib import Path
 
 import pytest
 
-from okrobo import parse_robot_def, robot_def_to_dict, validate_robot_def
+from okrobo import CadMeshGeometry, parse_robot_def, robot_def_to_dict, validate_robot_def
 
-CONTRACT_DIR = Path(__file__).resolve().parents[3] / "contracts" / "robot-def" / "v0"
+CONTRACT_DIR = Path(__file__).resolve().parents[3] / "contracts" / "robot-def" / "v1"
 EXAMPLES_DIR = CONTRACT_DIR / "examples"
 INVALID_DIR = CONTRACT_DIR / "invalid"
 
@@ -22,7 +24,7 @@ def test_examples_directory_is_not_empty():
     assert list(EXAMPLES_DIR.glob("*.json"))
 
 
-@pytest.mark.parametrize("name", ["single-body", "two-link-arm"])
+@pytest.mark.parametrize("name", ["single-body", "two-link-arm", "cad-l-bracket"])
 def test_example_is_valid_and_round_trips(name):
     data = _load(EXAMPLES_DIR / f"{name}.json")
     robot = parse_robot_def(data)
@@ -91,3 +93,75 @@ def test_invalid_fixture_message_wording(rule):
 def test_parse_raises_on_missing_required_field():
     with pytest.raises(ValueError):
         parse_robot_def({"id": "x", "name": "X"})  # no bodies
+
+
+# CAD Kernel Phase 1: the new cad_mesh geometry variant. See
+# docs/decisions/cad-kernel-foundation.md.
+_IDENTITY = {"position": [0.0, 0.0, 0.0], "rotation_rpy": [0.0, 0.0, 0.0]}
+# A tetrahedron: 4 vertices, 4 triangular faces.
+_TETRAHEDRON = {
+    "vertices": [0.0, 0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 0.1],
+    "faces": [0, 1, 2, 0, 1, 3, 0, 2, 3, 1, 2, 3],
+}
+
+
+def _make_robot_with(visual, collision=None, has_collision=False):
+    body = {
+        "id": "part",
+        "name": "Part",
+        "transform": _IDENTITY,
+        "visual": visual,
+        "mass": 0.1,
+        "inertia": {"ixx": 0.001, "iyy": 0.001, "izz": 0.001},
+    }
+    # Only set `collision` at all when a caller actually wants one, so a
+    # single geometry field can be tested in isolation (mirrors
+    # apps/studio/src/contracts/robotDef.test.ts's makeRobotWith).
+    if has_collision:
+        body["collision"] = collision
+    return {
+        "id": "cad-test",
+        "name": "CAD Test",
+        "description": "",
+        "root_placement": _IDENTITY,
+        "bodies": [body],
+        "joints": [],
+        "actuators": [],
+        "sensors": [],
+    }
+
+
+def test_cad_mesh_parses_validates_cleanly_and_round_trips():
+    geometry = {"type": "cad_mesh", **_TETRAHEDRON}
+    robot = parse_robot_def(_make_robot_with(geometry, geometry, has_collision=True))
+    assert validate_robot_def(robot) == []
+    assert isinstance(robot.bodies[0].visual, CadMeshGeometry)
+
+    reparsed = parse_robot_def(robot_def_to_dict(robot))
+    assert reparsed == robot
+
+
+def test_cad_mesh_rejects_a_non_multiple_of_3_vertices_array():
+    bad = {"type": "cad_mesh", "vertices": [0.0, 0.0], "faces": [0, 0, 0]}
+    robot = parse_robot_def(_make_robot_with(bad))
+    issues = validate_robot_def(robot)
+    assert [i.rule for i in issues] == ["body-invalid-geometry"]
+    assert issues[0].element_id == "part"
+
+
+def test_cad_mesh_rejects_a_face_index_out_of_range():
+    bad = {"type": "cad_mesh", "vertices": _TETRAHEDRON["vertices"], "faces": [0, 1, 99]}
+    robot = parse_robot_def(_make_robot_with(bad))
+    issues = validate_robot_def(robot)
+    assert [i.rule for i in issues] == ["body-invalid-geometry"]
+    assert issues[0].element_id == "part"
+
+
+def test_cad_mesh_raises_on_a_non_numeric_vertices_array():
+    with pytest.raises(ValueError):
+        parse_robot_def(_make_robot_with({"type": "cad_mesh", "vertices": ["x"], "faces": [0, 0, 0]}))
+
+
+def test_cad_mesh_raises_on_a_negative_face_index():
+    with pytest.raises(ValueError):
+        parse_robot_def(_make_robot_with({"type": "cad_mesh", "vertices": _TETRAHEDRON["vertices"], "faces": [-1, 0, 0]}))

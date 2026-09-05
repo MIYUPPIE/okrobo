@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 
 from .robot_def import (
     BoxGeometry,
+    CadMeshGeometry,
     CapsuleGeometry,
     ConeGeometry,
     CylinderGeometry,
@@ -130,6 +131,14 @@ def _geometry_is_valid(geometry: Geometry) -> bool:
         return geometry.radius > 0 and geometry.length > 0
     if isinstance(geometry, MeshGeometry):
         return bool(geometry.path)
+    if isinstance(geometry, CadMeshGeometry):
+        return (
+            len(geometry.vertices) > 0
+            and len(geometry.vertices) % 3 == 0
+            and len(geometry.faces) > 0
+            and len(geometry.faces) % 3 == 0
+            and all(index < len(geometry.vertices) // 3 for index in geometry.faces)
+        )
     return True
 
 

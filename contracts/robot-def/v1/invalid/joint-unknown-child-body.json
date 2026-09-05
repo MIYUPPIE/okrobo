@@ -1,0 +1,10 @@
+{
+  "id": "invalid-fixture",
+  "name": "joint-unknown-child-body",
+  "bodies": [
+    { "id": "base", "name": "Base", "mass": 1.0, "inertia": { "ixx": 0.01, "iyy": 0.01, "izz": 0.01 } }
+  ],
+  "joints": [
+    { "id": "joint1", "name": "Joint 1", "type": "hinge", "parent": "base", "child": "ghost", "axis": [0, 1, 0], "limits": { "lower": -1.0, "upper": 1.0 } }
+  ]
+}

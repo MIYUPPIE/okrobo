@@ -94,8 +94,27 @@ GeomAttrs MjcfGeomAttrs(const Geometry& geometry) {
         case GeometryType::kMesh:
             size << kMeshPlaceholderHalfExtent << " " << kMeshPlaceholderHalfExtent << " " << kMeshPlaceholderHalfExtent;
             return {"box", size.str()};
+        case GeometryType::kCadMesh:
+            // A cad_mesh geom has no size= attribute (MJCF sizes a mesh geom
+            // from its own asset) and needs a mesh="..." name the caller
+            // alone knows how to construct (cad_{body.id} / cad_world_{id}) --
+            // callers special-case this branch before reaching here.
+            throw std::runtime_error("built_robot: cad_mesh geometry must be handled by the caller, not MjcfGeomAttrs");
     }
     throw std::runtime_error("built_robot: unknown geometry type");
+}
+
+// Adds a cad_mesh geometry's baked vertex/face data as a named mjSpec mesh
+// asset, so mj_compile can resolve a <geom type="mesh" mesh="{name}"/> with
+// no <asset> block and no file on disk -- verified with a native scratch
+// program (see docs/decisions/cad-kernel-foundation.md). Must run between
+// mj_parseXMLString and mj_compile.
+void AddCadMesh(mjSpec* spec, const std::string& name, const Geometry& geometry) {
+    mjsMesh* mesh = mjs_addMesh(spec, nullptr);
+    mjs_setName(mesh->element, name.c_str());
+    const std::vector<float> vertices(geometry.vertices.begin(), geometry.vertices.end());
+    mjs_setFloat(mesh->uservert, vertices.data(), static_cast<int>(vertices.size()));
+    mjs_setInt(mesh->userface, geometry.faces.data(), static_cast<int>(geometry.faces.size()));
 }
 
 std::string MjcfPosEuler(const Transform& transform) {
@@ -121,6 +140,10 @@ void AppendGeom(std::ostringstream& xml, const Body& body) {
         geometry = &body.visual;
     }
     if (!geometry) return;
+    if (geometry->type == GeometryType::kCadMesh) {
+        xml << "<geom type=\"mesh\" mesh=\"cad_" << body.id << "\" " << MjcfPosEuler(body.transform) << "/>";
+        return;
+    }
     const GeomAttrs attrs = MjcfGeomAttrs(*geometry);
     xml << "<geom type=\"" << attrs.type << "\" size=\"" << attrs.size << "\" " << MjcfPosEuler(body.transform)
         << "/>";
@@ -236,6 +259,11 @@ std::string GenerateMjcf(const RobotDef& robot, const WorldDef* world) {
     // each other's ids in advance). See docs/decisions/robot-builder-world.md.
     if (world) {
         for (const auto& object : world->objects) {
+            if (object.geometry.type == GeometryType::kCadMesh) {
+                xml << "<geom name=\"world_" << object.id << "\" type=\"mesh\" mesh=\"cad_world_" << object.id
+                    << "\" " << MjcfPosEuler(object.transform) << "/>";
+                continue;
+            }
             const GeomAttrs attrs = MjcfGeomAttrs(object.geometry);
             xml << "<geom name=\"world_" << object.id << "\" type=\"" << attrs.type << "\" size=\"" << attrs.size
                 << "\" " << MjcfPosEuler(object.transform) << "/>";
@@ -372,6 +400,29 @@ BuiltRobot::BuiltRobot(const RobotDef& robot, const WorldDef* world) {
     if (!spec) {
         throw std::runtime_error(std::string("built robot model failed to parse: ") + error);
     }
+
+    // cad_mesh bodies/objects reference a named mesh asset (e.g. mesh="cad_
+    // {id}") with no <asset> block in the XML above -- the mesh data itself
+    // is added directly to the parsed spec here, between parse and compile.
+    for (const auto& body : robot.bodies) {
+        const Geometry* geometry = nullptr;
+        if (body.has_collision) {
+            geometry = &body.collision;
+        } else if (body.has_visual) {
+            geometry = &body.visual;
+        }
+        if (geometry && geometry->type == GeometryType::kCadMesh) {
+            AddCadMesh(spec, "cad_" + body.id, *geometry);
+        }
+    }
+    if (world) {
+        for (const auto& object : world->objects) {
+            if (object.geometry.type == GeometryType::kCadMesh) {
+                AddCadMesh(spec, "cad_world_" + object.id, object.geometry);
+            }
+        }
+    }
+
     mjModel* model = mj_compile(spec, nullptr);
     if (!model) {
         const std::string message = std::string("built robot model failed to compile: ") + mjs_getError(spec);

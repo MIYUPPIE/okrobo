@@ -1,7 +1,9 @@
 #pragma once
 
-// Robot Builder Phase 1: contracts/robot-def/v0. Structural parse + semantic
-// validation only -- no simulation behavior in v0. Reference spec:
+// Robot Builder Phase 1: contracts/robot-def/v1 (v1 adds cad_mesh geometry
+// for the CAD Kernel initiative -- see
+// docs/decisions/cad-kernel-foundation.md). Structural parse + semantic
+// validation only -- no simulation behavior. Reference spec:
 // runtime/python/okrobo/robot_def.py. No nlohmann type appears in this
 // header; only robot_def.cpp includes <nlohmann/json.hpp> (see
 // docs/decisions/robot-definition-schema.md for why it's vendored and how
@@ -41,7 +43,7 @@ struct Transform {
     bool operator==(const Transform&) const = default;
 };
 
-enum class GeometryType { kBox, kSphere, kCylinder, kCapsule, kCone, kPlane, kMesh };
+enum class GeometryType { kBox, kSphere, kCylinder, kCapsule, kCone, kPlane, kMesh, kCadMesh };
 
 struct Geometry {
     GeometryType type = GeometryType::kBox;
@@ -50,6 +52,12 @@ struct Geometry {
     double length = 0.0;        // cylinder, capsule, cone
     std::string path;           // mesh; never opened in v0
     Vec3 scale{1.0, 1.0, 1.0};  // mesh
+    // cad_mesh (Robot Builder CAD Kernel Phase 1): a baked, frozen mesh
+    // authored by the CAD kernel pipeline -- flat vertex/face arrays, in
+    // this body's own frame. No live feature tree yet; see
+    // docs/decisions/cad-kernel-foundation.md.
+    std::vector<double> vertices;  // flat (x0,y0,z0, x1,y1,z1, ...), meters
+    std::vector<int32_t> faces;    // flat triangulated vertex-index triples
 
     bool operator==(const Geometry&) const = default;
 };

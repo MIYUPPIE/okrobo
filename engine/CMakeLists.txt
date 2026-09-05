@@ -47,7 +47,7 @@ target_include_directories(okrobo_engine PUBLIC src api)
 target_compile_options(okrobo_engine PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(okrobo_engine PRIVATE mujoco::mujoco)
 
-# Robot Builder Phase 1 (contracts/robot-def/v0): parse + validate only, no
+# Robot Builder Phase 1 (contracts/robot-def/v1): parse + validate only, no
 # simulation behavior. A separate target/library, deliberately never linked
 # into okrobo_engine, so nlohmann/json can never reach the WASM build even
 # by accident.
@@ -68,7 +68,7 @@ target_compile_options(okrobo_world_def PRIVATE -Wall -Wextra -Werror)
 
 # Robot Builder Phase 3: kinematic-tree helper for MJCF generation. Its own
 # target, not added to okrobo_robot_def -- that target is documented frozen
-# (contracts/robot-def/v0/contract.md) once all three language mirrors ship.
+# (contracts/robot-def/v1/contract.md) once all three language mirrors ship.
 add_library(okrobo_robot_tree src/robot_tree.cpp)
 target_include_directories(okrobo_robot_tree PUBLIC src)
 target_link_libraries(okrobo_robot_tree PUBLIC okrobo_robot_def)
@@ -134,14 +134,14 @@ target_compile_options(test_robot_def PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 # Baked in at configure time so the test finds the fixtures regardless of
 # ctest's working directory, rather than guessing from __FILE__ or CWD.
 target_compile_definitions(test_robot_def PRIVATE
-  OKROBO_ROBOT_DEF_CONTRACT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../contracts/robot-def/v0")
+  OKROBO_ROBOT_DEF_CONTRACT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../contracts/robot-def/v1")
 add_test(NAME robot_def COMMAND test_robot_def)
 
 add_executable(test_robot_tree tests/test_robot_tree.cpp)
 target_link_libraries(test_robot_tree PRIVATE okrobo_robot_tree)
 target_compile_options(test_robot_tree PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_compile_definitions(test_robot_tree PRIVATE
-  OKROBO_ROBOT_DEF_CONTRACT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../contracts/robot-def/v0")
+  OKROBO_ROBOT_DEF_CONTRACT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../contracts/robot-def/v1")
 add_test(NAME robot_tree COMMAND test_robot_tree)
 
 add_executable(test_world_def tests/test_world_def.cpp)
@@ -155,5 +155,5 @@ add_executable(test_built_robot tests/test_built_robot.cpp)
 target_link_libraries(test_built_robot PRIVATE okrobo_built_robot)
 target_compile_options(test_built_robot PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_compile_definitions(test_built_robot PRIVATE
-  OKROBO_ROBOT_DEF_CONTRACT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../contracts/robot-def/v0")
+  OKROBO_ROBOT_DEF_CONTRACT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../contracts/robot-def/v1")
 add_test(NAME built_robot COMMAND test_built_robot)

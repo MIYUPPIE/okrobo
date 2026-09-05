@@ -110,6 +110,14 @@ function geometryIsValid(g: Geometry): boolean {
       return g.radius > 0 && g.length > 0;
     case "mesh":
       return g.path.length > 0;
+    case "cad_mesh":
+      return (
+        g.vertices.length > 0 &&
+        g.vertices.length % 3 === 0 &&
+        g.faces.length > 0 &&
+        g.faces.length % 3 === 0 &&
+        g.faces.every((index) => index < g.vertices.length / 3)
+      );
   }
 }
 

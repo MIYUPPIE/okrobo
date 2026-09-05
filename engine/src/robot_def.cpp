@@ -58,6 +58,19 @@ Geometry ParseGeometry(const json& data) {
         g.type = GeometryType::kMesh;
         g.path = data.at("path").get<std::string>();
         g.scale = data.contains("scale") ? ParseVec3(data.at("scale"), "geometry.scale") : Vec3{1.0, 1.0, 1.0};
+    } else if (type == "cad_mesh") {
+        g.type = GeometryType::kCadMesh;
+        const auto& vertices = data.at("vertices");
+        if (!vertices.is_array()) throw std::runtime_error("robot-def: cad_mesh geometry needs a numeric vertices array");
+        for (const auto& v : vertices) g.vertices.push_back(v.get<double>());
+        const auto& faces = data.at("faces");
+        if (!faces.is_array()) throw std::runtime_error("robot-def: cad_mesh geometry needs an integer faces array");
+        for (const auto& f : faces) {
+            if (!f.is_number_integer() || f.get<int64_t>() < 0) {
+                throw std::runtime_error("robot-def: cad_mesh geometry needs a non-negative integer faces array");
+            }
+            g.faces.push_back(f.get<int32_t>());
+        }
     } else {
         throw std::runtime_error("robot-def: unknown geometry type '" + type + "'");
     }
@@ -185,6 +198,8 @@ json GeometryToJson(const Geometry& g) {
             return json{{"type", "plane"}, {"size", {g.size.x, g.size.y}}};
         case GeometryType::kMesh:
             return json{{"type", "mesh"}, {"path", g.path}, {"scale", {g.scale.x, g.scale.y, g.scale.z}}};
+        case GeometryType::kCadMesh:
+            return json{{"type", "cad_mesh"}, {"vertices", g.vertices}, {"faces", g.faces}};
     }
     throw std::runtime_error("robot-def: unknown geometry type");
 }
@@ -264,6 +279,12 @@ bool GeometryIsValid(const Geometry& g) {
             return g.radius > 0 && g.length > 0;
         case GeometryType::kMesh:
             return !g.path.empty();
+        case GeometryType::kCadMesh:
+            if (g.vertices.empty() || g.vertices.size() % 3 != 0 || g.faces.empty() || g.faces.size() % 3 != 0) return false;
+            for (const auto& index : g.faces) {
+                if (static_cast<size_t>(index) >= g.vertices.size() / 3) return false;
+            }
+            return true;
     }
     return true;
 }

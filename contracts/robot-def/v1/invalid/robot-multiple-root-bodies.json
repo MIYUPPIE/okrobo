@@ -1,0 +1,8 @@
+{
+  "id": "invalid-fixture",
+  "name": "robot-multiple-root-bodies",
+  "bodies": [
+    { "id": "base", "name": "Base", "mass": 1.0, "inertia": { "ixx": 0.01, "iyy": 0.01, "izz": 0.01 } },
+    { "id": "extra", "name": "Extra", "mass": 1.0, "inertia": { "ixx": 0.01, "iyy": 0.01, "izz": 0.01 } }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "id": "invalid-fixture",
+  "name": "body-duplicate-id",
+  "bodies": [
+    { "id": "base", "name": "Base A", "mass": 1.0, "inertia": { "ixx": 0.01, "iyy": 0.01, "izz": 0.01 } },
+    { "id": "base", "name": "Base B", "mass": 2.0, "inertia": { "ixx": 0.02, "iyy": 0.02, "izz": 0.02 } }
+  ]
+}

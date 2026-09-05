@@ -1,0 +1,88 @@
+{
+  "id": "two-link-arm",
+  "name": "Two-Link Arm",
+  "description": "Exercises every top-level array at least once: a root body plus two hinge-jointed links, a motor, an encoder, and a camera.",
+  "bodies": [
+    {
+      "id": "base",
+      "name": "Base",
+      "visual": { "type": "cylinder", "radius": 0.05, "length": 0.1 },
+      "collision": { "type": "cylinder", "radius": 0.05, "length": 0.1 },
+      "mass": 0.5,
+      "inertia": { "ixx": 0.001, "iyy": 0.001, "izz": 0.001 },
+      "material": { "color": [0.2, 0.2, 0.2] }
+    },
+    {
+      "id": "link1",
+      "name": "Link 1",
+      "transform": { "position": [0, 0, 0.1] },
+      "visual": { "type": "box", "size": [0.04, 0.04, 0.2] },
+      "collision": { "type": "box", "size": [0.04, 0.04, 0.2] },
+      "mass": 0.3,
+      "inertia": { "ixx": 0.0005, "iyy": 0.0005, "izz": 0.0002 },
+      "material": { "color": [0.6, 0.6, 0.6] }
+    },
+    {
+      "id": "link2",
+      "name": "Link 2 (tip)",
+      "transform": { "position": [0, 0, 0.2] },
+      "visual": { "type": "capsule", "radius": 0.02, "length": 0.15 },
+      "collision": { "type": "capsule", "radius": 0.02, "length": 0.15 },
+      "mass": 0.15,
+      "inertia": { "ixx": 0.0002, "iyy": 0.0002, "izz": 0.0001 },
+      "material": { "color": [0.8, 0.2, 0.2] }
+    }
+  ],
+  "joints": [
+    {
+      "id": "joint1",
+      "name": "Shoulder",
+      "type": "hinge",
+      "parent": "base",
+      "child": "link1",
+      "origin": { "position": [0, 0, 0.1] },
+      "axis": [0, 1, 0],
+      "limits": { "lower": -1.5707963267948966, "upper": 1.5707963267948966 },
+      "damping": 0.01,
+      "friction": 0.0
+    },
+    {
+      "id": "joint2",
+      "name": "Elbow",
+      "type": "hinge",
+      "parent": "link1",
+      "child": "link2",
+      "origin": { "position": [0, 0, 0.2] },
+      "axis": [0, 1, 0],
+      "limits": { "lower": -2.0943951023931953, "upper": 2.0943951023931953 },
+      "damping": 0.01,
+      "friction": 0.0
+    }
+  ],
+  "actuators": [
+    {
+      "id": "shoulder_motor",
+      "name": "Shoulder Motor",
+      "type": "motor",
+      "target_joint": "joint1",
+      "limits": { "effort": 2.0, "velocity": 3.14 }
+    }
+  ],
+  "sensors": [
+    {
+      "id": "shoulder_encoder",
+      "name": "Shoulder Encoder",
+      "type": "encoder",
+      "body": "link1",
+      "joint": "joint1"
+    },
+    {
+      "id": "tip_camera",
+      "name": "Tip Camera",
+      "type": "camera",
+      "body": "link2",
+      "transform": { "position": [0, 0, 0.075] },
+      "params": { "width": 64, "height": 48, "fov_degrees": 60 }
+    }
+  ]
+}

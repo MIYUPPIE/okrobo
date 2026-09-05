@@ -541,6 +541,63 @@ void TestLidarReadsOpenRangeThenBlocked() {
     assert(any_close_hit);
 }
 
+// ---- CAD Kernel Phase 1: cad_mesh geometry ----
+// See docs/decisions/cad-kernel-foundation.md.
+
+// A cad_mesh body -- the same box shape as TestDropAndSettle, but authored
+// as 8 raw vertices/12 triangular faces instead of GeometryType::kBox --
+// dropped from height settles at exactly the same resting height as the
+// native box. Proves AddCadMesh's mjs_addMesh/uservert/userface injection
+// produces a real MuJoCo collider (mj_compile builds its convex hull), not
+// a placeholder: the placeholder path (GeometryType::kMesh) would settle at
+// kMeshPlaceholderHalfExtent (0.03) instead, a different, wrong number.
+void TestCadMeshBodySettles() {
+    constexpr double kHalfX = 0.1, kHalfY = 0.075, kHalfZ = 0.04;
+    // clang-format off
+    const std::vector<double> vertices = {
+        -kHalfX, -kHalfY, -kHalfZ,  kHalfX, -kHalfY, -kHalfZ,  kHalfX, kHalfY, -kHalfZ,  -kHalfX, kHalfY, -kHalfZ,
+        -kHalfX, -kHalfY,  kHalfZ,  kHalfX, -kHalfY,  kHalfZ,  kHalfX, kHalfY,  kHalfZ,  -kHalfX, kHalfY,  kHalfZ,
+    };
+    const std::vector<int32_t> faces = {
+        0, 1, 2,  0, 2, 3,   // bottom
+        4, 6, 5,  4, 7, 6,   // top
+        0, 1, 5,  0, 5, 4,   // front (-y)
+        3, 2, 6,  3, 6, 7,   // back (+y)
+        0, 4, 7,  0, 7, 3,   // left (-x)
+        1, 2, 6,  1, 6, 5,   // right (+x)
+    };
+    // clang-format on
+
+    okrobo::RobotDef robot;
+    robot.id = "cad-mesh-drop-test";
+    robot.name = "CAD Mesh Drop Test";
+    robot.root_placement.position = {0.0, 0.0, 0.5};
+
+    okrobo::Body box;
+    box.id = "box";
+    box.name = "Box";
+    box.mass = 1.0;
+    box.inertia = MakeInertia(0.01);
+    box.has_collision = true;
+    box.collision.type = okrobo::GeometryType::kCadMesh;
+    box.collision.vertices = vertices;
+    box.collision.faces = faces;
+    robot.bodies.push_back(box);
+
+    okrobo::BuiltRobot built(robot);
+    Run(built, 2.0);
+
+    const auto pose = built.body_pose(0);
+    std::fprintf(stderr, "cad-mesh-drop-and-settle: x=%.6f y=%.6f z=%.6f\n", pose.x, pose.y, pose.z);
+    // Looser lateral tolerance than TestDropAndSettle's native kBox: a mesh's
+    // convex-hull-derived collision (built from our own 8 hand-authored
+    // vertices) generates contact points with tiny floating-point asymmetry
+    // that an analytic box primitive doesn't have -- real but negligible.
+    assert(std::abs(pose.x) < 1e-3);
+    assert(std::abs(pose.y) < 1e-3);
+    assert(std::abs(pose.z - kHalfZ) < 5e-3);  // same resting height as an equivalent kBox geometry
+}
+
 // ---- Robot Builder Phase 5: world objects ----
 // See docs/decisions/robot-builder-world.md.
 
@@ -604,6 +661,7 @@ int main() {
     TestForceTorqueNonzeroOnLoadedJoint();
     TestImuAccelerometerReadsGravityAtRest();
     TestLidarReadsOpenRangeThenBlocked();
+    TestCadMeshBodySettles();
     TestRobotSettlesOnWorldObject();
     std::puts("built_robot: all tests passed");
     return 0;

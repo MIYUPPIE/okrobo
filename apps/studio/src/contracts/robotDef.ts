@@ -1,13 +1,16 @@
-// TypeScript mirror of contracts/robot-def/v0. Change only together with the
+// TypeScript mirror of contracts/robot-def/v1. Change only together with the
 // contract (version bump) and the other mirrors (runtime/python/okrobo/robot_def.py,
 // engine/src/robot_def.{hpp,cpp}).
 //
-// A robot-def document is purely structural data -- bodies, joints,
-// actuators, sensors -- with no simulation behavior in v0: parsed and
-// validated here, never simulated. The kinematic tree is defined entirely by
-// joints[] edges, not a body.parent field, mirroring URDF and this repo's own
-// packs/urdf.ts idiom: a body with no incoming joint edge is a root, and
-// rigid attachment is a `fixed` joint, not a second hierarchy mechanism.
+// A robot-def document is structural data -- bodies, joints, actuators,
+// sensors. The kinematic tree is defined entirely by joints[] edges, not a
+// body.parent field, mirroring URDF and this repo's own packs/urdf.ts idiom:
+// a body with no incoming joint edge is a root, and rigid attachment is a
+// `fixed` joint, not a second hierarchy mechanism.
+//
+// v1 (CAD Kernel Phase 1) adds one new Geometry variant, `cad_mesh`: baked,
+// frozen vertex/face data from the CAD kernel (apps/studio/src/cad/) -- not
+// a live, re-editable feature tree. See docs/decisions/cad-kernel-foundation.md.
 //
 // parseRobotDef throws on malformed shape (same posture as validateWorld.ts).
 // validateRobotDef never throws: it always returns a (possibly empty) list of
@@ -27,7 +30,10 @@ export type Geometry =
   | { type: "capsule"; radius: number; length: number }
   | { type: "cone"; radius: number; length: number }
   | { type: "plane"; size: [number, number] }
-  | { type: "mesh"; path: string; scale: Vec3 };
+  | { type: "mesh"; path: string; scale: Vec3 }
+  /** Baked CAD-kernel output (v1) -- flat triangulated vertex/face arrays,
+   * not a live feature tree. See docs/decisions/cad-kernel-foundation.md. */
+  | { type: "cad_mesh"; vertices: number[]; faces: number[] };
 
 export interface Inertia {
   ixx: number;
@@ -176,6 +182,15 @@ export function parseGeometry(value: unknown): Geometry | undefined {
     case "mesh":
       if (typeof g.path !== "string" || g.path.length === 0) throw new Error("robot-def: mesh geometry needs path");
       return { type: "mesh", path: g.path, scale: g.scale === undefined ? [1, 1, 1] : asVec3(g.scale, "geometry.scale") };
+    case "cad_mesh": {
+      if (!Array.isArray(g.vertices) || !g.vertices.every(isFiniteNumber)) {
+        throw new Error("robot-def: cad_mesh geometry needs a numeric vertices array");
+      }
+      if (!Array.isArray(g.faces) || !g.faces.every((v) => Number.isInteger(v) && v >= 0)) {
+        throw new Error("robot-def: cad_mesh geometry needs a non-negative integer faces array");
+      }
+      return { type: "cad_mesh", vertices: g.vertices, faces: g.faces };
+    }
     default:
       throw new Error(`robot-def: unknown geometry type ${String(g.type)}`);
   }
@@ -312,6 +327,8 @@ export function geometryToJson(g: Geometry): unknown {
       return { type: "plane", size: g.size };
     case "mesh":
       return { type: "mesh", path: g.path, scale: g.scale };
+    case "cad_mesh":
+      return { type: "cad_mesh", vertices: g.vertices, faces: g.faces };
   }
 }
 
@@ -391,6 +408,14 @@ function geometryIsValid(g: Geometry): boolean {
       return g.radius > 0 && g.length > 0;
     case "mesh":
       return g.path.length > 0;
+    case "cad_mesh":
+      return (
+        g.vertices.length > 0 &&
+        g.vertices.length % 3 === 0 &&
+        g.faces.length > 0 &&
+        g.faces.length % 3 === 0 &&
+        g.faces.every((index) => index < g.vertices.length / 3)
+      );
   }
 }
 

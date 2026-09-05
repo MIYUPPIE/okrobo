@@ -25,6 +25,19 @@ describe("geometryFor", () => {
     expect(geometryFor({ type: "mesh", path: "foo.glb", scale: [1, 1, 1] })).toBeInstanceOf(THREE.BoxGeometry);
     expect(geometryFor(undefined)).toBeInstanceOf(THREE.BoxGeometry);
   });
+
+  // CAD Kernel Phase 1: real geometry, not a placeholder -- see
+  // docs/decisions/cad-kernel-foundation.md.
+  it("builds a real BufferGeometry from cad_mesh's baked vertex/face data", () => {
+    const vertices = [0, 0, 0, 0.1, 0, 0, 0, 0.1, 0, 0, 0, 0.1]; // a tetrahedron
+    const faces = [0, 1, 2, 0, 1, 3, 0, 2, 3, 1, 2, 3];
+    const geom = geometryFor({ type: "cad_mesh", vertices, faces });
+    expect(geom).toBeInstanceOf(THREE.BufferGeometry);
+    expect(geom).not.toBeInstanceOf(THREE.BoxGeometry); // not the mesh-type placeholder
+    expect(geom.getAttribute("position").count).toBe(4); // 4 vertices
+    expect(geom.getIndex()?.count).toBe(12); // 4 faces * 3 indices
+    expect(geom.getAttribute("normal")).toBeDefined(); // computeVertexNormals() ran
+  });
 });
 
 describe("applyTransform", () => {

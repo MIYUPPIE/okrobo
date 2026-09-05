@@ -31,6 +31,18 @@ export function geometryFor(geometry: Geometry | undefined): THREE.BufferGeometr
       return new THREE.PlaneGeometry(geometry.size[0], geometry.size[1]);
     case "mesh":
       return new THREE.BoxGeometry(PLACEHOLDER_SIZE, PLACEHOLDER_SIZE, PLACEHOLDER_SIZE);
+    case "cad_mesh": {
+      // Real geometry, not a placeholder -- baked CAD-kernel output (see
+      // docs/decisions/cad-kernel-foundation.md). No CAD kernel involved
+      // here at all: just raw vertex/index data, the same cost as any other
+      // three.js mesh. computeVertexNormals() since the schema doesn't
+      // carry per-vertex normals (MuJoCo computes its own separately).
+      const bufferGeometry = new THREE.BufferGeometry();
+      bufferGeometry.setAttribute("position", new THREE.Float32BufferAttribute(geometry.vertices, 3));
+      bufferGeometry.setIndex(geometry.faces);
+      bufferGeometry.computeVertexNormals();
+      return bufferGeometry;
+    }
   }
 }
 

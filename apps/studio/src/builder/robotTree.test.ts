@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { parseRobotDef, validateRobotDef } from "../contracts/robotDef";
 import { buildKinematicTree } from "./robotTree";
 
-const CONTRACT_DIR = join(process.cwd(), "..", "..", "contracts", "robot-def", "v0");
+const CONTRACT_DIR = join(process.cwd(), "..", "..", "contracts", "robot-def", "v1");
 const load = (dir: string, name: string): unknown => JSON.parse(readFileSync(join(dir, `${name}.json`), "utf8"));
 
 describe("buildKinematicTree", () => {
