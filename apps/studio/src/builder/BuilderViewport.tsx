@@ -19,10 +19,11 @@ import { geometryFor, materializeRobotScene, resolveBodyId, setHighlighted } fro
 // OrbitControls/TransformControls/render loop/picking, deps []) that must
 // never re-run -- re-running it would recreate the renderer and reset the
 // camera on every edit -- a rebuild effect (deps [robot, selectedBodyId,
-// gizmoMode]) that only touches the robot's own sub-scene, and a CAD-preview
-// effect (deps [cadPreview], Robot Builder CAD Kernel Phase 2) that only
-// touches a separate preview group never added to bodyGroupByIdRef, so it
-// can never affect raycasting or the real robot's own rendering.
+// gizmoMode, jointPick, bodyPick, suppressedBodyId]) that only touches the
+// robot's own sub-scene, and a CAD-preview effect (deps [cadPreview],
+// Robot Builder CAD Kernel Phase 2) that only touches a separate preview
+// group never added to bodyGroupByIdRef, so it can never affect raycasting
+// or the real robot's own rendering.
 //
 // No unit test here (matches the existing precedent -- Viewport3D.tsx has
 // none either; jsdom can't construct a real WebGLRenderer). Verified by the
@@ -47,16 +48,40 @@ export interface BuilderViewportProps {
    * the whole time -- dragging bodies and picking a joint pair are two
    * different things to be doing at once. */
   jointPick?: { parentId: string | null; onPick: (bodyId: string) => void };
+  /** Robot Builder CAD Kernel Phase 4 (Cut): a single-body pick (no
+   * parent-then-child two-step, unlike jointPick) for choosing an existing
+   * body as a Cut target. Same miss-is-ignored/gizmo-detached posture as
+   * jointPick, kept as its own prop rather than unified with it -- Cut's
+   * tools each got their own toggle handler in BuilderPanel.tsx too,
+   * consistent with how Extrude/Revolve/Boundary never shared one with Add
+   * Joint. */
+  bodyPick?: { selectedId: string | null; onPick: (bodyId: string) => void };
   /** Extrude tool (Robot Builder CAD Kernel Phase 2). A live preview of the
    * CAD body being authored -- not yet part of `robot` -- rendered as a
    * separate, semi-transparent ghost mesh, positioned where the body would
    * actually land if Applied. */
   cadPreview?: CadPreview | null;
+  /** Robot Builder CAD Kernel Phase 4 (Cut): hides this body's own real
+   * mesh while a Cut tool is actively previewing, so only the live
+   * cut-result ghost (cadPreview, positioned at the same spot) shows --
+   * avoids a confusing double-render of the original solid overlapping its
+   * own cut result. */
+  suppressedBodyId?: string | null;
 }
 
 const DRAG_CLICK_THRESHOLD_PX = 4;
 
-export function BuilderViewport({ robot, selectedBodyId, onSelectBody, onTransformBody, gizmoMode, jointPick, cadPreview }: BuilderViewportProps) {
+export function BuilderViewport({
+  robot,
+  selectedBodyId,
+  onSelectBody,
+  onTransformBody,
+  gizmoMode,
+  jointPick,
+  bodyPick,
+  cadPreview,
+  suppressedBodyId,
+}: BuilderViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Populated by the mount effect; read by the rebuild effect and by the
@@ -71,11 +96,13 @@ export function BuilderViewport({ robot, selectedBodyId, onSelectBody, onTransfo
   const onSelectBodyRef = useRef(onSelectBody);
   const onTransformBodyRef = useRef(onTransformBody);
   const jointPickRef = useRef(jointPick);
+  const bodyPickRef = useRef(bodyPick);
   useEffect(() => {
     selectedBodyIdRef.current = selectedBodyId;
     onSelectBodyRef.current = onSelectBody;
     onTransformBodyRef.current = onTransformBody;
     jointPickRef.current = jointPick;
+    bodyPickRef.current = bodyPick;
   });
 
   // Mount-once: renderer, scene, camera, controls, render loop, picking.
@@ -161,6 +188,11 @@ export function BuilderViewport({ robot, selectedBodyId, onSelectBody, onTransfo
         if (hitBodyId) pick.onPick(hitBodyId);
         return; // a miss is ignored -- don't cancel an in-progress pick
       }
+      const cutPick = bodyPickRef.current;
+      if (cutPick) {
+        if (hitBodyId) cutPick.onPick(hitBodyId);
+        return; // same miss-is-ignored posture as jointPick
+      }
       onSelectBodyRef.current(hitBodyId);
     };
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
@@ -214,13 +246,19 @@ export function BuilderViewport({ robot, selectedBodyId, onSelectBody, onTransfo
     robotRoot.add(root);
     bodyGroupByIdRef.current = bodyGroupById;
 
-    const highlightedId = jointPick ? jointPick.parentId : selectedBodyId;
+    const highlightedId = jointPick ? jointPick.parentId : bodyPick ? bodyPick.selectedId : selectedBodyId;
     for (const [id, group] of bodyGroupById) setHighlighted(group, id === highlightedId);
 
-    if (jointPick) {
-      // Picking a joint pair and dragging a body are two different things
-      // to be doing at once -- the gizmo has no business being attached
-      // while the tool is active, regardless of any stale selection.
+    if (suppressedBodyId) {
+      const suppressed = bodyGroupById.get(suppressedBodyId);
+      if (suppressed) suppressed.visible = false;
+    }
+
+    if (jointPick || bodyPick) {
+      // Picking a body (joint pair or Cut target) and dragging one are two
+      // different things to be doing at once -- the gizmo has no business
+      // being attached while either tool is active, regardless of any
+      // stale selection.
       transformControls.detach();
       return;
     }
@@ -228,7 +266,7 @@ export function BuilderViewport({ robot, selectedBodyId, onSelectBody, onTransfo
     const selectedGroup = selectedBodyId ? bodyGroupById.get(selectedBodyId) : undefined;
     if (selectedGroup) transformControls.attach(selectedGroup);
     else transformControls.detach();
-  }, [robot, selectedBodyId, gizmoMode, jointPick]);
+  }, [robot, selectedBodyId, gizmoMode, jointPick, bodyPick, suppressedBodyId]);
 
   // CAD-preview effect (Robot Builder CAD Kernel Phase 2): deliberately
   // independent of the rebuild effect above -- previewGroup is never added

@@ -93,6 +93,24 @@ export function makeCadBody(id: string, near: Body | null, mesh: Pick<CadMeshGeo
   };
 }
 
+/** Robot Builder CAD Kernel Phase 4 (Cut): replaces an existing body's own
+ * visual and collision geometry with a real cad_mesh result -- id, name,
+ * transform, mass, inertia, and material are all left untouched. Mass/
+ * inertia are deliberately not recomputed from the new (smaller, hollowed-
+ * out) shape, the same accepted simplification makeCadBody's own Boss
+ * bodies already ship with; still editable afterward via BodyInspector.
+ * A no-op (returns `robot` as-is) if `targetBodyId` doesn't match any body
+ * -- callers only ever call this right after picking a real target, so
+ * that should never happen in practice, but this keeps the function total
+ * rather than throwing on a stale id. */
+export function replaceBodyGeometry(robot: RobotDef, targetBodyId: string, mesh: Pick<CadMeshGeometry, "vertices" | "faces">): RobotDef {
+  const geometry: Geometry = { type: "cad_mesh", vertices: mesh.vertices, faces: mesh.faces };
+  return {
+    ...robot,
+    bodies: robot.bodies.map((b) => (b.id === targetBodyId ? { ...b, visual: geometry, collision: geometry } : b)),
+  };
+}
+
 /** Removes a body and cascades: joints that reference it as parent or
  * child, then actuators targeting a removed joint, then sensors on the
  * removed body or a removed joint. */

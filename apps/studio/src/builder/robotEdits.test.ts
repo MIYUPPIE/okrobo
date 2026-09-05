@@ -12,6 +12,7 @@ import {
   nextBodyId,
   nextJointId,
   removeBody,
+  replaceBodyGeometry,
 } from "./robotEdits";
 
 const EXAMPLES_DIR = join(process.cwd(), "..", "..", "contracts", "robot-def", "v1", "examples");
@@ -89,6 +90,45 @@ describe("makeCadBody", () => {
     expect(validateRobotDef(robot)).toEqual([
       expect.objectContaining({ rule: "robot-multiple-root-bodies", element_id: newId }),
     ]);
+  });
+});
+
+describe("replaceBodyGeometry", () => {
+  const mesh = { vertices: [0, 0, 0, 0.1, 0, 0, 0, 0.1, 0], faces: [0, 1, 2] };
+
+  it("replaces the target body's visual and collision with the given cad_mesh geometry", () => {
+    const robot = makeDefaultRobotDef();
+    const targetId = robot.bodies[0].id;
+    const next = replaceBodyGeometry(robot, targetId, mesh);
+    const body = next.bodies.find((b) => b.id === targetId)!;
+    expect(body.visual).toEqual({ type: "cad_mesh", vertices: mesh.vertices, faces: mesh.faces });
+    expect(body.collision).toEqual({ type: "cad_mesh", vertices: mesh.vertices, faces: mesh.faces });
+  });
+
+  it("leaves id, name, transform, mass, inertia, and material untouched", () => {
+    const robot = makeDefaultRobotDef();
+    const before = robot.bodies[0];
+    const next = replaceBodyGeometry(robot, before.id, mesh);
+    const after = next.bodies.find((b) => b.id === before.id)!;
+    expect(after.id).toBe(before.id);
+    expect(after.name).toBe(before.name);
+    expect(after.transform).toEqual(before.transform);
+    expect(after.mass).toBe(before.mass);
+    expect(after.inertia).toEqual(before.inertia);
+    expect(after.material).toEqual(before.material);
+  });
+
+  it("leaves every other body untouched", () => {
+    const robot = loadTwoLinkArm();
+    const next = replaceBodyGeometry(robot, "link1", mesh);
+    const base = next.bodies.find((b) => b.id === "base")!;
+    const original = robot.bodies.find((b) => b.id === "base")!;
+    expect(base).toEqual(original);
+  });
+
+  it("is a no-op when the target id doesn't exist", () => {
+    const robot = makeDefaultRobotDef();
+    expect(replaceBodyGeometry(robot, "ghost", mesh)).toEqual(robot);
   });
 });
 

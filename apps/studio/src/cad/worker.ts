@@ -18,7 +18,19 @@
 
 import { expose } from "comlink";
 import wasmUrl from "replicad-opencascadejs/wasm?url";
-import { extrudeCircleMesh, extrudeRectangleMesh, loftMesh, loadOC, revolveMesh, type Profile } from "./kernel.ts";
+import manifoldWasmUrl from "manifold-3d/manifold.wasm?url";
+import {
+  cutMesh,
+  extrudeCircleMesh,
+  extrudeRectangleMesh,
+  loftMesh,
+  loadManifold,
+  loadOC,
+  revolveMesh,
+  type CadMesh,
+  type CutTool,
+  type Profile,
+} from "./kernel.ts";
 
 const api = {
   async extrudeRectangle(width: number, height: number, depth: number) {
@@ -37,6 +49,12 @@ const api = {
   async loft(startProfile: Profile, endProfile: Profile, height: number) {
     await loadOC({ locateFile: () => wasmUrl });
     return loftMesh(startProfile, endProfile, height);
+  },
+  // CAD Kernel Phase 4 (Cut): needs both OpenCascade (to build the tool
+  // solid) and Manifold (for the real mesh boolean).
+  async cut(targetMesh: CadMesh, tool: CutTool, position: readonly [number, number, number]) {
+    await Promise.all([loadOC({ locateFile: () => wasmUrl }), loadManifold({ locateFile: () => manifoldWasmUrl })]);
+    return cutMesh(targetMesh, tool, position);
   },
 };
 

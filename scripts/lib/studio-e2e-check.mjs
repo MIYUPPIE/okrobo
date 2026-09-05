@@ -911,6 +911,66 @@ try {
     await waitForCondition("document.querySelector('.inspector-mesh-note')?.textContent?.includes('CAD part')", 5000),
   );
 
+  // -- robot builder: Cut operations (CAD Kernel Phase 4) -----------------
+  // body-2 (the original starter Chassis was itself deleted by the earlier
+  // Add Joint section's own "Delete body" step, leaving body-2 -- a plain
+  // box added via "+ Add body" -- as the sole surviving body at this
+  // point) starts as a plain box -- Extruded Cut proves a primitive body
+  // can be a real Cut target (geometryToMesh's own bridge, not just an
+  // already-cad_mesh one), and chaining Revolved/Boundary Cut onto the
+  // SAME now-cad_mesh body-2 proves Cut also works once the target is
+  // already a cad_mesh part. See docs/decisions/cad-kernel-cut-operations.md.
+  const bodyCountBeforeCuts = await page.evaluate("document.querySelectorAll('.hierarchy-row').length");
+
+  await page.evalClickText(".builder-toolbar button", "/^Extruded Cut$/");
+  check(
+    "Build mode: Extruded Cut enters the picking tool with a hint",
+    await waitForCondition("document.querySelector('.joint-pick-hint')?.textContent === 'Click the body to cut.'", 5000),
+  );
+  await page.clickText(".hierarchy-row", "/^body-2$/");
+  check(
+    "Build mode: picking a target body shows the Extruded Cut creation form",
+    await waitForCondition("document.querySelector('.builder-inspector h4')?.textContent === 'New CAD part (Extruded Cut)'", 5000),
+  );
+  check(
+    "Build mode: the default cutting tool computes a real preview through the warm CAD worker (Apply enables)",
+    await waitForCondition("!document.querySelector('.cad-extrude-creator .inspector-actions button.primary')?.disabled", 10000),
+  );
+  await page.evalClickText(".inspector-actions button", "/^Apply$/");
+  check(
+    "Build mode: Extruded Cut commits a real cut into the target body's own geometry (no new body added)",
+    await waitForCondition(`document.querySelectorAll('.hierarchy-row').length === ${bodyCountBeforeCuts}`, 5000),
+  );
+  await page.evalClickText(".hierarchy-row", "/^body-2$/");
+  check(
+    "Build mode: body-2 (a plain box) really became a cad_mesh body -- Shape is now locked to CAD part",
+    await waitForCondition("document.querySelector('.inspector-mesh-note')?.textContent?.includes('CAD part')", 5000),
+  );
+
+  await page.evalClickText(".builder-toolbar button", "/^Revolved Cut$/");
+  await page.clickText(".hierarchy-row", "/^body-2$/");
+  check(
+    "Build mode: Revolved Cut targets the same (already-cad_mesh) body and computes a real preview",
+    await waitForCondition("!document.querySelector('.cad-extrude-creator .inspector-actions button.primary')?.disabled", 10000),
+  );
+  await page.evalClickText(".inspector-actions button", "/^Apply$/");
+  check(
+    "Build mode: Revolved Cut commits with no new body added",
+    await waitForCondition(`document.querySelectorAll('.hierarchy-row').length === ${bodyCountBeforeCuts}`, 5000),
+  );
+
+  await page.evalClickText(".builder-toolbar button", "/^Boundary Cut$/");
+  await page.clickText(".hierarchy-row", "/^body-2$/");
+  check(
+    "Build mode: Boundary Cut targets the same body and computes a real preview",
+    await waitForCondition("!document.querySelector('.cad-extrude-creator .inspector-actions button.primary')?.disabled", 10000),
+  );
+  await page.evalClickText(".inspector-actions button", "/^Apply$/");
+  check(
+    "Build mode: Boundary Cut commits with no new body added",
+    await waitForCondition(`document.querySelectorAll('.hierarchy-row').length === ${bodyCountBeforeCuts}`, 5000),
+  );
+
   await page.clickText(".mode-toggle button", "/^Simulate$/");
   const backToSimulate = await waitForCondition(
     "!!document.querySelector('.sidebar') && !!document.querySelector('.viewport-3d canvas')",

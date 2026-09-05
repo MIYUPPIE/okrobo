@@ -17,6 +17,7 @@
     "@tauri-apps/plugin-dialog": "^2.7.3",
     "blockly": "^13.2.1",
     "comlink": "^4.4.2",
+    "manifold-3d": "^3.5.1",
     "monaco-editor": "^0.56.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

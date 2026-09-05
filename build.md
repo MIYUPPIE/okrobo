@@ -1315,3 +1315,73 @@ test` (455 passed across 50 files), `npm run typecheck`, `npm run build`
 the main bundle, which grew by only ~8KB), and the full `test-all.sh` gate
 suite (including all new E2E checks, run for real against a live dev
 server and headless Chrome) all green.
+
+## CAD Kernel — Phase 4: Cut operations (2026-09-05)
+
+Extruded Cut, Revolved Cut, Boundary Cut -- the boolean-subtraction
+counterpart to every Boss operation shipped so far, each removing a tool
+shape from an **existing** body in place instead of creating a new one.
+This looked architecturally blocked at first (Phase 1-3 bodies are baked,
+frozen mesh data with no live B-rep to boolean against) but isn't:
+replicad exposes a second, mesh-native boolean path via a new dependency,
+`manifold-3d` (~530KB WASM, tiny next to OpenCascade's ~23MB, loaded
+lazily in the same Worker). A baked body's mesh round-trips through an
+STL blob into a real, boolean-operable `MeshShape` with zero *additional*
+precision loss (STL is itself a flat triangle format, nothing curved left
+to facet a second time) -- verified end to end with a real scratch test
+before committing to the design (a baked box, an off-center cylinder
+tool, a real 72-vertex cut result, outer bounding box unchanged) exactly
+the same discipline that found Phase 3's revolve-origin gotcha. Two more
+real questions were resolved the same way before writing `cutMesh`'s final
+body: `Solid.translate()` returns a new object (the original still needs
+its own `.delete()`), and the cut result stays fully usable even after
+every input is deleted immediately. See
+`docs/decisions/cad-kernel-cut-operations.md`.
+
+The user chose "any body type" as a Cut target over restricting to
+already-`cad_mesh` bodies -- covering the real common case (drilling a
+hole in a plain box) directly. The bridge:
+`apps/studio/src/builder/geometryToMesh.ts` reuses `robotThree.ts`'s
+existing `geometryFor` (already built for rendering every primitive type)
+and reads its buffers back into the same flat mesh shape the kernel
+already works with -- no new tessellation code. A cut body permanently
+becomes a baked `cad_mesh` part afterward, same as any Boss body -- no
+live feature tree yet (Phase 7).
+
+Each Cut creator needed the identical profile-authoring fields its Boss
+counterpart already has, plus a new Position (X/Y/Z) block -- rather than
+writing that block a 5th and 6th time, `CadProfileFields.tsx` was
+extracted and `CadExtrudeCreator`/`CadRevolveCreator`/`CadBoundaryCreator`
+retrofitted to use it too, their own test suites re-running unchanged
+afterward to confirm a pure internal refactor. Caught and fixed one real
+wording regression during that retrofit before it shipped: the generic
+version produced "Start Radius" (capitalized) where the original produced
+"Start radius" (lowercase). `BuilderViewport.tsx` gained a new `bodyPick`
+prop (a single pick, structurally parallel to but not unified with the
+existing two-step `jointPick`) and a `suppressedBodyId` prop that hides
+the target's own real mesh while its live cut-result preview shows in its
+place.
+
+Tests: `extrude.test.ts` (+2 real-pipeline cases: a hole punched through a
+box with its outer bounding box unchanged, plus revolved/lofted cutting
+tools), `cadClient.test.ts` (+1 mocked wiring), `geometryToMesh.test.ts`
+(new, 5 cases -- box/sphere/cylinder/cad_mesh/undefined all produce sane
+flat arrays), `robotEdits.test.ts` (+4: `replaceBodyGeometry`), three new
+Cut creator test files (7/5/5 cases), `BuilderPanel.test.tsx` (+11: the
+picking flow, three new stubs, all-eight-tools mutual exclusivity). 10 new
+`studio-e2e-check.mjs` checks -- picking an existing plain box body and
+chaining all three Cut tools onto it in sequence (box to cad_mesh via
+Extruded Cut, then Revolved Cut and Boundary Cut onto the now-already-
+cad_mesh body), proving Cut works on both a fresh primitive and an
+existing CAD part, through the real Worker + real OpenCascade + real
+Manifold. One real bug found and fixed while first running those for
+real: the check assumed the starter "Chassis" body would still exist at
+that point in the flow, but the *earlier* Add Joint section's own "Delete
+body" step deletes Chassis itself, not its joint partner -- traced
+directly (a short isolated replay reproduced the wrong assumption, not a
+timing race) and fixed by targeting the body that actually survives
+(`body-2`). `npm run test` (492 passed across 54 files), `npm run
+typecheck`, `npm run build` (manifold's WASM lands as its own separate
+asset, main bundle grew by only ~11KB), and the full `test-all.sh` gate
+suite (including all new E2E checks, run for real against a live dev
+server and headless Chrome) all green.

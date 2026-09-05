@@ -7,10 +7,10 @@
 // docs/decisions/cad-kernel-sketch-ui.md.
 
 import { wrap, type Remote } from "comlink";
-import type { CadMesh, Profile } from "./kernel.ts";
+import type { CadMesh, CutTool, Profile } from "./kernel.ts";
 import type { CadWorkerApi } from "./worker.ts";
 
-export type { CadMesh, Profile };
+export type { CadMesh, CutTool, Profile };
 
 export interface CadPreview {
   mesh: CadMesh;
@@ -50,4 +50,10 @@ export async function revolve(options: { profile: Profile; offset: number; angle
 export async function loft(options: { startProfile: Profile; endProfile: Profile; height: number }): Promise<CadMesh> {
   const api = await getApi();
   return api.loft(options.startProfile, options.endProfile, options.height);
+}
+
+// CAD Kernel Phase 4 (Cut).
+export async function cut(options: { targetMesh: CadMesh; tool: CutTool; position: readonly [number, number, number] }): Promise<CadMesh> {
+  const api = await getApi();
+  return api.cut(options.targetMesh, options.tool, options.position);
 }

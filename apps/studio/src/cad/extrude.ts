@@ -12,14 +12,15 @@
 // ./worker.ts's comlink-wrapped client instead.
 
 import {
+  cut as cutDirect,
   extrudeCircle as extrudeCircleDirect,
   extrudeRectangle as extrudeRectangleDirect,
   loft as loftDirect,
   revolve as revolveDirect,
 } from "./kernel.ts";
-import type { CadMesh, Profile } from "./kernel.ts";
+import type { CadMesh, CutTool, Profile } from "./kernel.ts";
 
-export type { CadMesh, Profile };
+export type { CadMesh, CutTool, Profile };
 
 export function extrudeRectangle(options: { width: number; height: number; depth: number }): Promise<CadMesh> {
   return extrudeRectangleDirect(options.width, options.height, options.depth);
@@ -37,4 +38,10 @@ export function revolve(options: { profile: Profile; offset: number; angleDeg: n
 
 export function loft(options: { startProfile: Profile; endProfile: Profile; height: number }): Promise<CadMesh> {
   return loftDirect(options.startProfile, options.endProfile, options.height);
+}
+
+// CAD Kernel Phase 4 (Cut): see kernel.ts's cutMesh for the geometry
+// conventions.
+export function cut(options: { targetMesh: CadMesh; tool: CutTool; position: readonly [number, number, number] }): Promise<CadMesh> {
+  return cutDirect(options.targetMesh, options.tool, options.position);
 }

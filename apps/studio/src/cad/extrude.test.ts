@@ -5,7 +5,7 @@
 // EngineBuiltRobot.test.ts already treats its own WASM engine load.
 
 import { describe, expect, it } from "vitest";
-import { extrudeCircle, extrudeRectangle, loft, revolve } from "./extrude";
+import { cut, extrudeCircle, extrudeRectangle, loft, revolve } from "./extrude";
 
 function meshRanges(mesh: { vertices: number[] }) {
   const xs = [];
@@ -199,5 +199,69 @@ describe("loft", () => {
       expect(maxRadius).toBeLessThan(0.045);
     },
     10_000,
+  );
+});
+
+// CAD Kernel Phase 4 (Cut). Real pipeline, no mocks -- see
+// docs/decisions/cad-kernel-cut-operations.md for the empirically verified
+// mesh-boolean approach (importSTLAsMesh + Manifold, not a B-rep
+// reconstruction).
+describe("cut", () => {
+  it(
+    "punches a real hole through a box with an off-center extruded cylinder tool, leaving its outer bounding box unchanged",
+    async () => {
+      const box = await extrudeRectangle({ width: 0.1, height: 0.1, depth: 0.1 });
+      const result = await cut({
+        targetMesh: box,
+        tool: { operation: "extrude", profile: { type: "circle", radius: 0.015 }, depth: 0.2 },
+        position: [0.03, 0, 0],
+      });
+
+      expect(result.vertices.length).toBeGreaterThan(box.vertices.length); // the hole adds real new internal geometry
+      expect(result.faces.length % 3).toBe(0);
+
+      const vertexCount = result.vertices.length / 3;
+      for (const index of result.faces) {
+        expect(index).toBeGreaterThanOrEqual(0);
+        expect(index).toBeLessThan(vertexCount);
+      }
+
+      const { x, y, z } = meshRanges(result);
+      // The tool punched all the way through -- the box's own outer extent
+      // is unchanged, proving this is a real subtraction, not a shape swap.
+      expect(x[1] - x[0]).toBeCloseTo(0.1, 1);
+      expect(y[1] - y[0]).toBeCloseTo(0.1, 1);
+      expect(z[1] - z[0]).toBeCloseTo(0.1, 1);
+    },
+    30_000,
+  );
+
+  it(
+    "cuts with a revolved (torus) tool and a lofted tool, each producing a real, non-degenerate result",
+    async () => {
+      const box = await extrudeRectangle({ width: 0.1, height: 0.1, depth: 0.1 });
+
+      const revolveCut = await cut({
+        targetMesh: box,
+        tool: { operation: "revolve", profile: { type: "circle", radius: 0.01 }, offset: 0.03, angleDeg: 360 },
+        position: [0, 0, 0],
+      });
+      expect(revolveCut.vertices.length).toBeGreaterThan(0);
+      expect(revolveCut.faces.length % 3).toBe(0);
+
+      const loftCut = await cut({
+        targetMesh: box,
+        tool: {
+          operation: "loft",
+          startProfile: { type: "circle", radius: 0.02 },
+          endProfile: { type: "circle", radius: 0.01 },
+          height: 0.15,
+        },
+        position: [0, 0, -0.075],
+      });
+      expect(loftCut.vertices.length).toBeGreaterThan(0);
+      expect(loftCut.faces.length % 3).toBe(0);
+    },
+    15_000,
   );
 });

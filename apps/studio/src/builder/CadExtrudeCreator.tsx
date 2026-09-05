@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Body, RobotDef } from "../contracts/robotDef";
 import type { CadPreview } from "../cad/cadClient";
 import { extrudeCircle, extrudeRectangle } from "../cad/cadClient";
+import { CadProfileDimensionFields, parseProfileDraft, positiveNumber, type ProfileDraft, type ProfileShape } from "./CadProfileFields";
 import { makeCadBody, nextBodyId } from "./robotEdits";
 import { useCadPreview } from "./useCadPreview";
 
@@ -16,56 +17,32 @@ import { useCadPreview } from "./useCadPreview";
 // Circle), matching exactly what the kernel supports; the user chose this
 // parametric-dimensions form over a freeform 2D sketch canvas (no such
 // canvas exists anywhere in this codebase). See
-// docs/decisions/cad-kernel-sketch-ui.md.
-
-type Profile = "rectangle" | "circle";
+// docs/decisions/cad-kernel-sketch-ui.md. Profile fields (shape dropdown +
+// width/height-or-radius) share their parse logic and dimension inputs
+// with Revolve/Boundary/the Cut creators via ./CadProfileFields.tsx.
 
 interface Draft {
-  profile: Profile;
-  width: string;
-  height: string;
-  radius: string;
+  profile: ProfileDraft;
   depth: string;
 }
 
-const initialDraft: Draft = { profile: "rectangle", width: "0.05", height: "0.05", radius: "0.025", depth: "0.02" };
+const initialDraft: Draft = { profile: { shape: "rectangle", width: "0.05", height: "0.05", radius: "0.025" }, depth: "0.02" };
 
-interface ParsedRectangle {
-  profile: "rectangle";
-  width: number;
-  height: number;
+interface ParsedDraft {
+  profile: { type: "rectangle"; width: number; height: number } | { type: "circle"; radius: number };
   depth: number;
 }
-interface ParsedCircle {
-  profile: "circle";
-  radius: number;
-  depth: number;
-}
-type ParseResult = { ok: true; value: ParsedRectangle | ParsedCircle } | { ok: false; message: string };
-
-function positiveNumber(raw: string, label: string): { ok: true; value: number } | { ok: false; message: string } {
-  const value = Number.parseFloat(raw);
-  if (!Number.isFinite(value) || value <= 0) return { ok: false, message: `${label} must be greater than 0` };
-  return { ok: true, value };
-}
+type ParseResult = { ok: true; value: ParsedDraft } | { ok: false; message: string };
 
 /** Validated locally, before ever calling the CAD worker -- OpenCascade
  * throws on degenerate input (e.g. zero width), so this both gives instant
  * feedback and avoids a wasted worker round-trip. */
 function parseDraft(draft: Draft): ParseResult {
+  const profile = parseProfileDraft(draft.profile);
+  if (!profile.ok) return profile;
   const depth = positiveNumber(draft.depth, "Depth");
-  if (draft.profile === "rectangle") {
-    const width = positiveNumber(draft.width, "Width");
-    if (!width.ok) return width;
-    const height = positiveNumber(draft.height, "Height");
-    if (!height.ok) return height;
-    if (!depth.ok) return depth;
-    return { ok: true, value: { profile: "rectangle", width: width.value, height: height.value, depth: depth.value } };
-  }
-  const radius = positiveNumber(draft.radius, "Radius");
-  if (!radius.ok) return radius;
   if (!depth.ok) return depth;
-  return { ok: true, value: { profile: "circle", radius: radius.value, depth: depth.value } };
+  return { ok: true, value: { profile: profile.value, depth: depth.value } };
 }
 
 export interface CadExtrudeCreatorProps {
@@ -88,19 +65,18 @@ export interface CadExtrudeCreatorProps {
 export function CadExtrudeCreator({ robot, near, onApply, onCancel, onPreviewChange }: CadExtrudeCreatorProps) {
   const bodyId = useMemo(() => nextBodyId(robot), [robot]);
   const [draft, setDraft] = useState<Draft>(initialDraft);
-
-  const setField = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
+  const setProfile = (profile: ProfileDraft) => setDraft((d) => ({ ...d, profile }));
 
   const { status, error, mesh } = useCadPreview(() => {
     const parsed = parseDraft(draft);
     if (!parsed.ok) return parsed;
     const call = () =>
-      parsed.value.profile === "rectangle"
-        ? extrudeRectangle({ width: parsed.value.width, height: parsed.value.height, depth: parsed.value.depth })
-        : extrudeCircle({ radius: parsed.value.radius, depth: parsed.value.depth });
+      parsed.value.profile.type === "rectangle"
+        ? extrudeRectangle({ width: parsed.value.profile.width, height: parsed.value.profile.height, depth: parsed.value.depth })
+        : extrudeCircle({ radius: parsed.value.profile.radius, depth: parsed.value.depth });
     return { ok: true, call };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.profile, draft.width, draft.height, draft.radius, draft.depth]);
+  }, [draft.profile, draft.depth]);
 
   // Only reacts on a real settle (ready/error) -- skips "loading" so the
   // previous preview stays visible during a recompute instead of flickering
@@ -128,7 +104,7 @@ export function CadExtrudeCreator({ robot, near, onApply, onCancel, onPreviewCha
         <h5>Profile</h5>
         <label>
           Shape
-          <select aria-label="cad profile" value={draft.profile} onChange={(e) => setField("profile", e.target.value as Profile)}>
+          <select aria-label="cad profile" value={draft.profile.shape} onChange={(e) => setProfile({ ...draft.profile, shape: e.target.value as ProfileShape })}>
             <option value="rectangle">Rectangle</option>
             <option value="circle">Circle</option>
           </select>
@@ -138,26 +114,17 @@ export function CadExtrudeCreator({ robot, near, onApply, onCancel, onPreviewCha
       <section className="inspector-section">
         <h5>Dimensions (m)</h5>
         <div className="inspector-grid">
-          {draft.profile === "rectangle" ? (
-            <>
-              <label>
-                Width
-                <input aria-label="cad width" type="number" step="0.01" min="0" value={draft.width} onChange={(e) => setField("width", e.target.value)} />
-              </label>
-              <label>
-                Height
-                <input aria-label="cad height" type="number" step="0.01" min="0" value={draft.height} onChange={(e) => setField("height", e.target.value)} />
-              </label>
-            </>
-          ) : (
-            <label>
-              Radius
-              <input aria-label="cad radius" type="number" step="0.01" min="0" value={draft.radius} onChange={(e) => setField("radius", e.target.value)} />
-            </label>
-          )}
+          <CadProfileDimensionFields ariaPrefix="cad" draft={draft.profile} onChange={setProfile} />
           <label>
             Depth
-            <input aria-label="cad depth" type="number" step="0.01" min="0" value={draft.depth} onChange={(e) => setField("depth", e.target.value)} />
+            <input
+              aria-label="cad depth"
+              type="number"
+              step="0.01"
+              min="0"
+              value={draft.depth}
+              onChange={(e) => setDraft((d) => ({ ...d, depth: e.target.value }))}
+            />
           </label>
         </div>
       </section>

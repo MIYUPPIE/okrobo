@@ -110,4 +110,17 @@ describe("cadClient", () => {
     expect(stubApi.loft).toHaveBeenCalledWith(startProfile, endProfile, 0.08);
     expect(mesh).toEqual({ vertices: [4, 5, 6], faces: [1, 1, 1] });
   });
+
+  // CAD Kernel Phase 4 (Cut).
+  it("delegates cut to the wrapped API with the parsed args and resolves its result", async () => {
+    const stubApi = { cut: vi.fn().mockResolvedValue({ vertices: [7, 8, 9], faces: [2, 2, 2] }) };
+    wrapMock.mockReturnValue(stubApi);
+    const { cut } = await import("./cadClient");
+
+    const targetMesh = { vertices: [0, 0, 0, 0.1, 0, 0, 0, 0.1, 0], faces: [0, 1, 2] };
+    const tool = { operation: "extrude" as const, profile: { type: "circle" as const, radius: 0.015 }, depth: 0.2 };
+    const mesh = await cut({ targetMesh, tool, position: [0.03, 0, 0] });
+    expect(stubApi.cut).toHaveBeenCalledWith(targetMesh, tool, [0.03, 0, 0]);
+    expect(mesh).toEqual({ vertices: [7, 8, 9], faces: [2, 2, 2] });
+  });
 });

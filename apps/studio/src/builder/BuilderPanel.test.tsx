@@ -17,7 +17,9 @@ vi.mock("./BuilderViewport", () => ({
     robot: RobotDef;
     selectedBodyId: string | null;
     jointPick?: { parentId: string | null; onPick: (id: string) => void };
+    bodyPick?: { selectedId: string | null; onPick: (id: string) => void };
     cadPreview?: { mesh: unknown; position: unknown } | null;
+    suppressedBodyId?: string | null;
   }) => (
     <div
       data-testid="builder-viewport-stub"
@@ -25,13 +27,19 @@ vi.mock("./BuilderViewport", () => ({
       data-body-count={props.robot.bodies.length}
       data-joint-parent={props.jointPick?.parentId ?? ""}
       data-cad-preview={props.cadPreview ? "1" : ""}
+      data-suppressed={props.suppressedBodyId ?? ""}
     >
       {/* Real BuilderViewport picks a body by raycasting a 3D click; this
        * stub exposes the same "click a body" interaction as plain buttons
-       * so tests can drive the Add Joint tool's parent-then-child picking
-       * without a real WebGLRenderer. */}
+       * so tests can drive the Add Joint tool's parent-then-child picking,
+       * and Cut's own single-body pick, without a real WebGLRenderer. */}
       {props.jointPick && props.robot.bodies.map((b) => (
         <button key={b.id} onClick={() => props.jointPick!.onPick(b.id)}>
+          {`pick ${b.id}`}
+        </button>
+      ))}
+      {props.bodyPick && props.robot.bodies.map((b) => (
+        <button key={b.id} onClick={() => props.bodyPick!.onPick(b.id)}>
           {`pick ${b.id}`}
         </button>
       ))}
@@ -122,6 +130,32 @@ vi.mock("./CadBoundaryCreator", () => ({
     </div>
   ),
 }));
+// Same reasoning as the Boss creator stubs above -- the three Cut
+// creators' own async pipelines are tested for real in their own test
+// files (Robot Builder CAD Kernel Phase 4). onApply takes a single arg
+// here (no new body id -- Cut replaces the target's own geometry, it
+// doesn't add a body), unlike the Boss stubs' two-arg onApply.
+function makeCadCutCreatorStub(testId: string) {
+  return (props: { robot: RobotDef; targetBodyId: string; onApply: (next: RobotDef) => void; onCancel: () => void }) => (
+    <div data-testid={testId} data-target={props.targetBodyId}>
+      <button
+        onClick={() => {
+          const cutGeometry = { type: "cad_mesh" as const, vertices: [0, 0, 0], faces: [0, 0, 0] };
+          props.onApply({
+            ...props.robot,
+            bodies: props.robot.bodies.map((b) => (b.id === props.targetBodyId ? { ...b, visual: cutGeometry, collision: cutGeometry } : b)),
+          });
+        }}
+      >
+        stub apply
+      </button>
+      <button onClick={props.onCancel}>stub cancel</button>
+    </div>
+  );
+}
+vi.mock("./CadExtrudedCutCreator", () => ({ CadExtrudedCutCreator: makeCadCutCreatorStub("cad-extruded-cut-creator-stub") }));
+vi.mock("./CadRevolvedCutCreator", () => ({ CadRevolvedCutCreator: makeCadCutCreatorStub("cad-revolved-cut-creator-stub") }));
+vi.mock("./CadBoundaryCutCreator", () => ({ CadBoundaryCutCreator: makeCadCutCreatorStub("cad-boundary-cut-creator-stub") }));
 // jsdom has no ResizeObserver and can't lay out real SVG, both of which
 // Blockly.inject needs -- same reason BuilderViewport/TestViewport are
 // mocked above. BlocksPanel is only ever exercised for real via the
@@ -422,6 +456,121 @@ describe("BuilderPanel", () => {
     expect(onChange).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Boundary" })).not.toHaveClass("active");
     expect(screen.queryByTestId("cad-boundary-creator-stub")).not.toBeInTheDocument();
+  });
+
+  it("Extruded Cut: shows a pick hint until a target is picked, then the CadExtrudedCutCreator stub with that target's id", async () => {
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={() => {}} />);
+
+    const extrudedCut = screen.getByRole("button", { name: "Extruded Cut" });
+    await user.click(extrudedCut);
+    expect(extrudedCut).toHaveClass("active");
+    expect(screen.getByText("Click the body to cut.")).toBeInTheDocument();
+    expect(screen.queryByTestId("cad-extruded-cut-creator-stub")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "pick base" }));
+    expect(screen.queryByText("Click the body to cut.")).not.toBeInTheDocument();
+    expect(screen.getByTestId("cad-extruded-cut-creator-stub")).toHaveAttribute("data-target", "base");
+    // The picked target's real mesh is suppressed in the viewport while
+    // the Cut creator's own live preview takes its place.
+    expect(screen.getByTestId("builder-viewport-stub")).toHaveAttribute("data-suppressed", "base");
+  });
+
+  it("Extruded Cut: Apply from the stub replaces the target body's geometry and returns to the transform tool", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={onChange} />);
+
+    await user.click(screen.getByRole("button", { name: "Extruded Cut" }));
+    await user.click(screen.getByRole("button", { name: "pick base" }));
+    await user.click(screen.getByRole("button", { name: "stub apply" }));
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next: RobotDef = onChange.mock.calls[0][0];
+    expect(next.bodies).toHaveLength(1); // no new body -- the target's own geometry was replaced
+    expect(next.bodies[0]).toMatchObject({ id: "base", visual: { type: "cad_mesh" } });
+    expect(screen.queryByRole("button", { name: "Extruded Cut" })).not.toHaveClass("active");
+    expect(screen.getByTestId("builder-viewport-stub")).toHaveAttribute("data-suppressed", "");
+  });
+
+  it("Extruded Cut: Cancel from the stub returns to the transform tool without calling onChange, clearing the target pick", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={onChange} />);
+
+    await user.click(screen.getByRole("button", { name: "Extruded Cut" }));
+    await user.click(screen.getByRole("button", { name: "pick base" }));
+    await user.click(screen.getByRole("button", { name: "stub cancel" }));
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Extruded Cut" })).not.toHaveClass("active");
+    expect(screen.queryByTestId("cad-extruded-cut-creator-stub")).not.toBeInTheDocument();
+
+    // Reopening starts a fresh pick, not resuming the old one.
+    await user.click(screen.getByRole("button", { name: "Extruded Cut" }));
+    expect(screen.getByText("Click the body to cut.")).toBeInTheDocument();
+  });
+
+  it("Revolved Cut: picks a target then shows the CadRevolvedCutCreator stub", async () => {
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Revolved Cut" }));
+    await user.click(screen.getByRole("button", { name: "pick base" }));
+    expect(screen.getByTestId("cad-revolved-cut-creator-stub")).toHaveAttribute("data-target", "base");
+  });
+
+  it("Revolved Cut: Apply from the stub replaces the target body's geometry", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={onChange} />);
+
+    await user.click(screen.getByRole("button", { name: "Revolved Cut" }));
+    await user.click(screen.getByRole("button", { name: "pick base" }));
+    await user.click(screen.getByRole("button", { name: "stub apply" }));
+
+    const next: RobotDef = onChange.mock.calls[0][0];
+    expect(next.bodies).toHaveLength(1);
+    expect(next.bodies[0]).toMatchObject({ id: "base", visual: { type: "cad_mesh" } });
+  });
+
+  it("Boundary Cut: picks a target then shows the CadBoundaryCutCreator stub", async () => {
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Boundary Cut" }));
+    await user.click(screen.getByRole("button", { name: "pick base" }));
+    expect(screen.getByTestId("cad-boundary-cut-creator-stub")).toHaveAttribute("data-target", "base");
+  });
+
+  it("Boundary Cut: Apply from the stub replaces the target body's geometry", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={onChange} />);
+
+    await user.click(screen.getByRole("button", { name: "Boundary Cut" }));
+    await user.click(screen.getByRole("button", { name: "pick base" }));
+    await user.click(screen.getByRole("button", { name: "stub apply" }));
+
+    const next: RobotDef = onChange.mock.calls[0][0];
+    expect(next.bodies).toHaveLength(1);
+    expect(next.bodies[0]).toMatchObject({ id: "base", visual: { type: "cad_mesh" } });
+  });
+
+  it("all eight tools stay mutually exclusive: activating any Cut tool disables every Boss tool and Add Joint too", async () => {
+    const user = userEvent.setup();
+    const base = makeRobot();
+    const robot: RobotDef = { ...base, bodies: [...base.bodies, { id: "wheel", name: "Wheel", transform: identity, mass: 0.1, inertia }] };
+    render(<BuilderPanel robot={robot} onChange={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Boundary Cut" }));
+    expect(screen.getByRole("button", { name: "Add Joint" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Extrude" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Revolve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Boundary" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Extruded Cut" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Revolved Cut" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Boundary Cut" })).not.toBeDisabled(); // never disables itself
   });
 
   it("disables Test mode while the document has an error", () => {

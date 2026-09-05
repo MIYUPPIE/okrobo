@@ -13,8 +13,11 @@ import { ActuatorPanel } from "./ActuatorPanel";
 import { BodyInspector } from "./BodyInspector";
 import { BuilderViewport, type GizmoMode } from "./BuilderViewport";
 import { CadBoundaryCreator } from "./CadBoundaryCreator";
+import { CadBoundaryCutCreator } from "./CadBoundaryCutCreator";
 import { CadExtrudeCreator } from "./CadExtrudeCreator";
+import { CadExtrudedCutCreator } from "./CadExtrudedCutCreator";
 import { CadRevolveCreator } from "./CadRevolveCreator";
+import { CadRevolvedCutCreator } from "./CadRevolvedCutCreator";
 import { exportRobotDef } from "./exportRobot";
 import { HierarchyList } from "./HierarchyList";
 import { JointCreator } from "./JointCreator";
@@ -49,14 +52,18 @@ type ProgramTab = "Blocks" | "Python" | "C++";
 type ProgramStatus = "idle" | "running" | "error";
 /** "transform" is the ordinary select-and-gizmo tool; "add-joint" is the
  * joint-authoring tool (parent-then-child viewport picking); "extrude"/
- * "revolve"/"boundary" are the CAD part creation tools (Robot Builder CAD
- * Kernel Phases 2-3), each named for the actual CAD operation it performs
- * (Extruded Boss, a lathe revolve, a loft). */
-type BuilderTool = "transform" | "add-joint" | "extrude" | "revolve" | "boundary";
+ * "revolve"/"boundary" are the Boss CAD part creation tools (Robot Builder
+ * CAD Kernel Phases 2-3); "extruded-cut"/"revolved-cut"/"boundary-cut" are
+ * their Phase 4 boolean-subtraction counterparts, each first requiring a
+ * single existing-body pick (see cutTargetId below) before showing their
+ * own creator panel. */
+type BuilderTool = "transform" | "add-joint" | "extrude" | "revolve" | "boundary" | "extruded-cut" | "revolved-cut" | "boundary-cut";
 interface JointDraft {
   parentId: string;
   childId?: string;
 }
+
+const CUT_TOOLS: ReadonlySet<BuilderTool> = new Set(["extruded-cut", "revolved-cut", "boundary-cut"]);
 
 export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   const [selectedBodyId, setSelectedBodyId] = useState<string | null>(robot.bodies[0]?.id ?? null);
@@ -64,6 +71,11 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   const [builderTool, setBuilderTool] = useState<BuilderTool>("transform");
   const [jointDraft, setJointDraft] = useState<JointDraft | null>(null);
   const [cadPreview, setCadPreview] = useState<CadPreview | null>(null);
+  // Robot Builder CAD Kernel Phase 4 (Cut): the existing body a Cut tool is
+  // targeting. null while still picking (bodyPick is wired into the
+  // viewport/hierarchy then); once set, the matching Cut creator replaces
+  // the picking hint.
+  const [cutTargetId, setCutTargetId] = useState<string | null>(null);
   // Bumped only on a gizmo commit (not on the inspector's own Apply), so
   // BodyInspector resyncs its draft when a drag moved the body it's
   // showing -- mirrors App.tsx's existing worldEpoch convention.
@@ -89,6 +101,8 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   const issues = useMemo(() => validateRobotDef(robot), [robot]);
   const errorCount = issues.filter((i) => i.severity === "error").length;
   const selectedBody = selectedBodyId ? (robot.bodies.find((b) => b.id === selectedBodyId) ?? null) : null;
+  const isCutTool = CUT_TOOLS.has(builderTool);
+  const isCadTool = isCutTool || builderTool === "extrude" || builderTool === "revolve" || builderTool === "boundary";
 
   useEffect(() => {
     if (builderMode !== "test") return;
@@ -188,7 +202,7 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
     setCadPreview(null);
   };
 
-  // Shared by all three CAD tools (Extrude/Revolve/Boundary) -- their
+  // Shared by all three Boss CAD tools (Extrude/Revolve/Boundary) -- their
   // onApply/onCancel shape is identical regardless of which operation
   // produced the mesh, so one pair of handlers serves all three rather
   // than three near-duplicate copies.
@@ -202,12 +216,46 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   const cancelCadTool = () => {
     setBuilderTool("transform");
     setCadPreview(null);
+    setCutTargetId(null);
   };
 
-  /** Makes all five tools mutually exclusive by construction: a tool's own
+  /** Makes all eight tools mutually exclusive by construction: a tool's own
    * toolbar button never disables itself (so clicking it again toggles
    * back to "transform"), only a *different* exclusive tool being active. */
   const otherCadToolActive = (own: BuilderTool) => builderTool !== "transform" && builderTool !== own;
+
+  const toggleExtrudedCutTool = () => {
+    setBuilderTool((current) => (current === "extruded-cut" ? "transform" : "extruded-cut"));
+    setCadPreview(null);
+    setCutTargetId(null);
+  };
+
+  const toggleRevolvedCutTool = () => {
+    setBuilderTool((current) => (current === "revolved-cut" ? "transform" : "revolved-cut"));
+    setCadPreview(null);
+    setCutTargetId(null);
+  };
+
+  const toggleBoundaryCutTool = () => {
+    setBuilderTool((current) => (current === "boundary-cut" ? "transform" : "boundary-cut"));
+    setCadPreview(null);
+    setCutTargetId(null);
+  };
+
+  /** Single-body pick for any of the three Cut tools -- no parent-then-
+   * child two-step, unlike handleJointPick. Shared by BuilderViewport's
+   * bodyPick prop and HierarchyList's own rows, the same "two real input
+   * paths" precedent Add Joint already established. */
+  const handleCutTargetPick = (bodyId: string) => setCutTargetId(bodyId);
+
+  /** Shared by all three Cut tools -- no new body id to select (the target
+   * body's own id is unchanged), unlike applyCadBody. */
+  const applyCutResult = (next: RobotDef) => {
+    onChange(next);
+    setBuilderTool("transform");
+    setCadPreview(null);
+    setCutTargetId(null);
+  };
 
   // Robot Builder Phase 6: mirrors App.tsx's own run()/stop() shape for the
   // Car/Arm/Drone pipeline -- abort-if-already-running, arm(), set status,
@@ -279,8 +327,8 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
         </div>
         <HierarchyList
           robot={robot}
-          selectedBodyId={builderTool === "add-joint" ? (jointDraft?.parentId ?? null) : selectedBodyId}
-          onSelect={builderTool === "add-joint" ? handleJointPick : setSelectedBodyId}
+          selectedBodyId={builderTool === "add-joint" ? (jointDraft?.parentId ?? null) : isCutTool ? cutTargetId : selectedBodyId}
+          onSelect={builderTool === "add-joint" ? handleJointPick : isCutTool && cutTargetId === null ? handleCutTargetPick : setSelectedBodyId}
         />
         {builderMode === "edit" && (
           <button type="button" className="builder-add-body" onClick={addBody}>
@@ -298,7 +346,9 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
             onTransformBody={transformBody}
             gizmoMode={gizmoMode}
             jointPick={builderTool === "add-joint" ? { parentId: jointDraft?.parentId ?? null, onPick: handleJointPick } : undefined}
-            cadPreview={builderTool === "extrude" || builderTool === "revolve" || builderTool === "boundary" ? cadPreview : null}
+            bodyPick={isCutTool && cutTargetId === null ? { selectedId: null, onPick: handleCutTargetPick } : undefined}
+            cadPreview={isCadTool ? cadPreview : null}
+            suppressedBodyId={isCutTool ? cutTargetId : null}
           />
           <div className="builder-toolbar">
             <button
@@ -350,10 +400,35 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
             >
               Boundary
             </button>
+            <button
+              type="button"
+              className={builderTool === "extruded-cut" ? "active" : ""}
+              disabled={robot.bodies.length === 0 || otherCadToolActive("extruded-cut")}
+              onClick={toggleExtrudedCutTool}
+            >
+              Extruded Cut
+            </button>
+            <button
+              type="button"
+              className={builderTool === "revolved-cut" ? "active" : ""}
+              disabled={robot.bodies.length === 0 || otherCadToolActive("revolved-cut")}
+              onClick={toggleRevolvedCutTool}
+            >
+              Revolved Cut
+            </button>
+            <button
+              type="button"
+              className={builderTool === "boundary-cut" ? "active" : ""}
+              disabled={robot.bodies.length === 0 || otherCadToolActive("boundary-cut")}
+              onClick={toggleBoundaryCutTool}
+            >
+              Boundary Cut
+            </button>
           </div>
           {builderTool === "add-joint" && !jointDraft?.childId && (
             <p className="joint-pick-hint">{jointDraft ? "Click the child body." : "Click the parent body."}</p>
           )}
+          {isCutTool && cutTargetId === null && <p className="joint-pick-hint">Click the body to cut.</p>}
         </div>
       ) : (
         <div className="builder-stage">
@@ -478,6 +553,12 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
               onCancel={cancelCadTool}
               onPreviewChange={setCadPreview}
             />
+          ) : builderTool === "extruded-cut" && cutTargetId ? (
+            <CadExtrudedCutCreator robot={robot} targetBodyId={cutTargetId} onApply={applyCutResult} onCancel={cancelCadTool} onPreviewChange={setCadPreview} />
+          ) : builderTool === "revolved-cut" && cutTargetId ? (
+            <CadRevolvedCutCreator robot={robot} targetBodyId={cutTargetId} onApply={applyCutResult} onCancel={cancelCadTool} onPreviewChange={setCadPreview} />
+          ) : builderTool === "boundary-cut" && cutTargetId ? (
+            <CadBoundaryCutCreator robot={robot} targetBodyId={cutTargetId} onApply={applyCutResult} onCancel={cancelCadTool} onPreviewChange={setCadPreview} />
           ) : selectedBody && builderTool === "transform" ? (
             <BodyInspector
               key={`${selectedBody.id}:${transformEpoch}`}
@@ -488,7 +569,11 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
             />
           ) : (
             <p className="builder-empty-inspector">
-              {builderTool === "add-joint" ? "Pick a parent and a child body in the 3D view." : "Select a body to edit it."}
+              {builderTool === "add-joint"
+                ? "Pick a parent and a child body in the 3D view."
+                : isCutTool
+                  ? "Pick a body to cut in the 3D view."
+                  : "Select a body to edit it."}
             </p>
           )
         ) : builtRobot ? (
