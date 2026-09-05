@@ -148,4 +148,41 @@ describe("cadClient", () => {
     expect(stubApi.fillet).toHaveBeenCalledWith(shape, picks);
     expect(mesh).toEqual({ vertices: [1, 2, 3], faces: [0, 0, 0] });
   });
+
+  // CAD Kernel Phase 6 (Shell + Draft).
+  it("delegates previewFaces to the wrapped API with the shape and resolves its result", async () => {
+    const facePreview = { mesh: { vertices: [0, 0, 0], triangles: [0, 0, 0], normals: [0, 0, 1], faceGroups: [{ start: 0, count: 3, faceId: 1 }] }, centers: [[0, 0, 0]] };
+    const stubApi = { previewFaces: vi.fn().mockResolvedValue(facePreview) };
+    wrapMock.mockReturnValue(stubApi);
+    const { previewFaces } = await import("./cadClient");
+
+    const shape = { operation: "box" as const, size: [0.1, 0.06, 0.04] as [number, number, number] };
+    const result = await previewFaces(shape);
+    expect(stubApi.previewFaces).toHaveBeenCalledWith(shape);
+    expect(result).toEqual(facePreview);
+  });
+
+  it("delegates shell to the wrapped API with the shape, picks, and thickness, and resolves its result", async () => {
+    const stubApi = { shell: vi.fn().mockResolvedValue({ vertices: [1, 2, 3], faces: [0, 0, 0] }) };
+    wrapMock.mockReturnValue(stubApi);
+    const { shell } = await import("./cadClient");
+
+    const shape = { operation: "box" as const, size: [0.1, 0.06, 0.04] as [number, number, number] };
+    const picks = [[0, 0, 0.02] as [number, number, number]];
+    const mesh = await shell(shape, picks, 0.005);
+    expect(stubApi.shell).toHaveBeenCalledWith(shape, picks, 0.005);
+    expect(mesh).toEqual({ vertices: [1, 2, 3], faces: [0, 0, 0] });
+  });
+
+  it("delegates draft to the wrapped API with the shape, picks, and angle, and resolves its result", async () => {
+    const stubApi = { draft: vi.fn().mockResolvedValue({ vertices: [4, 5, 6], faces: [1, 1, 1] }) };
+    wrapMock.mockReturnValue(stubApi);
+    const { draft } = await import("./cadClient");
+
+    const shape = { operation: "cylinder" as const, radius: 0.03, length: 0.08 };
+    const picks = [[0, 0, 0] as [number, number, number]];
+    const mesh = await draft(shape, picks, 5);
+    expect(stubApi.draft).toHaveBeenCalledWith(shape, picks, 5);
+    expect(mesh).toEqual({ vertices: [4, 5, 6], faces: [1, 1, 1] });
+  });
 });

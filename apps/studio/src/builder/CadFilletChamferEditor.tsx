@@ -1,7 +1,8 @@
 import { useEffect, useMemo } from "react";
 import type { RobotDef } from "../contracts/robotDef";
-import type { CadEdgeOverlay, CadPreview, FilletBaseShape, ShapeEdgeMesh } from "../cad/cadClient";
+import type { CadEdgeOverlay, CadPreview, ShapeEdgeMesh } from "../cad/cadClient";
 import { fillet, previewEdges } from "../cad/cadClient";
+import { shapeFromGeometry } from "./cadTargetShape";
 import { FilletEdgeList } from "./FilletEdgeList";
 import { parseFilletPicks, type FilletPickDraft } from "./filletPicks";
 import { replaceBodyGeometry } from "./robotEdits";
@@ -22,13 +23,6 @@ import { useCadPreview } from "./useCadPreview";
 // Apply replaces the target's own geometry in place (robotEdits.ts's
 // replaceBodyGeometry, the same function Cut already uses) rather than
 // adding a new body.
-
-function shapeFromGeometry(geometry: RobotDef["bodies"][number]["visual"]): FilletBaseShape | null {
-  if (!geometry) return null;
-  if (geometry.type === "box") return { operation: "box", size: geometry.size };
-  if (geometry.type === "cylinder") return { operation: "cylinder", radius: geometry.radius, length: geometry.length };
-  return null;
-}
 
 export interface CadFilletChamferEditorProps {
   robot: RobotDef;

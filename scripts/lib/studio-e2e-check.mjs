@@ -1058,6 +1058,91 @@ try {
     await waitForCondition("document.querySelector('.inspector-mesh-note')?.textContent?.includes('CAD part')", 5000),
   );
 
+  // -- robot builder: Shell + Draft (CAD Kernel Phase 6) ------------------
+  // Standalone tools only this phase (no embedded step in the Boss
+  // creators -- see docs/decisions/cad-kernel-shell-draft.md). Each needs
+  // its own fresh plain box body (freshBoxId above is already a cad_mesh
+  // part from the Fillet/Chamfer section), read back from the DOM the
+  // same way, not hardcoded.
+  await page.evalClickText(".builder-add-body", "/Add body/");
+  const rowsAfterShellAddBody = await page.evaluate("[...document.querySelectorAll('.hierarchy-row')].map((r) => r.textContent)");
+  const shellBoxId = rowsAfterShellAddBody[rowsAfterShellAddBody.length - 1];
+
+  await page.evalClickText(".builder-toolbar button", "/^Shell$/");
+  check(
+    "Build mode: Shell enters the picking tool with a hint",
+    await waitForCondition("document.querySelector('.joint-pick-hint')?.textContent === 'Click the body to shell.'", 5000),
+  );
+  // evalClickText, not clickText: this immediately follows + Add body's
+  // own DOM mutation (a new hierarchy row appearing), exactly the
+  // coordinate-based click race cdp.mjs's own evalClick docstring warns
+  // about -- found for real here (this exact pick intermittently missed
+  // once the hierarchy list had accumulated enough prior rows).
+  await page.evalClickText(".hierarchy-row", `/^${shellBoxId}$/`);
+  check(
+    "Build mode: picking a box body shows the Shell editor",
+    await waitForCondition("document.querySelector('.builder-inspector h4')?.textContent === 'Shell'", 5000),
+  );
+  check(
+    "Build mode: the target's own faces preview settles (Faces section appears)",
+    await waitForCondition("!!document.querySelector('.face-pick-list')", 10000),
+  );
+  await page.evalClickText(".face-pick-row button", "/^Select$/"); // Face 1 -- any single face is a valid opening
+  check(
+    "Build mode: the default thickness computes a real hollowed preview (Apply enables)",
+    await waitForCondition("!document.querySelector('.cad-extrude-creator .inspector-actions button.primary')?.disabled", 10000),
+  );
+  await page.evalClickText(".inspector-actions button", "/^Apply$/");
+  check(
+    "Build mode: Shell commits with no new body added (geometry replaced in place)",
+    await waitForCondition(`document.querySelectorAll('.hierarchy-row').length === ${rowsAfterShellAddBody.length}`, 5000),
+  );
+  await page.evalClickText(".hierarchy-row", `/^${shellBoxId}$/`);
+  check(
+    "Build mode: the fresh box really became a cad_mesh body -- Shape is now locked to CAD part",
+    await waitForCondition("document.querySelector('.inspector-mesh-note')?.textContent?.includes('CAD part')", 5000),
+  );
+
+  await page.evalClickText(".builder-add-body", "/Add body/");
+  const rowsAfterDraftAddBody = await page.evaluate("[...document.querySelectorAll('.hierarchy-row')].map((r) => r.textContent)");
+  const draftBoxId = rowsAfterDraftAddBody[rowsAfterDraftAddBody.length - 1];
+
+  await page.evalClickText(".builder-toolbar button", "/^Draft$/");
+  check(
+    "Build mode: Draft enters the picking tool with a hint",
+    await waitForCondition("document.querySelector('.joint-pick-hint')?.textContent === 'Click the body to draft.'", 5000),
+  );
+  // Same evalClickText fix as the Shell pick above -- this is exactly
+  // where the coordinate-based click was observed to miss for real.
+  await page.evalClickText(".hierarchy-row", `/^${draftBoxId}$/`);
+  check(
+    "Build mode: picking a box body shows the Draft editor",
+    await waitForCondition("document.querySelector('.builder-inspector h4')?.textContent === 'Draft'", 5000),
+  );
+  check(
+    "Build mode: the target's own faces preview settles (Faces section appears)",
+    await waitForCondition("!!document.querySelector('.face-pick-list')", 10000),
+  );
+  // Face 1 is a box's own first side face (verified via kernel.ts's own
+  // makeBox face order: indices 0-3 are the four vertical side faces,
+  // 4-5 are the top/bottom caps, which lie parallel to the fixed XY
+  // neutral plane and would throw -- see kernel.ts's draft doc comment).
+  await page.evalClickText(".face-pick-row button", "/^Select$/");
+  check(
+    "Build mode: the default angle computes a real tapered preview (Apply enables)",
+    await waitForCondition("!document.querySelector('.cad-extrude-creator .inspector-actions button.primary')?.disabled", 10000),
+  );
+  await page.evalClickText(".inspector-actions button", "/^Apply$/");
+  check(
+    "Build mode: Draft commits with no new body added (geometry replaced in place)",
+    await waitForCondition(`document.querySelectorAll('.hierarchy-row').length === ${rowsAfterDraftAddBody.length}`, 5000),
+  );
+  await page.evalClickText(".hierarchy-row", `/^${draftBoxId}$/`);
+  check(
+    "Build mode: the fresh box really became a cad_mesh body -- Shape is now locked to CAD part",
+    await waitForCondition("document.querySelector('.inspector-mesh-note')?.textContent?.includes('CAD part')", 5000),
+  );
+
   await page.clickText(".mode-toggle button", "/^Simulate$/");
   const backToSimulate = await waitForCondition(
     "!!document.querySelector('.sidebar') && !!document.querySelector('.viewport-3d canvas')",

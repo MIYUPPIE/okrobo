@@ -15,7 +15,7 @@
 // "replicad" at all this phase -- see the decision doc for why that keeps
 // the CAD kernel's ~20MB WASM entirely out of the app's main bundle.
 
-import { importSTLAsMesh, makeBox, makeCylinder, setManifold, setOC, sketchCircle, sketchRectangle, type Edge, type Shape3D, type ShapeEdgeMesh } from "replicad";
+import { importSTLAsMesh, makeBox, makeCylinder, setManifold, setOC, sketchCircle, sketchRectangle, FaceFinder, type Edge, type Face, type Shape3D, type ShapeEdgeMesh, type ShapeMesh } from "replicad";
 import type { OpenCascadeInstance } from "replicad-opencascadejs";
 import opencascade from "replicad-opencascadejs";
 import ManifoldModule from "manifold-3d";
@@ -32,6 +32,12 @@ export interface CadMesh {
 // ShapeMesh's own `triangles` to `faces`, so it's re-exported as-is rather
 // than duplicated.
 export type { ShapeEdgeMesh };
+
+// CAD Kernel Phase 6 (Shell + Draft): same reasoning -- replicad's own
+// {vertices, triangles, normals, faceGroups} is exactly what a "pickable
+// faces" overlay needs (faceGroups partitions the triangle-index list by
+// which real B-rep face it came from), re-exported as-is.
+export type { ShapeMesh };
 
 export interface LoadOCOptions {
   locateFile?: (path: string, prefix: string) => string;
@@ -342,6 +348,18 @@ function buildFilletBaseSolid(shape: FilletBaseShape): Shape3D {
   return buildBossSolid(shape);
 }
 
+/** A matching tolerance derived from the solid's own bounding-box diagonal
+ * rather than a hardcoded absolute distance, so a geometric-descriptor
+ * match (fillet/chamfer picks, and CAD Kernel Phase 6's shell/draft face
+ * picks) stays reliable whether the shape is a 0.02-unit part or a
+ * 10-unit one. Extracted once a third caller needed the identical
+ * calculation. */
+function toleranceFor(solid: Shape3D): number {
+  const bounds = solid.boundingBox.bounds;
+  const diagonal = Math.hypot(bounds[1][0] - bounds[0][0], bounds[1][1] - bounds[0][1], bounds[1][2] - bounds[0][2]);
+  return Math.max(diagonal * 0.005, 1e-6);
+}
+
 /** One edge to round (fillet) or bevel (chamfer), identified by a
  * geometric descriptor point rather than the edge object itself or its
  * hashCode -- verified empirically that `Shape.hashCode` is NOT stable
@@ -360,11 +378,8 @@ export interface FilletPick {
 
 /** Applies every pick to `solid`, fillets first then chamfers (chained --
  * verified this works when both target different, non-adjacent edges of
- * the same base solid). Tolerance is derived from the solid's own
- * bounding-box diagonal rather than a hardcoded absolute distance, so
- * matching stays reliable whether the shape is a 0.02-unit part or a
- * 10-unit one. Skips either call entirely when its own pick list is
- * empty, rather than relying on an untested "radius always null" no-op
+ * the same base solid). Skips either call entirely when its own pick list
+ * is empty, rather than relying on an untested "radius always null" no-op
  * path. Caller owns disposing the returned shape; `solid` itself is left
  * untouched (fillet/chamfer both return a new shape) and still needs its
  * own disposal by the caller too.
@@ -380,9 +395,7 @@ export interface FilletPick {
  * generic error-message path every other opaque WASM exception already
  * does -- no special handling added for it. */
 function applyFilletPicks(solid: Shape3D, picks: FilletPick[]): Shape3D {
-  const bounds = solid.boundingBox.bounds;
-  const diagonal = Math.hypot(bounds[1][0] - bounds[0][0], bounds[1][1] - bounds[0][1], bounds[1][2] - bounds[0][2]);
-  const tolerance = Math.max(diagonal * 0.005, 1e-6);
+  const tolerance = toleranceFor(solid);
 
   const radiusFor = (targetOperation: FilletPick["operation"]) => {
     const matching = picks.filter((p) => p.operation === targetOperation);
@@ -448,4 +461,116 @@ export function filletMesh(shape: FilletBaseShape, picks: FilletPick[]): CadMesh
 export async function fillet(shape: FilletBaseShape, picks: FilletPick[]): Promise<CadMesh> {
   await loadOC();
   return filletMesh(shape, picks);
+}
+
+/** CAD Kernel Phase 6 (Shell + Draft): a picked face's descriptor point --
+ * `Face.center`, always exact, never a mesh approximation. Verified this
+ * matters here in a way it didn't for edges: a face's own mesh-
+ * triangulated centroid (averaging the vertices in its ShapeMesh.faceGroups
+ * triangle range) is a close match for a planar face, but for a curved
+ * one (e.g. a cylinder's circumferential surface) it can land measurably
+ * off the true center -- close enough to the matching tolerance below to
+ * risk a wrong or failed match. So FacePreview carries real `Face.center`
+ * values (read directly from the same live solid the mesh itself came
+ * from) rather than deriving descriptors from the mesh client-side the
+ * way edge descriptors are. No operation/value fields, unlike FilletPick:
+ * Shell/Draft each apply one shared parameter to their whole pick set,
+ * not a per-element one. */
+export type FacePick = [number, number, number];
+
+/** `centers[i]` corresponds to `mesh.faceGroups[i]` -- guaranteed by
+ * construction (both read from the same live solid instance in the same
+ * call, in `.faces`/`.mesh()`'s own matching order, verified empirically),
+ * not re-derived independently. `mesh` is what a face-picking overlay
+ * renders (one highlighted region per faceGroup); `centers` is what a
+ * student's pick actually records. */
+export interface FacePreview {
+  mesh: ShapeMesh;
+  centers: FacePick[];
+}
+
+/** Assumes loadOC() has already resolved. See previewFaces's own doc. */
+export function previewFacesMesh(shape: FilletBaseShape): FacePreview {
+  const solid = buildFilletBaseSolid(shape);
+  try {
+    const mesh = solid.mesh(DEFAULT_MESH_OPTIONS);
+    const centers = solid.faces.map((f: Face) => f.center.toTuple() as FacePick);
+    return { mesh, centers };
+  } finally {
+    solid.delete();
+  }
+}
+
+/** Full pipeline (load OC, build the base shape, export its faces as
+ * pickable regions plus their real centers) for direct Node use -- the
+ * same base shape a shell/draft call targets. Used to render the "Faces"
+ * list/3D overlay a student picks from. */
+export async function previewFaces(shape: FilletBaseShape): Promise<FacePreview> {
+  await loadOC();
+  return previewFacesMesh(shape);
+}
+
+/** Selects an arbitrary set of picked faces via a logical OR across one
+ * `.near(point, tolerance)` filter per pick -- verified this correctly
+ * selects exactly the picked faces (including a single one) on an
+ * independently rebuilt solid, unlike chaining `.near()` calls directly
+ * (which would AND them, requiring one face near every point at once). */
+function buildFaceFinder(picks: FacePick[], tolerance: number) {
+  return (f: FaceFinder) => f.either(picks.map((p) => (finder: FaceFinder) => finder.near(p, tolerance)));
+}
+
+/** Assumes loadOC() has already resolved. See shell's own doc. */
+export function shellMesh(shape: FilletBaseShape, picks: FacePick[], thickness: number): CadMesh {
+  const solid = buildFilletBaseSolid(shape);
+  try {
+    const shelled = solid.shell(thickness, buildFaceFinder(picks, toleranceFor(solid)));
+    try {
+      const mesh = shelled.mesh(DEFAULT_MESH_OPTIONS);
+      return { vertices: mesh.vertices, faces: mesh.triangles };
+    } finally {
+      shelled.delete();
+    }
+  } finally {
+    solid.delete();
+  }
+}
+
+/** Full pipeline (load OC, then build+shell+mesh) for direct Node use.
+ * Hollows out `shape`, removing the picked faces and leaving a wall of
+ * `thickness`. Only needs OpenCascade, same as fillet/chamfer. */
+export async function shell(shape: FilletBaseShape, picks: FacePick[], thickness: number): Promise<CadMesh> {
+  await loadOC();
+  return shellMesh(shape, picks, thickness);
+}
+
+/** Assumes loadOC() has already resolved. See draft's own doc. */
+export function draftMesh(shape: FilletBaseShape, picks: FacePick[], angleDeg: number): CadMesh {
+  const solid = buildFilletBaseSolid(shape);
+  try {
+    const drafted = solid.draft(angleDeg, buildFaceFinder(picks, toleranceFor(solid)), "XY");
+    try {
+      const mesh = drafted.mesh(DEFAULT_MESH_OPTIONS);
+      return { vertices: mesh.vertices, faces: mesh.triangles };
+    } finally {
+      drafted.delete();
+    }
+  } finally {
+    solid.delete();
+  }
+}
+
+/** Full pipeline (load OC, then build+draft+mesh) for direct Node use.
+ * Tapers the picked faces by `angleDeg`, measured from a neutral plane
+ * fixed at world "XY" (no UI control this phase -- mirrors how Revolve's
+ * own axis is fixed without exposing it). Verified empirically: a picked
+ * face parallel to this plane (e.g. a box's own top face) throws an
+ * opaque WebAssembly.Exception -- there's no "away from the plane"
+ * direction to taper. A side face (a box's vertical wall, or a
+ * cylinder's curved side) works reliably. Surfaces through the same
+ * generic error-message path every other opaque WASM exception already
+ * does -- no special handling added for it (see
+ * docs/decisions/cad-kernel-shell-draft.md). */
+export async function draft(shape: FilletBaseShape, picks: FacePick[], angleDeg: number): Promise<CadMesh> {
+  await loadOC();
+  return draftMesh(shape, picks, angleDeg);
 }

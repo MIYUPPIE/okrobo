@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
-import type { CadEdgeOverlay, CadPreview } from "../cad/cadClient";
+import type { CadEdgeOverlay, CadFaceOverlay, CadPreview } from "../cad/cadClient";
 import type { RobotDef, Transform } from "../contracts/robotDef";
 import { edgeGroupDescriptor } from "./filletPicks";
 import { geometryFor, materializeRobotScene, resolveBodyId, setHighlighted } from "./robotThree";
@@ -16,17 +16,17 @@ import { geometryFor, materializeRobotScene, resolveBodyId, setHighlighted } fro
 // warn against. There's also no WASM engine here (a builder robot isn't
 // simulated), so nothing to step.
 //
-// Four effects, deliberately: a mount-once effect (renderer/scene/camera/
+// Five effects, deliberately: a mount-once effect (renderer/scene/camera/
 // OrbitControls/TransformControls/render loop/picking, deps []) that must
 // never re-run -- re-running it would recreate the renderer and reset the
 // camera on every edit -- a rebuild effect (deps [robot, selectedBodyId,
 // gizmoMode, jointPick, bodyPick, suppressedBodyId]) that only touches the
 // robot's own sub-scene, a CAD-preview effect (deps [cadPreview], Robot
 // Builder CAD Kernel Phase 2) that only touches a separate preview group
-// never added to bodyGroupByIdRef, and an edge-overlay effect (deps
-// [edgeOverlay], Phase 5) that touches its own separate group the same
-// way -- none of the three can affect raycasting or the real robot's own
-// rendering.
+// never added to bodyGroupByIdRef, an edge-overlay effect (deps
+// [edgeOverlay], Phase 5), and a face-overlay effect (deps [faceOverlay],
+// Phase 6) -- each touching its own separate group the same way, so none
+// of the four can affect raycasting or the real robot's own rendering.
 //
 // No unit test here (matches the existing precedent -- Viewport3D.tsx has
 // none either; jsdom can't construct a real WebGLRenderer). Verified by the
@@ -77,6 +77,11 @@ export interface BuilderViewportProps {
    * recolors the edges already picked so a student can see which rows in
    * that list they correspond to. */
   edgeOverlay?: (CadEdgeOverlay & { pickedPoints: readonly [number, number, number][] }) | null;
+  /** Robot Builder CAD Kernel Phase 6 (Shell + Draft): a visual-only
+   * overlay of the current shape's own pickable faces -- same posture as
+   * edgeOverlay (no raycasting; the real pick path is FacePickList's own
+   * DOM rows). `pickedPoints` recolors the faces already picked. */
+  faceOverlay?: (CadFaceOverlay & { pickedPoints: readonly [number, number, number][] }) | null;
 }
 
 const DRAG_CLICK_THRESHOLD_PX = 4;
@@ -92,6 +97,7 @@ export function BuilderViewport({
   cadPreview,
   suppressedBodyId,
   edgeOverlay,
+  faceOverlay,
 }: BuilderViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -103,6 +109,7 @@ export function BuilderViewport({
   const bodyGroupByIdRef = useRef<Map<string, THREE.Group>>(new Map());
   const previewGroupRef = useRef<THREE.Group | null>(null);
   const edgeOverlayGroupRef = useRef<THREE.Group | null>(null);
+  const faceOverlayGroupRef = useRef<THREE.Group | null>(null);
 
   const selectedBodyIdRef = useRef(selectedBodyId);
   const onSelectBodyRef = useRef(onSelectBody);
@@ -160,6 +167,11 @@ export function BuilderViewport({
     edgeOverlayGroup.name = "cad-edge-overlay";
     scene.add(edgeOverlayGroup);
     edgeOverlayGroupRef.current = edgeOverlayGroup;
+
+    const faceOverlayGroup = new THREE.Group();
+    faceOverlayGroup.name = "cad-face-overlay";
+    scene.add(faceOverlayGroup);
+    faceOverlayGroupRef.current = faceOverlayGroup;
 
     const transformControls = new TransformControls(camera, renderer.domElement);
     scene.add(transformControls.getHelper());
@@ -247,6 +259,7 @@ export function BuilderViewport({
       bodyGroupByIdRef.current = new Map();
       previewGroupRef.current = null;
       edgeOverlayGroupRef.current = null;
+      faceOverlayGroupRef.current = null;
     };
   }, []);
 
@@ -341,6 +354,52 @@ export function BuilderViewport({
     edgeOverlayGroup.position.set(...position);
     edgeOverlayGroup.rotation.set(...rotation, "XYZ");
   }, [edgeOverlay]);
+
+  // Face-overlay effect (Robot Builder CAD Kernel Phase 6): same
+  // visual-only-aid posture as the edge-overlay effect above, but per
+  // face rather than per edge -- each faceGroup's own triangle range is
+  // rendered as its own semi-transparent THREE.Mesh, sharing the
+  // overlay's vertex/normal/index arrays via setDrawRange rather than
+  // copying them per face. "Picked" state compares against the overlay's
+  // own `centers` (the exact Face.center values FacePreview carries), not
+  // a client-recomputed mesh centroid -- a curved face's own mesh
+  // centroid isn't a reliable substitute (see
+  // docs/decisions/cad-kernel-shell-draft.md).
+  useEffect(() => {
+    const faceOverlayGroup = faceOverlayGroupRef.current;
+    if (!faceOverlayGroup) return;
+    faceOverlayGroup.clear();
+    if (!faceOverlay) return;
+    const { faceMesh, centers, position, rotation, pickedPoints } = faceOverlay;
+    const pickedColor = 0x33ff77;
+    const unpickedColor = 0x4da6ff;
+    const positions = new Float32Array(faceMesh.vertices);
+    const normals = new Float32Array(faceMesh.normals);
+    const index = faceMesh.triangles;
+    for (let groupIndex = 0; groupIndex < faceMesh.faceGroups.length; groupIndex++) {
+      const group = faceMesh.faceGroups[groupIndex];
+      const center = centers[groupIndex];
+      const isPicked = pickedPoints.some(
+        (p) => Math.abs(p[0] - center[0]) < 1e-9 && Math.abs(p[1] - center[1]) < 1e-9 && Math.abs(p[2] - center[2]) < 1e-9,
+      );
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      geometry.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
+      geometry.setIndex(index);
+      geometry.setDrawRange(group.start, group.count);
+      const material = new THREE.MeshStandardMaterial({
+        color: isPicked ? pickedColor : unpickedColor,
+        transparent: true,
+        opacity: 0.5,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      faceOverlayGroup.add(mesh);
+    }
+    faceOverlayGroup.position.set(...position);
+    faceOverlayGroup.rotation.set(...rotation, "XYZ");
+  }, [faceOverlay]);
 
   return <div ref={containerRef} className="viewport-3d builder-viewport" />;
 }

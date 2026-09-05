@@ -1466,3 +1466,74 @@ assuming it), and the adjacent-edge fillet+chamfer limitation itself
 new WASM asset -- fillet/chamfer only ever needs OpenCascade), and the
 full `test-all.sh` gate suite (including the new E2E checks, run for real
 against a live dev server and headless Chrome) all green.
+
+## CAD Kernel — Phase 6: Shell + Draft (2026-09-06)
+
+Shell (hollow out a body, removing picked faces, leaving a wall of a given
+thickness) and Draft (taper picked faces by an angle), each shipped as a
+new standalone tool targeting an already-placed box or cylinder body --
+the user chose this narrower scope over also embedding either as a step
+inside Extrude/Revolve/Boundary, since both apply one shared global
+parameter (a thickness, or an angle) to their whole pick set, not a
+per-element one like Fillet/Chamfer's own radius, and embedding either
+raised real, unresolved ordering questions against Fillet/Chamfer's own
+picks with no obvious default.
+
+Same live-B-rep constraint and edge-picking discipline as Phase 5 (only a
+fresh Boss shape mid-creation, or an exactly-reconstructable box/cylinder
+primitive, has a solid to pick from; `Shape.hashCode` confirmed unstable
+across independent rebuilds again, ruled out as an identifier again) --
+but a real, non-obvious difference surfaced for faces specifically: a
+face's own mesh-triangulated centroid isn't a safe stand-in for the exact
+`Face.center` the way an edge's own polyline sample was safe for edges.
+Verified empirically -- a cylinder's curved side face's mesh centroid
+landed ~0.054 units off the true center, uncomfortably close to the
+planned matching tolerance. So `previewFaces()` returns real `Face.center`
+values alongside the mesh, carried through end to end rather than
+re-derived from the mesh client-side. Also verified: `FaceFinder.either()`
+correctly selects an arbitrary set of picked faces (not just one) via a
+logical OR across `.near()` filters, since chaining `.near()` calls
+directly would AND them instead. And a real, gracefully-handled gotcha:
+`.draft()` throws when a picked face is parallel to its neutral plane (a
+box's own top face vs the default "XY") -- side walls and a cylinder's
+curved side work reliably against that same fixed plane, so the tool
+never exposes a plane picker at all this phase. See
+`docs/decisions/cad-kernel-shell-draft.md`.
+
+`toleranceFor()` extracted from `applyFilletPicks`'s own inline
+bounding-box-diagonal calculation, now shared by three callers.
+`shapeFromGeometry` (the box/cylinder -> FilletBaseShape mapping) pulled
+out of `CadFilletChamferEditor.tsx` into its own small module,
+`cadTargetShape.ts`, once a third standalone editor needed it too. Shell
+and Draft are structurally identical standalone editors (pick faces via a
+new `FacePickList.tsx` -- a Select/Deselect toggle, simpler than
+`FilletEdgeList.tsx`'s own Add-then-configure rows, since there's no
+per-face value -- author one shared numeric parameter, Apply replaces the
+target's geometry in place via the existing `replaceBodyGeometry`), so one
+shared `CadFacePickEditor.tsx` (parameterized by title/value-label/
+validation/which kernel call to make) serves both rather than two
+near-duplicate files. `BuilderViewport.tsx` gained a `faceOverlay` prop
+mirroring `edgeOverlay`'s own visual-only-aid posture -- one
+semi-transparent `THREE.Mesh` per picked-or-pickable face, built via
+`setDrawRange` over a shared vertex/index buffer rather than copying per
+face, no raycasting added.
+
+Tests: `extrude.test.ts` (+7 real-pipeline cases: face-list sanity for a
+box and a cylinder, shell removing one and multiple faces with a real
+bounding-box-unchanged check, draft on a box's side wall and a cylinder's
+curved side, the parallel-face-throws case), `cadClient.test.ts` (+3
+mocked wiring), `cadTargetShape.test.ts` (new, 4 cases), `FacePickList.test.tsx`
+(new, 6 cases), `CadFacePickEditor.test.tsx` (new, 10 cases covering both
+Shell- and Draft-shaped configurations), `BuilderPanel.test.tsx` (+6: both
+new tools' pick/apply/cancel flow via `it.each`, mutual exclusivity now
+covering eleven tools). 12 new `studio-e2e-check.mjs` checks -- Shell and
+Draft each on their own fresh plain box body. One real bug found and
+fixed while first running those for real: picking the target body's own
+hierarchy row via a coordinate-based click intermittently missed once the
+list had accumulated enough prior rows from earlier sections in the same
+continuous document -- the exact click race this file's own `evalClick`
+docstring warns about, fixed the same established way (a real DOM
+`.click()` instead). `npm run test` (570 passed across 60 files), `npm run
+typecheck`, `npm run build` (no new WASM asset), and the full
+`test-all.sh` gate suite (including the new E2E checks, run for real
+against a live dev server and headless Chrome) all green.

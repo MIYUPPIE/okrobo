@@ -13,16 +13,19 @@
 
 import {
   cut as cutDirect,
+  draft as draftDirect,
   extrudeCircle as extrudeCircleDirect,
   extrudeRectangle as extrudeRectangleDirect,
   fillet as filletDirect,
   loft as loftDirect,
   previewEdges as previewEdgesDirect,
+  previewFaces as previewFacesDirect,
   revolve as revolveDirect,
+  shell as shellDirect,
 } from "./kernel.ts";
-import type { CadMesh, CutTool, FilletBaseShape, FilletPick, Profile, ShapeEdgeMesh } from "./kernel.ts";
+import type { CadMesh, CutTool, FacePick, FacePreview, FilletBaseShape, FilletPick, Profile, ShapeEdgeMesh } from "./kernel.ts";
 
-export type { CadMesh, CutTool, FilletBaseShape, FilletPick, Profile, ShapeEdgeMesh };
+export type { CadMesh, CutTool, FacePick, FacePreview, FilletBaseShape, FilletPick, Profile, ShapeEdgeMesh };
 
 export function extrudeRectangle(options: { width: number; height: number; depth: number }): Promise<CadMesh> {
   return extrudeRectangleDirect(options.width, options.height, options.depth);
@@ -56,4 +59,18 @@ export function previewEdges(shape: FilletBaseShape): Promise<ShapeEdgeMesh> {
 
 export function fillet(shape: FilletBaseShape, picks: FilletPick[]): Promise<CadMesh> {
   return filletDirect(shape, picks);
+}
+
+// CAD Kernel Phase 6 (Shell + Draft): see kernel.ts's previewFaces/
+// shellMesh/draftMesh for the geometry conventions.
+export function previewFaces(shape: FilletBaseShape): Promise<FacePreview> {
+  return previewFacesDirect(shape);
+}
+
+export function shell(shape: FilletBaseShape, picks: FacePick[], thickness: number): Promise<CadMesh> {
+  return shellDirect(shape, picks, thickness);
+}
+
+export function draft(shape: FilletBaseShape, picks: FacePick[], angleDeg: number): Promise<CadMesh> {
+  return draftDirect(shape, picks, angleDeg);
 }

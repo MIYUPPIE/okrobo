@@ -7,10 +7,10 @@
 // docs/decisions/cad-kernel-sketch-ui.md.
 
 import { wrap, type Remote } from "comlink";
-import type { CadMesh, CutTool, FilletBaseShape, FilletPick, Profile, ShapeEdgeMesh } from "./kernel.ts";
+import type { CadMesh, CutTool, FacePick, FacePreview, FilletBaseShape, FilletPick, Profile, ShapeEdgeMesh, ShapeMesh } from "./kernel.ts";
 import type { CadWorkerApi } from "./worker.ts";
 
-export type { CadMesh, CutTool, FilletBaseShape, FilletPick, Profile, ShapeEdgeMesh };
+export type { CadMesh, CutTool, FacePick, FacePreview, FilletBaseShape, FilletPick, Profile, ShapeEdgeMesh, ShapeMesh };
 
 export interface CadPreview {
   mesh: CadMesh;
@@ -32,6 +32,22 @@ export interface CadPreview {
  * own `cadPreview` ghost renders, so the two stay visually aligned. */
 export interface CadEdgeOverlay {
   edgeMesh: ShapeEdgeMesh;
+  position: [number, number, number];
+  rotation: [number, number, number];
+}
+
+/** CAD Kernel Phase 6 (Shell + Draft): the pickable-faces overlay a
+ * Shell/Draft editor reports to BuilderPanel -- the same visual-only-aid
+ * role CadEdgeOverlay already plays for edges (no raycasting of its own;
+ * the real pick path is FacePickList's own DOM rows). `centers` (the same
+ * exact Face.center values FacePreview itself carries) is what
+ * BuilderViewport compares against `pickedPoints` to recolor a picked
+ * face -- carried through rather than re-derived from `faceMesh`, since a
+ * curved face's own mesh-triangulated centroid isn't a reliable
+ * substitute (see docs/decisions/cad-kernel-shell-draft.md). */
+export interface CadFaceOverlay {
+  faceMesh: ShapeMesh;
+  centers: FacePick[];
   position: [number, number, number];
   rotation: [number, number, number];
 }
@@ -86,4 +102,20 @@ export async function previewEdges(shape: FilletBaseShape): Promise<ShapeEdgeMes
 export async function fillet(shape: FilletBaseShape, picks: FilletPick[]): Promise<CadMesh> {
   const api = await getApi();
   return api.fillet(shape, picks);
+}
+
+// CAD Kernel Phase 6 (Shell + Draft).
+export async function previewFaces(shape: FilletBaseShape): Promise<FacePreview> {
+  const api = await getApi();
+  return api.previewFaces(shape);
+}
+
+export async function shell(shape: FilletBaseShape, picks: FacePick[], thickness: number): Promise<CadMesh> {
+  const api = await getApi();
+  return api.shell(shape, picks, thickness);
+}
+
+export async function draft(shape: FilletBaseShape, picks: FacePick[], angleDeg: number): Promise<CadMesh> {
+  const api = await getApi();
+  return api.draft(shape, picks, angleDeg);
 }

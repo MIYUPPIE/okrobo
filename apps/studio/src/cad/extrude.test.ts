@@ -5,7 +5,7 @@
 // EngineBuiltRobot.test.ts already treats its own WASM engine load.
 
 import { describe, expect, it } from "vitest";
-import { cut, extrudeCircle, extrudeRectangle, fillet, loft, previewEdges, revolve, type ShapeEdgeMesh } from "./extrude";
+import { cut, draft, extrudeCircle, extrudeRectangle, fillet, loft, previewEdges, previewFaces, revolve, shell, type ShapeEdgeMesh } from "./extrude";
 
 // A group's own true midpoint (2-point straight edge) or an interior
 // polyline sample (many-point curved edge) -- never a shared vertex,
@@ -367,6 +367,124 @@ describe("fillet", () => {
       const shape = { operation: "box" as const, size: [0.1, 0.06, 0.04] as [number, number, number] };
       const edges = await previewEdges(shape);
       await expect(fillet(shape, [{ point: edgeGroupDescriptor(edges, 0), operation: "fillet", value: 10 }])).rejects.toBeTruthy();
+    },
+    15_000,
+  );
+});
+
+// CAD Kernel Phase 6 (Shell + Draft). Real pipeline, no mocks -- see
+// docs/decisions/cad-kernel-shell-draft.md. Face descriptors here are the
+// exact Face.center values previewFaces itself returns (not derived from
+// the mesh, unlike edges -- verified a curved face's own mesh-triangulated
+// centroid can land measurably off the true center).
+describe("previewFaces", () => {
+  it(
+    "exports a real, pickable face list with distinct centers for a box primitive shape",
+    async () => {
+      const preview = await previewFaces({ operation: "box", size: [0.1, 0.06, 0.04] });
+      expect(preview.mesh.faceGroups.length).toBe(6); // a box has exactly 6 faces
+      expect(preview.centers.length).toBe(6);
+      const unique = new Set(preview.centers.map((c) => c.map((v) => v.toFixed(6)).join(",")));
+      expect(unique.size).toBe(6); // every face has a distinct center
+    },
+    30_000,
+  );
+
+  it(
+    "exports a real face list for a cylinder primitive shape (curved side + two caps)",
+    async () => {
+      const preview = await previewFaces({ operation: "cylinder", radius: 0.03, length: 0.08 });
+      expect(preview.mesh.faceGroups.length).toBe(3);
+      expect(preview.centers.length).toBe(3);
+    },
+    15_000,
+  );
+});
+
+describe("shell", () => {
+  it(
+    "hollows out a box by removing one picked face, leaving its outer bounding box unchanged",
+    async () => {
+      const shape = { operation: "box" as const, size: [0.1, 0.06, 0.04] as [number, number, number] };
+      const preview = await previewFaces(shape);
+      const topCenter = preview.centers.find((c) => Math.abs(c[2] - 0.02) < 1e-6)!;
+      const result = await shell(shape, [topCenter], 0.005);
+
+      expect(result.vertices.length % 3).toBe(0);
+      expect(result.faces.length % 3).toBe(0);
+      const vertexCount = result.vertices.length / 3;
+      for (const index of result.faces) {
+        expect(index).toBeGreaterThanOrEqual(0);
+        expect(index).toBeLessThan(vertexCount);
+      }
+
+      const { x, y, z } = meshRanges(result);
+      // Removing one face and hollowing the rest doesn't change the outer
+      // footprint -- only carves material from the inside and opens the
+      // removed face.
+      expect(x[1] - x[0]).toBeCloseTo(0.1, 2);
+      expect(y[1] - y[0]).toBeCloseTo(0.06, 2);
+      expect(z[1] - z[0]).toBeCloseTo(0.04, 2);
+    },
+    30_000,
+  );
+
+  it(
+    "removes multiple picked faces at once (an open tube), and works on a standalone cylinder body",
+    async () => {
+      const boxShape = { operation: "box" as const, size: [0.1, 0.06, 0.04] as [number, number, number] };
+      const boxPreview = await previewFaces(boxShape);
+      const top = boxPreview.centers.find((c) => Math.abs(c[2] - 0.02) < 1e-6)!;
+      const bottom = boxPreview.centers.find((c) => Math.abs(c[2] + 0.02) < 1e-6)!;
+      const tube = await shell(boxShape, [top, bottom], 0.005);
+      expect(tube.vertices.length).toBeGreaterThan(0);
+      expect(tube.faces.length % 3).toBe(0);
+
+      const cylShape = { operation: "cylinder" as const, radius: 0.03, length: 0.08 };
+      const cylPreview = await previewFaces(cylShape);
+      const topCap = cylPreview.centers.find((c) => c[1] > 0.03)!;
+      const cylResult = await shell(cylShape, [topCap], 0.005);
+      expect(cylResult.vertices.length).toBeGreaterThan(0);
+      expect(cylResult.faces.length % 3).toBe(0);
+    },
+    15_000,
+  );
+});
+
+describe("draft", () => {
+  it(
+    "tapers a picked side face by a real angle, producing a non-degenerate result",
+    async () => {
+      const shape = { operation: "box" as const, size: [0.1, 0.06, 0.04] as [number, number, number] };
+      const preview = await previewFaces(shape);
+      const sideCenter = preview.centers.find((c) => Math.abs(c[0] - 0.05) < 1e-6)!;
+      const result = await draft(shape, [sideCenter], 5);
+      expect(result.vertices.length).toBeGreaterThan(0);
+      expect(result.faces.length % 3).toBe(0);
+    },
+    30_000,
+  );
+
+  it(
+    "works on a standalone cylinder body's own curved side face",
+    async () => {
+      const shape = { operation: "cylinder" as const, radius: 0.03, length: 0.08 };
+      const preview = await previewFaces(shape);
+      const curvedCenter = preview.centers.find((c) => Math.abs(c[1]) < 0.001)!;
+      const result = await draft(shape, [curvedCenter], 5);
+      expect(result.vertices.length).toBeGreaterThan(0);
+      expect(result.faces.length % 3).toBe(0);
+    },
+    15_000,
+  );
+
+  it(
+    "a face parallel to the fixed XY neutral plane throws a catchable error",
+    async () => {
+      const shape = { operation: "box" as const, size: [0.1, 0.06, 0.04] as [number, number, number] };
+      const preview = await previewFaces(shape);
+      const topCenter = preview.centers.find((c) => Math.abs(c[2] - 0.02) < 1e-6)!;
+      await expect(draft(shape, [topCenter], 5)).rejects.toBeTruthy();
     },
     15_000,
   );

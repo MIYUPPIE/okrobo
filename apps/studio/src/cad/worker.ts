@@ -21,6 +21,7 @@ import wasmUrl from "replicad-opencascadejs/wasm?url";
 import manifoldWasmUrl from "manifold-3d/manifold.wasm?url";
 import {
   cutMesh,
+  draftMesh,
   extrudeCircleMesh,
   extrudeRectangleMesh,
   filletMesh,
@@ -28,9 +29,12 @@ import {
   loadManifold,
   loadOC,
   previewEdgesMesh,
+  previewFacesMesh,
   revolveMesh,
+  shellMesh,
   type CadMesh,
   type CutTool,
+  type FacePick,
   type FilletBaseShape,
   type FilletPick,
   type Profile,
@@ -69,6 +73,19 @@ const api = {
   async fillet(shape: FilletBaseShape, picks: FilletPick[]) {
     await loadOC({ locateFile: () => wasmUrl });
     return filletMesh(shape, picks);
+  },
+  // CAD Kernel Phase 6 (Shell + Draft): OpenCascade only, same as Fillet/Chamfer.
+  async previewFaces(shape: FilletBaseShape) {
+    await loadOC({ locateFile: () => wasmUrl });
+    return previewFacesMesh(shape);
+  },
+  async shell(shape: FilletBaseShape, picks: FacePick[], thickness: number) {
+    await loadOC({ locateFile: () => wasmUrl });
+    return shellMesh(shape, picks, thickness);
+  },
+  async draft(shape: FilletBaseShape, picks: FacePick[], angleDeg: number) {
+    await loadOC({ locateFile: () => wasmUrl });
+    return draftMesh(shape, picks, angleDeg);
   },
 };
 

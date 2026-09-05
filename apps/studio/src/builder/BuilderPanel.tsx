@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BlocksPanel } from "../BlocksPanel";
 import { setBuiltRobotFields } from "../blocks/okroboBlocks";
-import type { CadEdgeOverlay, CadPreview } from "../cad/cadClient";
+import type { CadEdgeOverlay, CadFaceOverlay, CadPreview, FacePick } from "../cad/cadClient";
+import { draft, shell } from "../cad/cadClient";
 import { validateRobotDef, type RobotDef, type Transform } from "../contracts/robotDef";
 import type { WorldDef } from "../contracts/worldDef";
 import { EngineBuiltRobot } from "../engine/EngineBuiltRobot";
@@ -16,7 +17,9 @@ import { CadBoundaryCreator } from "./CadBoundaryCreator";
 import { CadBoundaryCutCreator } from "./CadBoundaryCutCreator";
 import { CadExtrudeCreator } from "./CadExtrudeCreator";
 import { CadExtrudedCutCreator } from "./CadExtrudedCutCreator";
+import { CadFacePickEditor } from "./CadFacePickEditor";
 import { CadFilletChamferEditor } from "./CadFilletChamferEditor";
+import { positiveNumber } from "./CadProfileFields";
 import { CadRevolveCreator } from "./CadRevolveCreator";
 import { CadRevolvedCutCreator } from "./CadRevolvedCutCreator";
 import { exportRobotDef } from "./exportRobot";
@@ -59,8 +62,22 @@ type ProgramStatus = "idle" | "running" | "error";
  * their Phase 4 boolean-subtraction counterparts, each first requiring a
  * single existing-body pick (see pickTargetId below) before showing their
  * own creator panel; "fillet-chamfer" (Phase 5) is a fourth single-pick
- * tool of that same shape, targeting an existing box/cylinder body. */
-type BuilderTool = "transform" | "add-joint" | "extrude" | "revolve" | "boundary" | "extruded-cut" | "revolved-cut" | "boundary-cut" | "fillet-chamfer";
+ * tool of that same shape, targeting an existing box/cylinder body;
+ * "shell"/"draft" (Phase 6) are two more of that same shape, targeting
+ * faces instead of edges -- standalone only this phase, no embedded step
+ * in the Boss creators (see docs/decisions/cad-kernel-shell-draft.md). */
+type BuilderTool =
+  | "transform"
+  | "add-joint"
+  | "extrude"
+  | "revolve"
+  | "boundary"
+  | "extruded-cut"
+  | "revolved-cut"
+  | "boundary-cut"
+  | "fillet-chamfer"
+  | "shell"
+  | "draft";
 interface JointDraft {
   parentId: string;
   childId?: string;
@@ -68,11 +85,11 @@ interface JointDraft {
 
 const CUT_TOOLS: ReadonlySet<BuilderTool> = new Set(["extruded-cut", "revolved-cut", "boundary-cut"]);
 /** Every tool that needs a single existing-body pick before it can show
- * its own creator/editor panel -- Cut's three tools plus Fillet/Chamfer's
- * one. Drives the shared bodyPick/suppressedBodyId wiring; CUT_TOOLS
- * itself stays narrower, for the handful of things still genuinely
- * Cut-specific (hint copy, which creator to render). */
-const TARGET_PICK_TOOLS: ReadonlySet<BuilderTool> = new Set([...CUT_TOOLS, "fillet-chamfer"]);
+ * its own creator/editor panel -- Cut's three tools, Fillet/Chamfer's one,
+ * and Shell/Draft's two. Drives the shared bodyPick/suppressedBodyId
+ * wiring; CUT_TOOLS itself stays narrower, for the handful of things
+ * still genuinely Cut-specific (hint copy, which creator to render). */
+const TARGET_PICK_TOOLS: ReadonlySet<BuilderTool> = new Set([...CUT_TOOLS, "fillet-chamfer", "shell", "draft"]);
 
 export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   const [selectedBodyId, setSelectedBodyId] = useState<string | null>(robot.bodies[0]?.id ?? null);
@@ -91,6 +108,12 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   // existing box/cylinder body).
   const [filletPicks, setFilletPicks] = useState<FilletPickDraft[]>([]);
   const [edgeOverlay, setEdgeOverlay] = useState<CadEdgeOverlay | null>(null);
+  // Robot Builder CAD Kernel Phase 6 (Shell + Draft): faces picked so far,
+  // lifted the same way filletPicks/edgeOverlay are -- a separate, simpler
+  // shape (just points, no per-pick operation/value) since Shell/Draft
+  // each apply one shared parameter to their whole pick set.
+  const [facePicks, setFacePicks] = useState<FacePick[]>([]);
+  const [faceOverlay, setFaceOverlay] = useState<CadFaceOverlay | null>(null);
   // Bumped only on a gizmo commit (not on the inspector's own Apply), so
   // BodyInspector resyncs its draft when a drag moved the body it's
   // showing -- mirrors App.tsx's existing worldEpoch convention.
@@ -208,6 +231,8 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
     setCadPreview(null);
     setFilletPicks([]);
     setEdgeOverlay(null);
+    setFacePicks([]);
+    setFaceOverlay(null);
   };
 
   const toggleRevolveTool = () => {
@@ -215,6 +240,8 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
     setCadPreview(null);
     setFilletPicks([]);
     setEdgeOverlay(null);
+    setFacePicks([]);
+    setFaceOverlay(null);
   };
 
   const toggleBoundaryTool = () => {
@@ -222,6 +249,8 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
     setCadPreview(null);
     setFilletPicks([]);
     setEdgeOverlay(null);
+    setFacePicks([]);
+    setFaceOverlay(null);
   };
 
   // Shared by all three Boss CAD tools (Extrude/Revolve/Boundary) -- their
@@ -234,6 +263,8 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
     setCadPreview(null);
     setFilletPicks([]);
     setEdgeOverlay(null);
+    setFacePicks([]);
+    setFaceOverlay(null);
     setSelectedBodyId(newBodyId);
   };
 
@@ -243,29 +274,44 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
     setPickTargetId(null);
     setFilletPicks([]);
     setEdgeOverlay(null);
+    setFacePicks([]);
+    setFaceOverlay(null);
   };
 
-  /** Makes all nine tools mutually exclusive by construction: a tool's own
-   * toolbar button never disables itself (so clicking it again toggles
-   * back to "transform"), only a *different* exclusive tool being active. */
+  /** Makes all eleven tools mutually exclusive by construction: a tool's
+   * own toolbar button never disables itself (so clicking it again
+   * toggles back to "transform"), only a *different* exclusive tool
+   * being active. */
   const otherCadToolActive = (own: BuilderTool) => builderTool !== "transform" && builderTool !== own;
 
   const toggleExtrudedCutTool = () => {
     setBuilderTool((current) => (current === "extruded-cut" ? "transform" : "extruded-cut"));
     setCadPreview(null);
     setPickTargetId(null);
+    setFilletPicks([]);
+    setEdgeOverlay(null);
+    setFacePicks([]);
+    setFaceOverlay(null);
   };
 
   const toggleRevolvedCutTool = () => {
     setBuilderTool((current) => (current === "revolved-cut" ? "transform" : "revolved-cut"));
     setCadPreview(null);
     setPickTargetId(null);
+    setFilletPicks([]);
+    setEdgeOverlay(null);
+    setFacePicks([]);
+    setFaceOverlay(null);
   };
 
   const toggleBoundaryCutTool = () => {
     setBuilderTool((current) => (current === "boundary-cut" ? "transform" : "boundary-cut"));
     setCadPreview(null);
     setPickTargetId(null);
+    setFilletPicks([]);
+    setEdgeOverlay(null);
+    setFacePicks([]);
+    setFaceOverlay(null);
   };
 
   const toggleFilletChamferTool = () => {
@@ -274,9 +320,31 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
     setPickTargetId(null);
     setFilletPicks([]);
     setEdgeOverlay(null);
+    setFacePicks([]);
+    setFaceOverlay(null);
   };
 
-  /** Single-body pick for any of the four TARGET_PICK_TOOLS -- no parent-
+  const toggleShellTool = () => {
+    setBuilderTool((current) => (current === "shell" ? "transform" : "shell"));
+    setCadPreview(null);
+    setPickTargetId(null);
+    setFilletPicks([]);
+    setEdgeOverlay(null);
+    setFacePicks([]);
+    setFaceOverlay(null);
+  };
+
+  const toggleDraftTool = () => {
+    setBuilderTool((current) => (current === "draft" ? "transform" : "draft"));
+    setCadPreview(null);
+    setPickTargetId(null);
+    setFilletPicks([]);
+    setEdgeOverlay(null);
+    setFacePicks([]);
+    setFaceOverlay(null);
+  };
+
+  /** Single-body pick for any of the six TARGET_PICK_TOOLS -- no parent-
    * then-child two-step, unlike handleJointPick. Shared by BuilderViewport's
    * bodyPick prop and HierarchyList's own rows, the same "two real input
    * paths" precedent Add Joint already established. */
@@ -284,9 +352,11 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
     setPickTargetId(bodyId);
     setFilletPicks([]);
     setEdgeOverlay(null);
+    setFacePicks([]);
+    setFaceOverlay(null);
   };
 
-  /** Shared by all four TARGET_PICK_TOOLS -- no new body id to select (the
+  /** Shared by all six TARGET_PICK_TOOLS -- no new body id to select (the
    * target body's own id is unchanged), unlike applyCadBody. */
   const applyTargetEditResult = (next: RobotDef) => {
     onChange(next);
@@ -295,7 +365,19 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
     setPickTargetId(null);
     setFilletPicks([]);
     setEdgeOverlay(null);
+    setFacePicks([]);
+    setFaceOverlay(null);
   };
+
+  function shellValidate(raw: string) {
+    return positiveNumber(raw, "Thickness");
+  }
+
+  function draftValidate(raw: string): { ok: true; value: number } | { ok: false; message: string } {
+    const value = Number.parseFloat(raw);
+    if (!Number.isFinite(value) || value <= 0 || value >= 90) return { ok: false, message: "Angle must be between 0 and 90" };
+    return { ok: true, value };
+  }
 
   // Robot Builder Phase 6: mirrors App.tsx's own run()/stop() shape for the
   // Car/Arm/Drone pipeline -- abort-if-already-running, arm(), set status,
@@ -390,6 +472,7 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
             cadPreview={isCadTool ? cadPreview : null}
             suppressedBodyId={isTargetPickTool ? pickTargetId : null}
             edgeOverlay={isCadTool && edgeOverlay ? { ...edgeOverlay, pickedPoints: filletPicks.map((p) => p.point) } : null}
+            faceOverlay={isCadTool && faceOverlay ? { ...faceOverlay, pickedPoints: facePicks } : null}
           />
           <div className="builder-toolbar">
             <button
@@ -473,12 +556,30 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
             >
               Fillet/Chamfer
             </button>
+            <button
+              type="button"
+              className={builderTool === "shell" ? "active" : ""}
+              disabled={robot.bodies.length === 0 || otherCadToolActive("shell")}
+              onClick={toggleShellTool}
+            >
+              Shell
+            </button>
+            <button
+              type="button"
+              className={builderTool === "draft" ? "active" : ""}
+              disabled={robot.bodies.length === 0 || otherCadToolActive("draft")}
+              onClick={toggleDraftTool}
+            >
+              Draft
+            </button>
           </div>
           {builderTool === "add-joint" && !jointDraft?.childId && (
             <p className="joint-pick-hint">{jointDraft ? "Click the child body." : "Click the parent body."}</p>
           )}
           {isCutTool && pickTargetId === null && <p className="joint-pick-hint">Click the body to cut.</p>}
           {builderTool === "fillet-chamfer" && pickTargetId === null && <p className="joint-pick-hint">Click the body to fillet or chamfer.</p>}
+          {builderTool === "shell" && pickTargetId === null && <p className="joint-pick-hint">Click the body to shell.</p>}
+          {builderTool === "draft" && pickTargetId === null && <p className="joint-pick-hint">Click the body to draft.</p>}
         </div>
       ) : (
         <div className="builder-stage">
@@ -629,6 +730,40 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
               onEdgePicksChange={setFilletPicks}
               onEdgeOverlayChange={setEdgeOverlay}
             />
+          ) : builderTool === "shell" && pickTargetId ? (
+            <CadFacePickEditor
+              title="Shell"
+              valueLabel="Thickness (m)"
+              ariaLabel="shell thickness"
+              defaultValue="0.005"
+              validateValue={shellValidate}
+              computeMesh={shell}
+              robot={robot}
+              targetBodyId={pickTargetId}
+              onApply={applyTargetEditResult}
+              onCancel={cancelCadTool}
+              onPreviewChange={setCadPreview}
+              facePicks={facePicks}
+              onFacePicksChange={setFacePicks}
+              onFaceOverlayChange={setFaceOverlay}
+            />
+          ) : builderTool === "draft" && pickTargetId ? (
+            <CadFacePickEditor
+              title="Draft"
+              valueLabel="Angle (°)"
+              ariaLabel="draft angle"
+              defaultValue="5"
+              validateValue={draftValidate}
+              computeMesh={draft}
+              robot={robot}
+              targetBodyId={pickTargetId}
+              onApply={applyTargetEditResult}
+              onCancel={cancelCadTool}
+              onPreviewChange={setCadPreview}
+              facePicks={facePicks}
+              onFacePicksChange={setFacePicks}
+              onFaceOverlayChange={setFaceOverlay}
+            />
           ) : selectedBody && builderTool === "transform" ? (
             <BodyInspector
               key={`${selectedBody.id}:${transformEpoch}`}
@@ -645,7 +780,11 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
                   ? "Pick a body to cut in the 3D view."
                   : builderTool === "fillet-chamfer"
                     ? "Pick a body to fillet or chamfer in the 3D view."
-                    : "Select a body to edit it."}
+                    : builderTool === "shell"
+                      ? "Pick a body to shell in the 3D view."
+                      : builderTool === "draft"
+                        ? "Pick a body to draft in the 3D view."
+                        : "Select a body to edit it."}
             </p>
           )
         ) : builtRobot ? (

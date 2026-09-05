@@ -162,6 +162,30 @@ vi.mock("./CadBoundaryCutCreator", () => ({ CadBoundaryCutCreator: makeCadCutCre
 // Kernel Phase 5 (Fillet + Chamfer). Its own real edge-picking pipeline is
 // tested in CadFilletChamferEditor.test.tsx.
 vi.mock("./CadFilletChamferEditor", () => ({ CadFilletChamferEditor: makeCadCutCreatorStub("cad-fillet-chamfer-editor-stub") }));
+// Robot Builder CAD Kernel Phase 6 (Shell + Draft): one shared component
+// used twice (Shell and Draft each pass their own `title`), so the stub
+// exposes it as a data attribute rather than a fixed test id the way the
+// Cut/Fillet-Chamfer stubs above do -- both tools render through the same
+// mocked component. Its own real face-picking pipeline is tested in
+// CadFacePickEditor.test.tsx.
+vi.mock("./CadFacePickEditor", () => ({
+  CadFacePickEditor: (props: { title: string; targetBodyId: string; onApply: (next: RobotDef) => void; onCancel: () => void; robot: RobotDef }) => (
+    <div data-testid="cad-face-pick-editor-stub" data-title={props.title} data-target={props.targetBodyId}>
+      <button
+        onClick={() => {
+          const geometry = { type: "cad_mesh" as const, vertices: [0, 0, 0], faces: [0, 0, 0] };
+          props.onApply({
+            ...props.robot,
+            bodies: props.robot.bodies.map((b) => (b.id === props.targetBodyId ? { ...b, visual: geometry, collision: geometry } : b)),
+          });
+        }}
+      >
+        stub apply
+      </button>
+      <button onClick={props.onCancel}>stub cancel</button>
+    </div>
+  ),
+}));
 // jsdom has no ResizeObserver and can't lay out real SVG, both of which
 // Blockly.inject needs -- same reason BuilderViewport/TestViewport are
 // mocked above. BlocksPanel is only ever exercised for real via the
@@ -614,7 +638,63 @@ describe("BuilderPanel", () => {
     expect(screen.getByText("Click the body to fillet or chamfer.")).toBeInTheDocument();
   });
 
-  it("all nine tools stay mutually exclusive: activating any Cut/Fillet-Chamfer tool disables every Boss tool and Add Joint too", async () => {
+  it.each(["Shell", "Draft"] as const)(
+    "%s: shows a pick hint until a target is picked, then the CadFacePickEditor stub with the right title and target's id",
+    async (title) => {
+      const user = userEvent.setup();
+      render(<BuilderPanel robot={makeRobot()} onChange={() => {}} />);
+
+      const toolButton = screen.getByRole("button", { name: title });
+      await user.click(toolButton);
+      expect(toolButton).toHaveClass("active");
+      expect(screen.getByText(`Click the body to ${title.toLowerCase()}.`)).toBeInTheDocument();
+      expect(screen.queryByTestId("cad-face-pick-editor-stub")).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "pick base" }));
+      expect(screen.queryByText(`Click the body to ${title.toLowerCase()}.`)).not.toBeInTheDocument();
+      const stub = screen.getByTestId("cad-face-pick-editor-stub");
+      expect(stub).toHaveAttribute("data-title", title);
+      expect(stub).toHaveAttribute("data-target", "base");
+      expect(screen.getByTestId("builder-viewport-stub")).toHaveAttribute("data-suppressed", "base");
+    },
+  );
+
+  it.each(["Shell", "Draft"] as const)("%s: Apply from the stub replaces the target body's geometry and returns to the transform tool", async (title) => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={onChange} />);
+
+    await user.click(screen.getByRole("button", { name: title }));
+    await user.click(screen.getByRole("button", { name: "pick base" }));
+    await user.click(screen.getByRole("button", { name: "stub apply" }));
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next: RobotDef = onChange.mock.calls[0][0];
+    expect(next.bodies).toHaveLength(1); // no new body -- the target's own geometry was replaced
+    expect(next.bodies[0]).toMatchObject({ id: "base", visual: { type: "cad_mesh" } });
+    expect(screen.queryByRole("button", { name: title })).not.toHaveClass("active");
+    expect(screen.getByTestId("builder-viewport-stub")).toHaveAttribute("data-suppressed", "");
+  });
+
+  it.each(["Shell", "Draft"] as const)("%s: Cancel from the stub returns to the transform tool without calling onChange, clearing the target pick", async (title) => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={onChange} />);
+
+    await user.click(screen.getByRole("button", { name: title }));
+    await user.click(screen.getByRole("button", { name: "pick base" }));
+    await user.click(screen.getByRole("button", { name: "stub cancel" }));
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: title })).not.toHaveClass("active");
+    expect(screen.queryByTestId("cad-face-pick-editor-stub")).not.toBeInTheDocument();
+
+    // Reopening starts a fresh pick, not resuming the old one.
+    await user.click(screen.getByRole("button", { name: title }));
+    expect(screen.getByText(`Click the body to ${title.toLowerCase()}.`)).toBeInTheDocument();
+  });
+
+  it("all eleven tools stay mutually exclusive: activating any Cut/Fillet-Chamfer/Shell/Draft tool disables every Boss tool and Add Joint too", async () => {
     const user = userEvent.setup();
     const base = makeRobot();
     const robot: RobotDef = { ...base, bodies: [...base.bodies, { id: "wheel", name: "Wheel", transform: identity, mass: 0.1, inertia }] };
@@ -628,6 +708,8 @@ describe("BuilderPanel", () => {
     expect(screen.getByRole("button", { name: "Extruded Cut" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Revolved Cut" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Fillet/Chamfer" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Shell" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Draft" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Boundary Cut" })).not.toBeDisabled(); // never disables itself
   });
 
