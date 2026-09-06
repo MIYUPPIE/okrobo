@@ -1596,3 +1596,65 @@ order. `npm run test` (600 passed across 61 files), `npm run typecheck`,
 `python3 -m pytest` (204 passed, 1 skipped), `ctest` (13/13), and the full
 `test-all.sh` gate suite (including the new E2E checks, run for real
 against a live dev server and headless Chrome) all green.
+
+## CAD Kernel — Phase 7.2: Live-recompute executor (2026-09-06)
+
+The real hard part: a new module, `apps/studio/src/cad/executor.ts`,
+reimplements fillet/chamfer/shell/draft directly against raw OpenCascade
+builders (`BRepFilletAPI_MakeFillet`/`MakeChamfer`,
+`BRepOffsetAPI_MakeThickSolid`, `BRepOffsetAPI_DraftAngle`, reached via
+replicad's own exported `getOC()` -- no fork needed) instead of replicad's
+own `.fillet()`/`.chamfer()`/`.shell()`/`.draft()` convenience wrappers,
+which destroy their builder before its `Modified()`/`Generated()`/
+`IsDeleted()` history can ever be read (verified by reading replicad's own
+source). `replayFeatures(features)` walks a body's own recorded
+`Feature[]` history (Phase 7.1) and keeps ONE live OpenCascade solid alive
+across every step -- the previous step's own output feeds directly into
+the next step's operation, which is what lets Cut become a real B-rep
+boolean here (replicad's own `Shape3D.cut()`) instead of `cutMesh`'s own
+Manifold mesh-boolean-via-STL-roundtrip (that path, and the three
+standalone Cut creators that still use it, are untouched -- they can
+target ANY existing body, `cad_mesh` included, which the executor's own
+root-replay approach can't).
+
+Verified empirically against real OpenCascade WASM (not assumed) that
+`Modified()`/`Generated()`/`IsDeleted()` behave very differently across
+operation families: `BRepFilletAPI_MakeFillet`/`MakeChamfer`/
+`BRepOffsetAPI_DraftAngle` only track history for entities their own
+operation actually touched -- `IsDeleted()` comes back `true` for
+anything untouched too, which is NOT evidence of removal, just "nothing
+was tracked"; the geometric near() fallback (Phase 5/6's own established
+mechanism) correctly finds those. `BRepOffsetAPI_MakeThickSolid` (shell)
+gives a real, meaningful `Modified()` entry even for the face passed in
+as "to remove" -- it becomes a thin rim face at the opening, not nothing.
+`BRepAlgoAPI_Cut` tracks `Modified()` for essentially every face, touched
+or not. A genuinely fully-consumed entity (verified: a cut tool that
+entirely engulfs a face) gives empty history AND no geometric match
+either -- correctly resolves "deleted". And a real gotcha: filleting/
+chamfering an edge doesn't produce a successor edge -- `Generated()`
+returns a FACE (the new blend/bevel surface), so `resolveAfterOperation`'s
+own `pointOfRawShape` reads each candidate's actual `ShapeType()` (via
+replicad's own public `downcast()`, since Embind's own binding runtime
+rejects a plain `TopoDS_Shape` where a `TopoDS_Edge`/`TopoDS_Face` is
+expected) rather than assuming it matches the original pick's kind. See
+`docs/decisions/cad-kernel-live-recompute-executor.md`.
+
+Scope, deliberately: this ships the primitive (`resolveAfterOperation`)
+and the full-chain replay, fully tested -- it does NOT wire anything into
+the UI, detect an edit, or implement "recompute downstream of step K".
+Nothing can edit a stored Feature yet; that orchestration is Phase 7.3's
+own job, once real UI requirements exist to design it against.
+`executor.ts` is currently unreferenced by the shipped app -- confirmed
+via `npm run build` (843 modules, WASM asset sizes byte-identical to
+Phase 7.1's own build).
+
+Tests: `executor.test.ts` (new, 15 cases, real OpenCascade WASM, no
+mocks, mirroring `extrude.test.ts`'s own "real pipeline" posture and 30s
+timeout) -- cross-checks replayFeatures's own fillet_chamfer/shell/draft
+output byte-for-byte against kernel.ts's own single-shot fillet()/
+shell()/draft(), a full 3-step chain (box -> shell -> draft) with every
+pick resolving "ok", and direct verification of resolveAfterOperation's
+"ok" (history-informed and geometric-fallback) and "deleted" paths against
+hand-built raw OpenCascade scenarios. `npm run test` (615 passed across 62
+files), `npm run typecheck`, `npm run build` all green. No contract,
+Python, or C++ changes this phase.

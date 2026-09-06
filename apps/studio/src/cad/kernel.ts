@@ -89,7 +89,11 @@ export function loadManifold(options?: LoadManifoldOptions): Promise<ManifoldTop
   return manifoldPromise;
 }
 
-const DEFAULT_MESH_OPTIONS = { tolerance: 0.01, angularTolerance: 0.3 };
+// CAD Kernel Phase 7.2 (live-recompute executor): exported so executor.ts's
+// own raw-OCC operations mesh their final result with the exact same
+// tolerance every single-shot function here already uses -- one shared
+// constant, not a second hardcoded copy.
+export const DEFAULT_MESH_OPTIONS = { tolerance: 0.01, angularTolerance: 0.3 };
 
 /** CAD Kernel Phase 3 (Revolve + Boundary): the two profile shapes every
  * operation shares. Extrude's own extrudeRectangleMesh/extrudeCircleMesh
@@ -224,9 +228,9 @@ export type CutTool = BossOperation;
 /** Builds a Boss operation as a live solid, stopping one step before
  * extrudeMesh/revolveMesh/loftMesh's own `.mesh()` + delete -- callers
  * that need to keep operating on the live solid (cutMesh's translate +
- * meshShape(), Phase 5's fillet/chamfer) do that step themselves. Caller
- * owns disposal. */
-function buildBossSolid(op: BossOperation): Shape3D {
+ * meshShape(), Phase 5's fillet/chamfer, Phase 7.2's executor.ts) do that
+ * step themselves. Caller owns disposal. */
+export function buildBossSolid(op: BossOperation): Shape3D {
   if (op.operation === "extrude") {
     const sketch = makeProfileSketch(op.profile);
     const solid = sketch.extrude(op.depth, { origin: [0, 0, -op.depth / 2] });
@@ -337,7 +341,10 @@ export async function cut(targetMesh: CadMesh, tool: CutTool, position: readonly
  * applied there) -- zero approximation, zero axis-mismatch risk. */
 export type FilletBaseShape = BossOperation | { operation: "box"; size: [number, number, number] } | { operation: "cylinder"; radius: number; length: number };
 
-function buildFilletBaseSolid(shape: FilletBaseShape): Shape3D {
+/** Also covers every Feature root kind (extrude/revolve/loft/box/cylinder)
+ * one to one -- executor.ts's own buildRoot (Phase 7.2) reuses this
+ * directly rather than duplicating the sketch/primitive-building logic. */
+export function buildFilletBaseSolid(shape: FilletBaseShape): Shape3D {
   if (shape.operation === "box") {
     const [sx, sy, sz] = shape.size;
     return makeBox([-sx / 2, -sy / 2, -sz / 2], [sx / 2, sy / 2, sz / 2]);
@@ -354,7 +361,7 @@ function buildFilletBaseSolid(shape: FilletBaseShape): Shape3D {
  * picks) stays reliable whether the shape is a 0.02-unit part or a
  * 10-unit one. Extracted once a third caller needed the identical
  * calculation. */
-function toleranceFor(solid: Shape3D): number {
+export function toleranceFor(solid: Shape3D): number {
   const bounds = solid.boundingBox.bounds;
   const diagonal = Math.hypot(bounds[1][0] - bounds[0][0], bounds[1][1] - bounds[0][1], bounds[1][2] - bounds[0][2]);
   return Math.max(diagonal * 0.005, 1e-6);
