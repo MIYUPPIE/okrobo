@@ -1,4 +1,5 @@
 import type { FilletPick, ShapeEdgeMesh } from "../cad/cadClient";
+import type { Feature } from "../contracts/robotDef";
 import { positiveNumber } from "./CadProfileFields";
 
 // CAD Kernel Phase 5 (Fillet + Chamfer): shared by every creator that lets
@@ -60,4 +61,25 @@ export function parseFilletPicks(drafts: FilletPickDraft[]): FilletPicksParseRes
     picks.push({ point: draft.point, operation: draft.operation, value: value.value });
   }
   return { ok: true, value: picks };
+}
+
+/** Builds this fillet/chamfer step's own Feature entry (CAD Kernel Phase
+ * 7.1) from the kernel's own FilletPick[] -- every caller of
+ * parseFilletPicks that goes on to apply the result also needs this, so
+ * it's kept alongside rather than duplicated per creator. `sourceStep` is
+ * the same value for every pick here: whichever single step (the fresh
+ * Boss shape, or an existing/synthesized root) this fillet/chamfer set was
+ * picked from -- forward-looking and unused until CAD Kernel Phase 7.2, see
+ * CadPick's own doc in contracts/robotDef.ts. */
+export function filletChamferFeatureFromPicks(picks: FilletPick[], sourceStep: number): Feature {
+  return {
+    operation: "fillet_chamfer",
+    picks: picks.map((pick, localIndex) => ({
+      source_step: sourceStep,
+      local_index: localIndex,
+      point: pick.point,
+      operation: pick.operation,
+      value: pick.value,
+    })),
+  };
 }

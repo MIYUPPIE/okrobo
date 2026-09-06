@@ -5,7 +5,7 @@
 // numeric utilities (no scene graph, no rendering) -- still no React.
 
 import * as THREE from "three";
-import type { Body, Geometry, Issue, RobotDef, Transform } from "../contracts/robotDef";
+import type { Body, Feature, Geometry, Issue, RobotDef, Transform } from "../contracts/robotDef";
 
 const DEFAULT_STARTER_COLOR: [number, number, number] = [0.3, 0.5, 0.9];
 const DEFAULT_BODY_COLOR: [number, number, number] = [0.6, 0.6, 0.6];
@@ -68,6 +68,24 @@ const CAD_BODY_INERTIA = { ixx: 0.0001, iyy: 0.0001, izz: 0.0001 };
 
 type CadMeshGeometry = Extract<Geometry, { type: "cad_mesh" }>;
 
+/** A body whose current visual/collision is a bare, exactly-reconstructable
+ * primitive (box or cylinder) has no CAD history yet -- this is the implicit
+ * root a modifier tool's own Feature gets prepended with the first time it
+ * touches such a body (CAD Kernel Phase 7.1), so the stored `features` list
+ * stays a complete, ordered record even though the body itself was never
+ * created through a Boss creator. Anything else (sphere/cone/capsule/plane,
+ * or an already-baked cad_mesh) has no exact Feature root to synthesize and
+ * yields no entries -- matches cadTargetShape.ts's own shapeFromGeometry
+ * restriction, which is exactly why every standalone modifier tool
+ * (Fillet/Chamfer, Shell, Draft) only ever targets a box/cylinder body in
+ * the first place. */
+function implicitRootFeatures(geometry: Geometry | undefined): Feature[] {
+  if (!geometry) return [];
+  if (geometry.type === "box") return [{ operation: "box", size: geometry.size }];
+  if (geometry.type === "cylinder") return [{ operation: "cylinder", radius: geometry.radius, length: geometry.length }];
+  return [];
+}
+
 /** Mirrors makeDefaultBody's exact positioning convention (0.1m along +x
  * from `near`, or the origin) for a CAD-kernel-authored mesh body (Robot
  * Builder CAD Kernel Phase 2) instead of a default box. Takes a structural
@@ -77,8 +95,12 @@ type CadMeshGeometry = Extract<Geometry, { type: "cad_mesh" }>;
  * scripts/generate-cad-examples.mjs's cad-l-bracket.json example uses --
  * a reasonable small-part default, still editable afterward via
  * BodyInspector's ordinary Mass & inertia fields (only Shape is locked for
- * a cad_mesh body). See docs/decisions/cad-kernel-sketch-ui.md. */
-export function makeCadBody(id: string, near: Body | null, mesh: Pick<CadMeshGeometry, "vertices" | "faces">): Body {
+ * a cad_mesh body). `features` (CAD Kernel Phase 7.1) is this body's own
+ * ordered construction history, in caller order -- usually one root entry,
+ * but two when a Boss creator's own embedded Fillet/Chamfer step (picked on
+ * the not-yet-baked shape) produced the mesh being baked here. See
+ * docs/decisions/cad-kernel-feature-tree-data-model.md. */
+export function makeCadBody(id: string, near: Body | null, mesh: Pick<CadMeshGeometry, "vertices" | "faces">, features: Feature[]): Body {
   const base = near?.transform.position ?? [0, 0, 0];
   const geometry: Geometry = { type: "cad_mesh", vertices: mesh.vertices, faces: mesh.faces };
   return {
@@ -87,6 +109,7 @@ export function makeCadBody(id: string, near: Body | null, mesh: Pick<CadMeshGeo
     transform: { position: [base[0] + 0.1, base[1], base[2]], rotation_rpy: [0, 0, 0] },
     visual: geometry,
     collision: geometry,
+    features,
     mass: CAD_BODY_MASS,
     inertia: CAD_BODY_INERTIA,
     material: { color: DEFAULT_BODY_COLOR },
@@ -102,12 +125,20 @@ export function makeCadBody(id: string, near: Body | null, mesh: Pick<CadMeshGeo
  * A no-op (returns `robot` as-is) if `targetBodyId` doesn't match any body
  * -- callers only ever call this right after picking a real target, so
  * that should never happen in practice, but this keeps the function total
- * rather than throwing on a stale id. */
-export function replaceBodyGeometry(robot: RobotDef, targetBodyId: string, mesh: Pick<CadMeshGeometry, "vertices" | "faces">): RobotDef {
+ * rather than throwing on a stale id. `newFeatures` (CAD Kernel Phase 7.1)
+ * is appended to the target's own existing `features` -- or, when that's
+ * empty/absent, to its synthesized implicit root (implicitRootFeatures) --
+ * so the modifier this call represents (Cut/Fillet-Chamfer/Shell/Draft)
+ * lands as the next ordered step in a complete history. */
+export function replaceBodyGeometry(robot: RobotDef, targetBodyId: string, mesh: Pick<CadMeshGeometry, "vertices" | "faces">, newFeatures: Feature[]): RobotDef {
   const geometry: Geometry = { type: "cad_mesh", vertices: mesh.vertices, faces: mesh.faces };
   return {
     ...robot,
-    bodies: robot.bodies.map((b) => (b.id === targetBodyId ? { ...b, visual: geometry, collision: geometry } : b)),
+    bodies: robot.bodies.map((b) => {
+      if (b.id !== targetBodyId) return b;
+      const baseFeatures = b.features && b.features.length > 0 ? b.features : implicitRootFeatures(b.visual ?? b.collision);
+      return { ...b, visual: geometry, collision: geometry, features: [...baseFeatures, ...newFeatures] };
+    }),
   };
 }
 

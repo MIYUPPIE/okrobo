@@ -139,6 +139,29 @@ describe("CadExtrudeCreator", () => {
     expect(newBody.id).toBe("body-2");
     expect(newBody.visual).toEqual({ type: "cad_mesh", vertices: mesh.vertices, faces: mesh.faces });
     expect(newBody.transform.position).toEqual([0.1, 0, 0]); // 0.1m from `near` (chassis at origin)
+    expect(newBody.features).toEqual([{ operation: "extrude", profile: { type: "rectangle", width: 0.05, height: 0.05 }, depth: 0.02 }]);
+  });
+
+  // CAD Kernel Phase 7.1: the new body's own construction history.
+  it("Apply records an extrude root plus a fillet_chamfer step when edges were picked", async () => {
+    vi.useFakeTimers();
+    const edges = { lines: [0, 0, 0, 10, 0, 0], edgeGroups: [{ start: 0, count: 2, edgeId: 1 }] };
+    previewEdgesMock.mockResolvedValue(edges);
+    filletMock.mockResolvedValue(mesh);
+    const onApply = vi.fn();
+    const picked = [{ point: [5, 0, 0] as [number, number, number], operation: "fillet" as const, value: "0.005" }];
+    render(
+      <CadExtrudeCreator robot={makeRobot()} near={null} onApply={onApply} onCancel={() => {}} onPreviewChange={() => {}} edgePicks={picked} onEdgePicksChange={() => {}} onEdgeOverlayChange={() => {}} />,
+    );
+
+    await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    const [nextRobot] = onApply.mock.calls[0] as [RobotDef];
+    expect(nextRobot.bodies[1].features).toEqual([
+      { operation: "extrude", profile: { type: "rectangle", width: 0.05, height: 0.05 }, depth: 0.02 },
+      { operation: "fillet_chamfer", picks: [{ source_step: 0, local_index: 0, point: [5, 0, 0], operation: "fillet", value: 0.005 }] },
+    ]);
   });
 
   it("Cancel calls onCancel without calling onApply", () => {

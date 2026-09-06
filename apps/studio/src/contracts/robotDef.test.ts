@@ -1,15 +1,15 @@
-// Gate tests for the robot-def v1 TypeScript mirror. Mirrors
+// Gate tests for the robot-def v2 TypeScript mirror. Mirrors
 // engine/tests/test_robot_def.cpp and runtime/python/tests/test_robot_def.py:
-// all three read the same fixtures under contracts/robot-def/v1/ (v1's own
-// examples/invalid include v0's fixtures verbatim, since v1 is a strict
-// additive superset -- see docs/decisions/cad-kernel-foundation.md).
+// all three read the same fixtures under contracts/robot-def/v2/ (v2's own
+// examples/invalid include v1's fixtures verbatim, since v2 is a strict
+// additive superset -- see docs/decisions/cad-kernel-feature-tree-data-model.md).
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseRobotDef, robotDefToJson, validateRobotDef, type Issue } from "./robotDef";
 
-const CONTRACT_DIR = join(process.cwd(), "..", "..", "contracts", "robot-def", "v1");
+const CONTRACT_DIR = join(process.cwd(), "..", "..", "contracts", "robot-def", "v2");
 const EXAMPLES_DIR = join(CONTRACT_DIR, "examples");
 const INVALID_DIR = join(CONTRACT_DIR, "invalid");
 
@@ -20,7 +20,7 @@ const fixtureNames = (dir: string): string[] =>
     .map((f) => f.replace(/\.json$/, ""))
     .sort();
 
-describe("robot-def v1 examples", () => {
+describe("robot-def v2 examples", () => {
   const names = fixtureNames(EXAMPLES_DIR);
 
   it("has at least one example", () => {
@@ -36,7 +36,7 @@ describe("robot-def v1 examples", () => {
   });
 });
 
-describe("robot-def v1 invalid fixtures", () => {
+describe("robot-def v2 invalid fixtures", () => {
   const rules = fixtureNames(INVALID_DIR);
 
   it("has at least one fixture", () => {
@@ -76,6 +76,7 @@ describe("robot-def v1 invalid fixtures", () => {
     "sensor-unknown-body": "Sensor 's1': body 'ghost' does not exist",
     "sensor-encoder-missing-joint": "Sensor 's1': encoder sensors must set 'joint'",
     "sensor-unknown-joint": "Sensor 's1': joint 'ghost' does not exist",
+    "body-features-without-cad-mesh": "Body 'base': features is only meaningful alongside a cad_mesh visual/collision",
   };
 
   it("expected-message map covers every fixture", () => {
@@ -89,7 +90,7 @@ describe("robot-def v1 invalid fixtures", () => {
   });
 });
 
-describe("robot-def v1 parsing", () => {
+describe("robot-def v2 parsing", () => {
   it("throws on malformed shape", () => {
     expect(() => parseRobotDef({ id: "x", name: "X" })).toThrow();
   });
@@ -97,7 +98,7 @@ describe("robot-def v1 parsing", () => {
 
 // CAD Kernel Phase 1: the new cad_mesh geometry variant. See
 // docs/decisions/cad-kernel-foundation.md.
-describe("cad_mesh geometry (v1)", () => {
+describe("cad_mesh geometry (v2)", () => {
   const identity = { position: [0, 0, 0] as [number, number, number], rotation_rpy: [0, 0, 0] as [number, number, number] };
   // A tetrahedron: 4 vertices, 4 triangular faces.
   const tetrahedron = {
@@ -162,5 +163,81 @@ describe("cad_mesh geometry (v1)", () => {
 
   it("throws on a non-numeric vertices array", () => {
     expect(() => parseRobotDef(makeRobotWith({ type: "cad_mesh", vertices: ["x"], faces: [0, 0, 0] }))).toThrow();
+  });
+});
+
+// CAD Kernel Phase 7.1 (v2): the new Body.features construction history.
+// See docs/decisions/cad-kernel-feature-tree-data-model.md.
+describe("body.features (v2)", () => {
+  const identity = { position: [0, 0, 0] as [number, number, number], rotation_rpy: [0, 0, 0] as [number, number, number] };
+  const cadMesh = { type: "cad_mesh", vertices: [0, 0, 0, 0.1, 0, 0, 0, 0.1, 0, 0, 0, 0.1], faces: [0, 1, 2, 0, 1, 3, 0, 2, 3, 1, 2, 3] };
+
+  function makeRobotWithFeatures(features: unknown[]) {
+    return {
+      id: "cad-test",
+      name: "CAD Test",
+      description: "",
+      root_placement: identity,
+      bodies: [
+        {
+          id: "part",
+          name: "Part",
+          transform: identity,
+          visual: cadMesh,
+          collision: cadMesh,
+          features,
+          mass: 0.1,
+          inertia: { ixx: 0.001, iyy: 0.001, izz: 0.001 },
+        },
+      ],
+      joints: [],
+      actuators: [],
+      sensors: [],
+    };
+  }
+
+  const pick = { source_step: 0, local_index: 0, point: [0.05, 0, 0] };
+
+  it.each([
+    ["extrude", { operation: "extrude", profile: { type: "rectangle", width: 0.1, height: 0.06 }, depth: 0.04 }],
+    ["revolve", { operation: "revolve", profile: { type: "circle", radius: 0.02 }, offset: 0.05, angle_deg: 360 }],
+    ["loft", { operation: "loft", start_profile: { type: "circle", radius: 0.03 }, end_profile: { type: "rectangle", width: 0.05, height: 0.05 }, height: 0.08 }],
+    ["box", { operation: "box", size: [0.1, 0.06, 0.04] }],
+    ["cylinder", { operation: "cylinder", radius: 0.03, length: 0.08 }],
+    ["cut", { operation: "cut", tool: { operation: "extrude", profile: { type: "circle", radius: 0.01 }, depth: 0.2 }, position: [0, 0, 0] }],
+    ["fillet_chamfer", { operation: "fillet_chamfer", picks: [{ ...pick, operation: "fillet", value: 0.005 }] }],
+    ["shell", { operation: "shell", picks: [pick], thickness: 0.005 }],
+    ["draft", { operation: "draft", picks: [pick], angle_deg: 5 }],
+  ] as const)("%s feature parses, validates cleanly, and round-trips", (_kind, feature) => {
+    const robot = parseRobotDef(makeRobotWithFeatures([feature]));
+    expect(validateRobotDef(robot)).toEqual([]);
+    expect(robot.bodies[0].features).toEqual([feature]);
+    const reparsed = parseRobotDef(robotDefToJson(robot));
+    expect(reparsed).toEqual(robot);
+  });
+
+  it("preserves a multi-step ordered history", () => {
+    const features = [
+      { operation: "box", size: [0.1, 0.06, 0.04] },
+      { operation: "shell", picks: [pick], thickness: 0.005 },
+      { operation: "draft", picks: [pick], angle_deg: 5 },
+    ];
+    const robot = parseRobotDef(makeRobotWithFeatures(features));
+    expect(robot.bodies[0].features).toEqual(features);
+  });
+
+  it("throws on an unknown feature operation", () => {
+    expect(() => parseRobotDef(makeRobotWithFeatures([{ operation: "bogus" }]))).toThrow();
+  });
+
+  it("throws on a fillet_chamfer feature with no picks", () => {
+    expect(() => parseRobotDef(makeRobotWithFeatures([{ operation: "fillet_chamfer", picks: [] }]))).toThrow();
+  });
+
+  it("omits an empty/absent features array from serialization", () => {
+    const robot = parseRobotDef(makeRobotWithFeatures([]));
+    expect(robot.bodies[0].features).toEqual([]);
+    const json = robotDefToJson(robot) as { bodies: Record<string, unknown>[] };
+    expect(json.bodies[0]).not.toHaveProperty("features");
   });
 });

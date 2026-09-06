@@ -1,4 +1,4 @@
-// TypeScript mirror of contracts/robot-def/v1. Change only together with the
+// TypeScript mirror of contracts/robot-def/v2. Change only together with the
 // contract (version bump) and the other mirrors (runtime/python/okrobo/robot_def.py,
 // engine/src/robot_def.{hpp,cpp}).
 //
@@ -9,8 +9,14 @@
 // `fixed` joint, not a second hierarchy mechanism.
 //
 // v1 (CAD Kernel Phase 1) adds one new Geometry variant, `cad_mesh`: baked,
-// frozen vertex/face data from the CAD kernel (apps/studio/src/cad/) -- not
-// a live, re-editable feature tree. See docs/decisions/cad-kernel-foundation.md.
+// frozen vertex/face data from the CAD kernel (apps/studio/src/cad/). v2
+// (CAD Kernel Phase 7.1) adds an optional Body.features list -- an ordered,
+// additive RECORD of the operations that produced a cad_mesh body's own
+// vertices/faces (mirroring apps/studio/src/cad/kernel.ts's own operation
+// shapes), layered on top of that baked data, never replacing it. Nothing
+// reads `features` back into a live, re-editable, recomputing tree yet --
+// that's CAD Kernel Phase 7.2/7.3. See
+// docs/decisions/cad-kernel-feature-tree-data-model.md.
 //
 // parseRobotDef throws on malformed shape (same posture as validateWorld.ts).
 // validateRobotDef never throws: it always returns a (possibly empty) list of
@@ -35,6 +41,58 @@ export type Geometry =
    * not a live feature tree. See docs/decisions/cad-kernel-foundation.md. */
   | { type: "cad_mesh"; vertices: number[]; faces: number[] };
 
+/** A 2D sketch profile, as authored in Build mode's CAD tools -- mirrors
+ * apps/studio/src/cad/kernel.ts's own Profile type exactly (v2, CAD Kernel
+ * Phase 7.1). */
+export type Profile = { type: "rectangle"; width: number; height: number } | { type: "circle"; radius: number };
+
+/** A picked edge or face reference, recorded inside a Feature (v2, CAD
+ * Kernel Phase 7.1). source_step/local_index are forward-looking and unused
+ * this phase -- reserved for CAD Kernel Phase 7.2's real topological
+ * identity (OpenCascade's own Modified/Generated/IsDeleted history,
+ * propagated step to step); `point` is the geometric descriptor every
+ * picking tool already computes today. See
+ * docs/decisions/cad-kernel-fillet-chamfer.md and cad-kernel-shell-draft.md.
+ * Field names are snake_case, matching this contract's own established
+ * convention (`target_joint`, `rotation_rpy`) rather than kernel.ts's own
+ * camelCase runtime params -- a small, deliberate naming seam at the
+ * boundary between "persisted contract data" and "CAD kernel call args". */
+export interface CadPick {
+  source_step: number;
+  local_index: number;
+  point: Vec3;
+}
+
+export interface FilletChamferPick extends CadPick {
+  operation: "fillet" | "chamfer";
+  value: number;
+}
+
+/** A fresh-shape-creating operation -- Extrude/Revolve/Boundary. Mirrors
+ * kernel.ts's own BossOperation type exactly (field names aside -- see
+ * CadPick's own doc on the snake_case seam), including its "loft"
+ * discriminant for what Build mode's own toolbar calls Boundary. */
+export type BossOperation =
+  | { operation: "extrude"; profile: Profile; depth: number }
+  | { operation: "revolve"; profile: Profile; offset: number; angle_deg: number }
+  | { operation: "loft"; start_profile: Profile; end_profile: Profile; height: number };
+
+/** One step in a cad_mesh body's own construction history (v2, CAD Kernel
+ * Phase 7.1) -- see docs/decisions/cad-kernel-feature-tree-data-model.md.
+ * The first entry in a body's own features[] is always a root (a
+ * BossOperation, or a plain box/cylinder primitive a modifier tool was
+ * applied to directly); every later entry is a modifier applied to the
+ * previous entry's own result. Write-only, display-only data this phase --
+ * nothing parses it back into a live shape yet. */
+export type Feature =
+  | BossOperation
+  | { operation: "box"; size: Vec3 }
+  | { operation: "cylinder"; radius: number; length: number }
+  | { operation: "cut"; tool: BossOperation; position: Vec3 }
+  | { operation: "fillet_chamfer"; picks: FilletChamferPick[] }
+  | { operation: "shell"; picks: CadPick[]; thickness: number }
+  | { operation: "draft"; picks: CadPick[]; angle_deg: number };
+
 export interface Inertia {
   ixx: number;
   iyy: number;
@@ -51,6 +109,11 @@ export interface Body {
   transform: Transform;
   visual?: Geometry;
   collision?: Geometry;
+  /** Ordered CAD-kernel construction history (v2, CAD Kernel Phase 7.1).
+   * Absent or empty means a hand-authored primitive with no CAD history --
+   * the status quo for every non-CAD body. Only meaningful alongside a
+   * cad_mesh visual/collision. */
+  features?: Feature[];
   mass: number;
   inertia: Inertia;
   material?: Material;
@@ -196,6 +259,85 @@ export function parseGeometry(value: unknown): Geometry | undefined {
   }
 }
 
+export function parseProfile(value: unknown): Profile {
+  const p = asRecord(value);
+  switch (p.type) {
+    case "rectangle":
+      if (!isFiniteNumber(p.width) || !isFiniteNumber(p.height)) throw new Error("robot-def: rectangle profile needs width and height");
+      return { type: "rectangle", width: p.width, height: p.height };
+    case "circle":
+      if (!isFiniteNumber(p.radius)) throw new Error("robot-def: circle profile needs radius");
+      return { type: "circle", radius: p.radius };
+    default:
+      throw new Error(`robot-def: unknown profile type ${String(p.type)}`);
+  }
+}
+
+function parseCadPick(value: unknown): CadPick {
+  const p = asRecord(value);
+  if (!Number.isInteger(p.source_step) || (p.source_step as number) < 0) throw new Error("robot-def: pick needs a non-negative integer source_step");
+  if (!Number.isInteger(p.local_index) || (p.local_index as number) < 0) throw new Error("robot-def: pick needs a non-negative integer local_index");
+  return { source_step: p.source_step as number, local_index: p.local_index as number, point: asVec3(p.point, "pick.point") };
+}
+
+function parseFilletChamferPick(value: unknown): FilletChamferPick {
+  const pick = parseCadPick(value);
+  const p = asRecord(value);
+  if (p.operation !== "fillet" && p.operation !== "chamfer") throw new Error("robot-def: fillet/chamfer pick needs operation 'fillet' or 'chamfer'");
+  if (!isFiniteNumber(p.value) || p.value <= 0) throw new Error("robot-def: fillet/chamfer pick needs a positive value");
+  return { ...pick, operation: p.operation, value: p.value };
+}
+
+export function parseBossOperation(value: unknown): BossOperation {
+  const o = asRecord(value);
+  switch (o.operation) {
+    case "extrude":
+      if (!isFiniteNumber(o.depth)) throw new Error("robot-def: extrude operation needs depth");
+      return { operation: "extrude", profile: parseProfile(o.profile), depth: o.depth };
+    case "revolve":
+      if (!isFiniteNumber(o.offset) || !isFiniteNumber(o.angle_deg)) throw new Error("robot-def: revolve operation needs offset and angle_deg");
+      return { operation: "revolve", profile: parseProfile(o.profile), offset: o.offset, angle_deg: o.angle_deg };
+    case "loft":
+      if (!isFiniteNumber(o.height)) throw new Error("robot-def: loft operation needs height");
+      return { operation: "loft", start_profile: parseProfile(o.start_profile), end_profile: parseProfile(o.end_profile), height: o.height };
+    default:
+      throw new Error(`robot-def: unknown boss operation ${String(o.operation)}`);
+  }
+}
+
+export function parseFeature(value: unknown): Feature {
+  const f = asRecord(value);
+  switch (f.operation) {
+    case "extrude":
+    case "revolve":
+    case "loft":
+      return parseBossOperation(value);
+    case "box":
+      return { operation: "box", size: asVec3(f.size, "feature.size") };
+    case "cylinder":
+      if (!isFiniteNumber(f.radius) || !isFiniteNumber(f.length)) throw new Error("robot-def: cylinder feature needs radius and length");
+      return { operation: "cylinder", radius: f.radius, length: f.length };
+    case "cut":
+      return { operation: "cut", tool: parseBossOperation(f.tool), position: asVec3(f.position, "feature.position") };
+    case "fillet_chamfer": {
+      if (!Array.isArray(f.picks) || f.picks.length === 0) throw new Error("robot-def: fillet_chamfer feature needs at least one pick");
+      return { operation: "fillet_chamfer", picks: f.picks.map(parseFilletChamferPick) };
+    }
+    case "shell": {
+      if (!Array.isArray(f.picks) || f.picks.length === 0) throw new Error("robot-def: shell feature needs at least one pick");
+      if (!isFiniteNumber(f.thickness) || f.thickness <= 0) throw new Error("robot-def: shell feature needs a positive thickness");
+      return { operation: "shell", picks: f.picks.map(parseCadPick), thickness: f.thickness };
+    }
+    case "draft": {
+      if (!Array.isArray(f.picks) || f.picks.length === 0) throw new Error("robot-def: draft feature needs at least one pick");
+      if (!isFiniteNumber(f.angle_deg) || f.angle_deg <= 0) throw new Error("robot-def: draft feature needs a positive angle_deg");
+      return { operation: "draft", picks: f.picks.map(parseCadPick), angle_deg: f.angle_deg };
+    }
+    default:
+      throw new Error(`robot-def: unknown feature operation ${String(f.operation)}`);
+  }
+}
+
 function parseBody(value: unknown): Body {
   const b = asRecord(value);
   if (typeof b.id !== "string" || typeof b.name !== "string") throw new Error("robot-def: body needs id and name");
@@ -215,6 +357,7 @@ function parseBody(value: unknown): Body {
     transform: parseTransform(b.transform),
     visual: parseGeometry(b.visual),
     collision: parseGeometry(b.collision),
+    features: Array.isArray(b.features) ? b.features.map(parseFeature) : undefined,
     mass: b.mass,
     inertia: { ixx: inertia.ixx, iyy: inertia.iyy, izz: inertia.izz },
     material,
@@ -332,6 +475,55 @@ export function geometryToJson(g: Geometry): unknown {
   }
 }
 
+export function profileToJson(p: Profile): unknown {
+  switch (p.type) {
+    case "rectangle":
+      return { type: "rectangle", width: p.width, height: p.height };
+    case "circle":
+      return { type: "circle", radius: p.radius };
+  }
+}
+
+function cadPickToJson(p: CadPick): unknown {
+  return { source_step: p.source_step, local_index: p.local_index, point: p.point };
+}
+
+function filletChamferPickToJson(p: FilletChamferPick): unknown {
+  return { ...(cadPickToJson(p) as Record<string, unknown>), operation: p.operation, value: p.value };
+}
+
+export function bossOperationToJson(o: BossOperation): unknown {
+  switch (o.operation) {
+    case "extrude":
+      return { operation: "extrude", profile: profileToJson(o.profile), depth: o.depth };
+    case "revolve":
+      return { operation: "revolve", profile: profileToJson(o.profile), offset: o.offset, angle_deg: o.angle_deg };
+    case "loft":
+      return { operation: "loft", start_profile: profileToJson(o.start_profile), end_profile: profileToJson(o.end_profile), height: o.height };
+  }
+}
+
+export function featureToJson(f: Feature): unknown {
+  switch (f.operation) {
+    case "extrude":
+    case "revolve":
+    case "loft":
+      return bossOperationToJson(f);
+    case "box":
+      return { operation: "box", size: f.size };
+    case "cylinder":
+      return { operation: "cylinder", radius: f.radius, length: f.length };
+    case "cut":
+      return { operation: "cut", tool: bossOperationToJson(f.tool), position: f.position };
+    case "fillet_chamfer":
+      return { operation: "fillet_chamfer", picks: f.picks.map(filletChamferPickToJson) };
+    case "shell":
+      return { operation: "shell", picks: f.picks.map(cadPickToJson), thickness: f.thickness };
+    case "draft":
+      return { operation: "draft", picks: f.picks.map(cadPickToJson), angle_deg: f.angle_deg };
+  }
+}
+
 function bodyToJson(b: Body): unknown {
   const out: Record<string, unknown> = {
     id: b.id,
@@ -342,6 +534,7 @@ function bodyToJson(b: Body): unknown {
   };
   if (b.visual !== undefined) out.visual = geometryToJson(b.visual);
   if (b.collision !== undefined) out.collision = geometryToJson(b.collision);
+  if (b.features !== undefined && b.features.length > 0) out.features = b.features.map(featureToJson);
   if (b.material?.color !== undefined) out.material = { color: b.material.color };
   return out;
 }
@@ -460,6 +653,15 @@ export function validateRobotDef(robot: RobotDef): Issue[] {
           message: `Body '${body.id}': geometry size must be positive`,
         });
       }
+    }
+    if (body.features !== undefined && body.features.length > 0 && body.visual?.type !== "cad_mesh" && body.collision?.type !== "cad_mesh") {
+      issues.push({
+        rule: "body-features-without-cad-mesh",
+        severity: "error",
+        element_kind: "body",
+        element_id: body.id,
+        message: `Body '${body.id}': features is only meaningful alongside a cad_mesh visual/collision`,
+      });
     }
     if (!Number.isFinite(body.mass) || body.mass <= 0) {
       issues.push({ rule: "body-invalid-mass", severity: "error", element_kind: "body", element_id: body.id, message: `Body '${body.id}' has no valid mass` });

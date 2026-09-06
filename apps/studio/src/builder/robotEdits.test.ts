@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
-import { parseRobotDef, validateRobotDef, type Issue, type Transform } from "../contracts/robotDef";
+import { parseRobotDef, validateRobotDef, type Feature, type Issue, type Transform } from "../contracts/robotDef";
 import {
   computeJointOrigin,
   issuesIntroducedBy,
@@ -15,7 +15,7 @@ import {
   replaceBodyGeometry,
 } from "./robotEdits";
 
-const EXAMPLES_DIR = join(process.cwd(), "..", "..", "contracts", "robot-def", "v1", "examples");
+const EXAMPLES_DIR = join(process.cwd(), "..", "..", "contracts", "robot-def", "v2", "examples");
 const loadTwoLinkArm = () => parseRobotDef(JSON.parse(readFileSync(join(EXAMPLES_DIR, "two-link-arm.json"), "utf8")));
 
 describe("makeDefaultRobotDef", () => {
@@ -63,20 +63,21 @@ describe("makeDefaultBody", () => {
 
 describe("makeCadBody", () => {
   const mesh = { vertices: [0, 0, 0, 0.1, 0, 0, 0, 0.1, 0], faces: [0, 1, 2] };
+  const extrudeFeature: Feature = { operation: "extrude", profile: { type: "rectangle", width: 0.05, height: 0.05 }, depth: 0.02 };
 
   it("positions 0.1m from a reference body, mirroring makeDefaultBody", () => {
     const near = makeDefaultRobotDef().bodies[0];
-    const body = makeCadBody("body-2", near, mesh);
+    const body = makeCadBody("body-2", near, mesh, [extrudeFeature]);
     expect(body.transform.position).toEqual([near.transform.position[0] + 0.1, near.transform.position[1], near.transform.position[2]]);
   });
 
   it("positions at the origin offset when there's no reference body", () => {
-    const body = makeCadBody("body-1", null, mesh);
+    const body = makeCadBody("body-1", null, mesh, [extrudeFeature]);
     expect(body.transform.position).toEqual([0.1, 0, 0]);
   });
 
   it("sets visual and collision to the given cad_mesh geometry with the expected mass/inertia defaults", () => {
-    const body = makeCadBody("body-1", null, mesh);
+    const body = makeCadBody("body-1", null, mesh, [extrudeFeature]);
     expect(body.visual).toEqual({ type: "cad_mesh", vertices: mesh.vertices, faces: mesh.faces });
     expect(body.collision).toEqual({ type: "cad_mesh", vertices: mesh.vertices, faces: mesh.faces });
     expect(body.mass).toBe(0.05);
@@ -86,20 +87,39 @@ describe("makeCadBody", () => {
   it("is well-formed on its own -- valid geometry, only the expected extra-root warning once added", () => {
     const robot = makeDefaultRobotDef();
     const newId = nextBodyId(robot);
-    robot.bodies.push(makeCadBody(newId, robot.bodies[0], mesh));
+    robot.bodies.push(makeCadBody(newId, robot.bodies[0], mesh, [extrudeFeature]));
     expect(validateRobotDef(robot)).toEqual([
       expect.objectContaining({ rule: "robot-multiple-root-bodies", element_id: newId }),
     ]);
+  });
+
+  it("sets features to exactly the given ordered list (CAD Kernel Phase 7.1)", () => {
+    const filletFeature: Feature = {
+      operation: "fillet_chamfer",
+      picks: [{ source_step: 0, local_index: 0, point: [0.025, 0, 0], operation: "fillet", value: 0.005 }],
+    };
+    const body = makeCadBody("body-1", null, mesh, [extrudeFeature, filletFeature]);
+    expect(body.features).toEqual([extrudeFeature, filletFeature]);
+  });
+
+  it("omits features from serialization-relevant validation when empty", () => {
+    const body = makeCadBody("body-1", null, mesh, []);
+    expect(body.features).toEqual([]);
   });
 });
 
 describe("replaceBodyGeometry", () => {
   const mesh = { vertices: [0, 0, 0, 0.1, 0, 0, 0, 0.1, 0], faces: [0, 1, 2] };
+  const cutFeature: Feature = {
+    operation: "cut",
+    tool: { operation: "extrude", profile: { type: "circle", radius: 0.01 }, depth: 0.2 },
+    position: [0, 0, 0],
+  };
 
   it("replaces the target body's visual and collision with the given cad_mesh geometry", () => {
     const robot = makeDefaultRobotDef();
     const targetId = robot.bodies[0].id;
-    const next = replaceBodyGeometry(robot, targetId, mesh);
+    const next = replaceBodyGeometry(robot, targetId, mesh, [cutFeature]);
     const body = next.bodies.find((b) => b.id === targetId)!;
     expect(body.visual).toEqual({ type: "cad_mesh", vertices: mesh.vertices, faces: mesh.faces });
     expect(body.collision).toEqual({ type: "cad_mesh", vertices: mesh.vertices, faces: mesh.faces });
@@ -108,7 +128,7 @@ describe("replaceBodyGeometry", () => {
   it("leaves id, name, transform, mass, inertia, and material untouched", () => {
     const robot = makeDefaultRobotDef();
     const before = robot.bodies[0];
-    const next = replaceBodyGeometry(robot, before.id, mesh);
+    const next = replaceBodyGeometry(robot, before.id, mesh, [cutFeature]);
     const after = next.bodies.find((b) => b.id === before.id)!;
     expect(after.id).toBe(before.id);
     expect(after.name).toBe(before.name);
@@ -120,7 +140,7 @@ describe("replaceBodyGeometry", () => {
 
   it("leaves every other body untouched", () => {
     const robot = loadTwoLinkArm();
-    const next = replaceBodyGeometry(robot, "link1", mesh);
+    const next = replaceBodyGeometry(robot, "link1", mesh, [cutFeature]);
     const base = next.bodies.find((b) => b.id === "base")!;
     const original = robot.bodies.find((b) => b.id === "base")!;
     expect(base).toEqual(original);
@@ -128,7 +148,44 @@ describe("replaceBodyGeometry", () => {
 
   it("is a no-op when the target id doesn't exist", () => {
     const robot = makeDefaultRobotDef();
-    expect(replaceBodyGeometry(robot, "ghost", mesh)).toEqual(robot);
+    expect(replaceBodyGeometry(robot, "ghost", mesh, [cutFeature])).toEqual(robot);
+  });
+
+  it("prepends a synthesized box root the first time a modifier touches a bare box body (CAD Kernel Phase 7.1)", () => {
+    const robot = makeDefaultRobotDef(); // bodies[0] is a box, features absent
+    const targetId = robot.bodies[0].id;
+    const boxSize = (robot.bodies[0].visual as { type: "box"; size: [number, number, number] }).size;
+    const next = replaceBodyGeometry(robot, targetId, mesh, [cutFeature]);
+    const body = next.bodies.find((b) => b.id === targetId)!;
+    expect(body.features).toEqual([{ operation: "box", size: boxSize }, cutFeature]);
+  });
+
+  it("prepends a synthesized cylinder root the first time a modifier touches a bare cylinder body", () => {
+    const robot = makeDefaultRobotDef();
+    robot.bodies[0] = { ...robot.bodies[0], visual: { type: "cylinder", radius: 0.03, length: 0.08 }, collision: { type: "cylinder", radius: 0.03, length: 0.08 } };
+    const targetId = robot.bodies[0].id;
+    const next = replaceBodyGeometry(robot, targetId, mesh, [cutFeature]);
+    const body = next.bodies.find((b) => b.id === targetId)!;
+    expect(body.features).toEqual([{ operation: "cylinder", radius: 0.03, length: 0.08 }, cutFeature]);
+  });
+
+  it("appends to an already-recorded history instead of re-synthesizing a root", () => {
+    const robot = makeDefaultRobotDef();
+    const existing: Feature = { operation: "box", size: [0.2, 0.15, 0.08] };
+    robot.bodies[0] = { ...robot.bodies[0], features: [existing] };
+    const targetId = robot.bodies[0].id;
+    const next = replaceBodyGeometry(robot, targetId, mesh, [cutFeature]);
+    const body = next.bodies.find((b) => b.id === targetId)!;
+    expect(body.features).toEqual([existing, cutFeature]);
+  });
+
+  it("records no synthesized root for a primitive that has no exact Feature shape (e.g. sphere)", () => {
+    const robot = makeDefaultRobotDef();
+    robot.bodies[0] = { ...robot.bodies[0], visual: { type: "sphere", radius: 0.05 }, collision: { type: "sphere", radius: 0.05 } };
+    const targetId = robot.bodies[0].id;
+    const next = replaceBodyGeometry(robot, targetId, mesh, [cutFeature]);
+    const body = next.bodies.find((b) => b.id === targetId)!;
+    expect(body.features).toEqual([cutFeature]);
   });
 });
 

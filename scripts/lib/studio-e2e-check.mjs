@@ -1005,6 +1005,8 @@ try {
     "Build mode: Extrude with an embedded fillet commits a new cad_mesh body",
     await waitForCondition(`document.querySelectorAll('.hierarchy-row').length === ${bodyCountBeforeFillet} + 1`, 5000),
   );
+  const rowsAfterExtrudeFillet = await page.evaluate("[...document.querySelectorAll('.hierarchy-row')].map((r) => r.textContent)");
+  const extrudeFilletBodyId = rowsAfterExtrudeFillet[rowsAfterExtrudeFillet.length - 1];
 
   // Extrude/Revolve/Boundary above each already added their own new body
   // (this is one continuous document, not reset between sections -- see
@@ -1141,6 +1143,51 @@ try {
   check(
     "Build mode: the fresh box really became a cad_mesh body -- Shape is now locked to CAD part",
     await waitForCondition("document.querySelector('.inspector-mesh-note')?.textContent?.includes('CAD part')", 5000),
+  );
+
+  // -- robot builder: Feature tree (CAD Kernel Phase 7.1) -----------------
+  // Read-only construction-history panel -- no new tool, so this just
+  // re-selects bodies already produced by the sections above and checks
+  // the recorded features[] rendered correctly, in order. See
+  // docs/decisions/cad-kernel-feature-tree-data-model.md.
+  await page.evalClickText(".hierarchy-row", `/^${extrudeFilletBodyId}$/`);
+  check(
+    "Build mode: an Extrude with an embedded fillet records both steps in the Construction history panel, in order",
+    await waitForCondition(
+      `(() => { const rows = [...document.querySelectorAll('.feature-tree-list li')].map((r) => r.textContent); ` +
+        `return rows[0] === 'Extrude (0.05×0.05m rect, depth 0.02m)' && rows[1] === 'Fillet/Chamfer (1 fillet)'; })()`,
+      5000,
+    ),
+  );
+
+  await page.evalClickText(".hierarchy-row", `/^${freshBoxId}$/`);
+  check(
+    "Build mode: a plain box Fillet/Chamfered in place gets a synthesized Box root plus its own fillet_chamfer step",
+    await waitForCondition(
+      `(() => { const rows = [...document.querySelectorAll('.feature-tree-list li')].map((r) => r.textContent); ` +
+        `return rows[0] === 'Box (0.05 × 0.05 × 0.05 m)' && rows[1] === 'Fillet/Chamfer (1 fillet, 1 chamfer)'; })()`,
+      5000,
+    ),
+  );
+
+  await page.evalClickText(".hierarchy-row", `/^${shellBoxId}$/`);
+  check(
+    "Build mode: a plain box Shelled in place gets a synthesized Box root plus its own shell step",
+    await waitForCondition(
+      `(() => { const rows = [...document.querySelectorAll('.feature-tree-list li')].map((r) => r.textContent); ` +
+        `return rows[0] === 'Box (0.05 × 0.05 × 0.05 m)' && rows[1] === 'Shell (1 face, thickness 0.005m)'; })()`,
+      5000,
+    ),
+  );
+
+  await page.evalClickText(".hierarchy-row", `/^${draftBoxId}$/`);
+  check(
+    "Build mode: a plain box Drafted in place gets a synthesized Box root plus its own draft step",
+    await waitForCondition(
+      `(() => { const rows = [...document.querySelectorAll('.feature-tree-list li')].map((r) => r.textContent); ` +
+        `return rows[0] === 'Box (0.05 × 0.05 × 0.05 m)' && rows[1] === 'Draft (1 face, angle 5°)'; })()`,
+      5000,
+    ),
   );
 
   await page.clickText(".mode-toggle button", "/^Simulate$/");

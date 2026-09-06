@@ -1,8 +1,11 @@
-"""Reference model for the OKROBO robot definition v1 (Robot Builder Phase 1;
-v1 adds cad_mesh geometry for the CAD Kernel initiative -- see
-docs/decisions/cad-kernel-foundation.md).
+"""Reference model for the OKROBO robot definition v2 (Robot Builder Phase 1
+adds cad_mesh geometry for the CAD Kernel initiative; CAD Kernel Phase 7.1
+adds Body.features, an ordered construction-history record layered on top
+of a cad_mesh body's own baked vertices/faces -- see
+docs/decisions/cad-kernel-foundation.md and
+docs/decisions/cad-kernel-feature-tree-data-model.md).
 
-This is the executable spec for contracts/robot-def/v1: the same role
+This is the executable spec for contracts/robot-def/v2: the same role
 _sim.py plays for kinematics. TypeScript (apps/studio/src/contracts/robotDef.ts)
 and C++ (engine/src/robot_def.{hpp,cpp}) are hand-mirrored to match. Change
 this file only together with the contract and the other two mirrors.
@@ -94,6 +97,129 @@ Geometry = Union[
     BoxGeometry, SphereGeometry, CylinderGeometry, CapsuleGeometry, ConeGeometry, PlaneGeometry, MeshGeometry, CadMeshGeometry
 ]
 
+# ---- CAD feature history (v2, CAD Kernel Phase 7.1) ----
+#
+# An ordered, additive RECORD of the operations that produced a cad_mesh
+# body's own baked vertices/faces -- layered on top of that baked data,
+# never replacing it. Nothing here reads a feature back into a live,
+# re-editable, recomputing shape yet -- that is CAD Kernel Phase 7.2/7.3.
+# See docs/decisions/cad-kernel-feature-tree-data-model.md.
+
+
+@dataclass
+class RectangleProfile:
+    width: float
+    height: float
+    type: str = "rectangle"
+
+
+@dataclass
+class CircleProfile:
+    radius: float
+    type: str = "circle"
+
+
+Profile = Union[RectangleProfile, CircleProfile]
+
+
+@dataclass
+class CadPick:
+    """A picked edge or face reference. source_step/local_index are
+    forward-looking and unused this phase -- reserved for CAD Kernel Phase
+    7.2's real topological identity; point is the geometric descriptor
+    every picking tool already computes today."""
+
+    source_step: int
+    local_index: int
+    point: tuple
+
+
+@dataclass
+class FilletChamferPick:
+    source_step: int
+    local_index: int
+    point: tuple
+    operation: str  # fillet | chamfer
+    value: float
+
+
+@dataclass
+class ExtrudeFeature:
+    profile: Profile
+    depth: float
+    operation: str = "extrude"
+
+
+@dataclass
+class RevolveFeature:
+    profile: Profile
+    offset: float
+    angle_deg: float
+    operation: str = "revolve"
+
+
+@dataclass
+class LoftFeature:
+    start_profile: Profile
+    end_profile: Profile
+    height: float
+    operation: str = "loft"
+
+
+# A fresh-shape-creating operation -- Extrude/Revolve/Boundary. Mirrors
+# apps/studio/src/cad/kernel.ts's own BossOperation type, including its
+# "loft" discriminant for what Build mode's own toolbar calls Boundary.
+BossOperation = Union[ExtrudeFeature, RevolveFeature, LoftFeature]
+
+
+@dataclass
+class BoxFeature:
+    size: tuple
+    operation: str = "box"
+
+
+@dataclass
+class CylinderFeature:
+    radius: float
+    length: float
+    operation: str = "cylinder"
+
+
+@dataclass
+class CutFeature:
+    tool: BossOperation
+    position: tuple
+    operation: str = "cut"
+
+
+@dataclass
+class FilletChamferFeature:
+    picks: tuple  # tuple[FilletChamferPick, ...]
+    operation: str = "fillet_chamfer"
+
+
+@dataclass
+class ShellFeature:
+    picks: tuple  # tuple[CadPick, ...]
+    thickness: float
+    operation: str = "shell"
+
+
+@dataclass
+class DraftFeature:
+    picks: tuple  # tuple[CadPick, ...]
+    angle_deg: float
+    operation: str = "draft"
+
+
+# One step in a cad_mesh body's own construction history. The first entry
+# in a body's own features is always a root (a BossOperation, or a plain
+# box/cylinder primitive a modifier tool was applied to directly); every
+# later entry is a modifier applied to the previous entry's own result.
+Feature = Union[
+    ExtrudeFeature, RevolveFeature, LoftFeature, BoxFeature, CylinderFeature, CutFeature, FilletChamferFeature, ShellFeature, DraftFeature
+]
+
 # ---- bodies ----
 
 
@@ -122,6 +248,11 @@ class Body:
     transform: Transform = field(default_factory=Transform)
     visual: Geometry | None = None
     collision: Geometry | None = None
+    # Ordered CAD-kernel construction history (v2, CAD Kernel Phase 7.1).
+    # Empty means a hand-authored primitive with no CAD history -- the
+    # status quo for every non-CAD body. Only meaningful alongside a
+    # cad_mesh visual/collision.
+    features: tuple = field(default_factory=tuple)  # tuple[Feature, ...]
     mass: float = 0.0
     inertia: Inertia = field(default_factory=lambda: Inertia(0.0, 0.0, 0.0))
     material: Material | None = None
@@ -293,6 +424,85 @@ def parse_geometry(data: dict | None) -> Geometry | None:
     raise ValueError(f"robot-def: unknown geometry type {kind!r}")
 
 
+def parse_profile(data: dict) -> Profile:
+    kind = data.get("type")
+    if kind == "rectangle":
+        return RectangleProfile(width=float(data["width"]), height=float(data["height"]))
+    if kind == "circle":
+        return CircleProfile(radius=float(data["radius"]))
+    raise ValueError(f"robot-def: unknown profile type {kind!r}")
+
+
+def _parse_cad_pick(data: dict) -> CadPick:
+    source_step = data["source_step"]
+    local_index = data["local_index"]
+    if not isinstance(source_step, int) or isinstance(source_step, bool) or source_step < 0:
+        raise ValueError("robot-def: pick needs a non-negative integer source_step")
+    if not isinstance(local_index, int) or isinstance(local_index, bool) or local_index < 0:
+        raise ValueError("robot-def: pick needs a non-negative integer local_index")
+    return CadPick(source_step=source_step, local_index=local_index, point=tuple(float(v) for v in data["point"]))
+
+
+def _parse_fillet_chamfer_pick(data: dict) -> FilletChamferPick:
+    pick = _parse_cad_pick(data)
+    operation = data.get("operation")
+    if operation not in ("fillet", "chamfer"):
+        raise ValueError("robot-def: fillet/chamfer pick needs operation 'fillet' or 'chamfer'")
+    value = float(data["value"])
+    if value <= 0:
+        raise ValueError("robot-def: fillet/chamfer pick needs a positive value")
+    return FilletChamferPick(source_step=pick.source_step, local_index=pick.local_index, point=pick.point, operation=operation, value=value)
+
+
+def parse_boss_operation(data: dict) -> BossOperation:
+    operation = data.get("operation")
+    if operation == "extrude":
+        return ExtrudeFeature(profile=parse_profile(data["profile"]), depth=float(data["depth"]))
+    if operation == "revolve":
+        return RevolveFeature(profile=parse_profile(data["profile"]), offset=float(data["offset"]), angle_deg=float(data["angle_deg"]))
+    if operation == "loft":
+        return LoftFeature(
+            start_profile=parse_profile(data["start_profile"]),
+            end_profile=parse_profile(data["end_profile"]),
+            height=float(data["height"]),
+        )
+    raise ValueError(f"robot-def: unknown boss operation {operation!r}")
+
+
+def parse_feature(data: dict) -> Feature:
+    operation = data.get("operation")
+    if operation in ("extrude", "revolve", "loft"):
+        return parse_boss_operation(data)
+    if operation == "box":
+        return BoxFeature(size=tuple(float(v) for v in data["size"]))
+    if operation == "cylinder":
+        return CylinderFeature(radius=float(data["radius"]), length=float(data["length"]))
+    if operation == "cut":
+        return CutFeature(tool=parse_boss_operation(data["tool"]), position=tuple(float(v) for v in data["position"]))
+    if operation == "fillet_chamfer":
+        picks = data["picks"]
+        if not picks:
+            raise ValueError("robot-def: fillet_chamfer feature needs at least one pick")
+        return FilletChamferFeature(picks=tuple(_parse_fillet_chamfer_pick(p) for p in picks))
+    if operation == "shell":
+        picks = data["picks"]
+        if not picks:
+            raise ValueError("robot-def: shell feature needs at least one pick")
+        thickness = float(data["thickness"])
+        if thickness <= 0:
+            raise ValueError("robot-def: shell feature needs a positive thickness")
+        return ShellFeature(picks=tuple(_parse_cad_pick(p) for p in picks), thickness=thickness)
+    if operation == "draft":
+        picks = data["picks"]
+        if not picks:
+            raise ValueError("robot-def: draft feature needs at least one pick")
+        angle_deg = float(data["angle_deg"])
+        if angle_deg <= 0:
+            raise ValueError("robot-def: draft feature needs a positive angle_deg")
+        return DraftFeature(picks=tuple(_parse_cad_pick(p) for p in picks), angle_deg=angle_deg)
+    raise ValueError(f"robot-def: unknown feature operation {operation!r}")
+
+
 def _parse_body(data: dict) -> Body:
     material = None
     material_data = data.get("material")
@@ -305,6 +515,7 @@ def _parse_body(data: dict) -> Body:
         transform=parse_transform(data.get("transform")),
         visual=parse_geometry(data.get("visual")),
         collision=parse_geometry(data.get("collision")),
+        features=tuple(parse_feature(f) for f in data.get("features", [])),
         mass=float(data["mass"]),
         inertia=Inertia(ixx=float(inertia_data["ixx"]), iyy=float(inertia_data["iyy"]), izz=float(inertia_data["izz"])),
         material=material,
@@ -414,6 +625,58 @@ def geometry_to_dict(g: Geometry) -> dict:
     raise ValueError(f"robot-def: unknown geometry {g!r}")
 
 
+def profile_to_dict(p: Profile) -> dict:
+    if isinstance(p, RectangleProfile):
+        return {"type": "rectangle", "width": p.width, "height": p.height}
+    if isinstance(p, CircleProfile):
+        return {"type": "circle", "radius": p.radius}
+    raise ValueError(f"robot-def: unknown profile {p!r}")
+
+
+def _cad_pick_to_dict(p: CadPick) -> dict:
+    return {"source_step": p.source_step, "local_index": p.local_index, "point": list(p.point)}
+
+
+def _fillet_chamfer_pick_to_dict(p: FilletChamferPick) -> dict:
+    out = _cad_pick_to_dict(p)
+    out["operation"] = p.operation
+    out["value"] = p.value
+    return out
+
+
+def boss_operation_to_dict(o: BossOperation) -> dict:
+    if isinstance(o, ExtrudeFeature):
+        return {"operation": "extrude", "profile": profile_to_dict(o.profile), "depth": o.depth}
+    if isinstance(o, RevolveFeature):
+        return {"operation": "revolve", "profile": profile_to_dict(o.profile), "offset": o.offset, "angle_deg": o.angle_deg}
+    if isinstance(o, LoftFeature):
+        return {
+            "operation": "loft",
+            "start_profile": profile_to_dict(o.start_profile),
+            "end_profile": profile_to_dict(o.end_profile),
+            "height": o.height,
+        }
+    raise ValueError(f"robot-def: unknown boss operation {o!r}")
+
+
+def feature_to_dict(f: Feature) -> dict:
+    if isinstance(f, (ExtrudeFeature, RevolveFeature, LoftFeature)):
+        return boss_operation_to_dict(f)
+    if isinstance(f, BoxFeature):
+        return {"operation": "box", "size": list(f.size)}
+    if isinstance(f, CylinderFeature):
+        return {"operation": "cylinder", "radius": f.radius, "length": f.length}
+    if isinstance(f, CutFeature):
+        return {"operation": "cut", "tool": boss_operation_to_dict(f.tool), "position": list(f.position)}
+    if isinstance(f, FilletChamferFeature):
+        return {"operation": "fillet_chamfer", "picks": [_fillet_chamfer_pick_to_dict(p) for p in f.picks]}
+    if isinstance(f, ShellFeature):
+        return {"operation": "shell", "picks": [_cad_pick_to_dict(p) for p in f.picks], "thickness": f.thickness}
+    if isinstance(f, DraftFeature):
+        return {"operation": "draft", "picks": [_cad_pick_to_dict(p) for p in f.picks], "angle_deg": f.angle_deg}
+    raise ValueError(f"robot-def: unknown feature {f!r}")
+
+
 def _body_to_dict(b: Body) -> dict:
     out = {
         "id": b.id,
@@ -426,6 +689,8 @@ def _body_to_dict(b: Body) -> dict:
         out["visual"] = geometry_to_dict(b.visual)
     if b.collision is not None:
         out["collision"] = geometry_to_dict(b.collision)
+    if b.features:
+        out["features"] = [feature_to_dict(f) for f in b.features]
     if b.material is not None and b.material.color is not None:
         out["material"] = {"color": list(b.material.color)}
     return out
@@ -542,6 +807,16 @@ def validate_robot_def(robot: RobotDef) -> list:  # list[Issue]
                 issues.append(
                     Issue("body-invalid-geometry", element_kind="body", element_id=body.id, message=f"Body '{body.id}': geometry size must be positive")
                 )
+        has_cad_mesh = isinstance(body.visual, CadMeshGeometry) or isinstance(body.collision, CadMeshGeometry)
+        if body.features and not has_cad_mesh:
+            issues.append(
+                Issue(
+                    "body-features-without-cad-mesh",
+                    element_kind="body",
+                    element_id=body.id,
+                    message=f"Body '{body.id}': features is only meaningful alongside a cad_mesh visual/collision",
+                )
+            )
         if not math.isfinite(body.mass) or body.mass <= 0:
             issues.append(Issue("body-invalid-mass", element_kind="body", element_id=body.id, message=f"Body '{body.id}' has no valid mass"))
         for axis_name, value in (("ixx", body.inertia.ixx), ("iyy", body.inertia.iyy), ("izz", body.inertia.izz)):

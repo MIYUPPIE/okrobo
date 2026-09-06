@@ -111,6 +111,9 @@ describe("CadBoundaryCreator", () => {
     const [nextRobot, newBodyId] = onApply.mock.calls[0] as [RobotDef, string];
     expect(newBodyId).toBe("body-2");
     expect(nextRobot.bodies[1].visual).toEqual({ type: "cad_mesh", vertices: mesh.vertices, faces: mesh.faces });
+    expect(nextRobot.bodies[1].features).toEqual([
+      { operation: "loft", start_profile: { type: "circle", radius: 0.03 }, end_profile: { type: "rectangle", width: 0.05, height: 0.05 }, height: 0.08 },
+    ]);
   });
 
   it("Cancel calls onCancel without calling onApply", () => {

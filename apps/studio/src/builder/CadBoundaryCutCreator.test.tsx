@@ -89,6 +89,14 @@ describe("CadBoundaryCutCreator", () => {
     const [nextRobot] = onApply.mock.calls[0] as [RobotDef];
     expect(nextRobot.bodies[0].id).toBe("chassis");
     expect(nextRobot.bodies[0].visual).toEqual({ type: "cad_mesh", vertices: cutMesh.vertices, faces: cutMesh.faces });
+    expect(nextRobot.bodies[0].features).toEqual([
+      { operation: "box", size: [0.1, 0.1, 0.1] },
+      {
+        operation: "cut",
+        tool: { operation: "loft", start_profile: { type: "circle", radius: 0.02 }, end_profile: { type: "circle", radius: 0.01 }, height: 0.2 },
+        position: [0, 0, 0],
+      },
+    ]);
   });
 
   it("Cancel calls onCancel without calling onApply", () => {

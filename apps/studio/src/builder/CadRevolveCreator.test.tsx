@@ -117,6 +117,7 @@ describe("CadRevolveCreator", () => {
     const [nextRobot, newBodyId] = onApply.mock.calls[0] as [RobotDef, string];
     expect(newBodyId).toBe("body-2");
     expect(nextRobot.bodies[1].visual).toEqual({ type: "cad_mesh", vertices: mesh.vertices, faces: mesh.faces });
+    expect(nextRobot.bodies[1].features).toEqual([{ operation: "revolve", profile: { type: "rectangle", width: 0.02, height: 0.03 }, offset: 0.05, angle_deg: 360 }]);
   });
 
   it("Cancel calls onCancel without calling onApply", () => {

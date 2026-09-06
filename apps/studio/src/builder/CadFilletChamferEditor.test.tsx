@@ -174,6 +174,12 @@ describe("CadFilletChamferEditor", () => {
     expect(body.id).toBe("chassis");
     expect(body.transform).toEqual(robot.bodies[0].transform);
     expect(body.visual).toEqual({ type: "cad_mesh", vertices: resultMesh.vertices, faces: resultMesh.faces });
+    // CAD Kernel Phase 7.1: the target's own bare box has no prior features,
+    // so a synthesized box root is prepended ahead of this fillet_chamfer step.
+    expect(body.features).toEqual([
+      { operation: "box", size: [0.1, 0.06, 0.04] },
+      { operation: "fillet_chamfer", picks: [{ source_step: 0, local_index: 0, point: [5, 0, 0], operation: "fillet", value: 0.005 }] },
+    ]);
   });
 
   it("Cancel calls onCancel without calling onApply", () => {

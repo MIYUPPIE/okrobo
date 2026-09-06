@@ -1,11 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
-import type { RobotDef } from "../contracts/robotDef";
+import type { CadPick, Feature, RobotDef } from "../contracts/robotDef";
 import type { CadFaceOverlay, CadPreview, FacePick, FacePreview, FilletBaseShape } from "../cad/cadClient";
 import { previewFaces } from "../cad/cadClient";
 import { shapeFromGeometry } from "./cadTargetShape";
 import { FacePickList } from "./FacePickList";
 import { replaceBodyGeometry } from "./robotEdits";
 import { useCadPreview } from "./useCadPreview";
+
+/** Wraps the kernel's own FacePick (a bare point tuple) into this step's
+ * own recorded CadPick (CAD Kernel Phase 7.1) -- `sourceStep` is the single
+ * step (an existing/synthesized root) this face set was picked from,
+ * forward-looking and unused until Phase 7.2, see CadPick's own doc in
+ * contracts/robotDef.ts. */
+function cadPicksFromFacePicks(facePicks: FacePick[], sourceStep: number): CadPick[] {
+  return facePicks.map((point, localIndex) => ({ source_step: sourceStep, local_index: localIndex, point }));
+}
 
 // Build mode's standalone Shell and Draft panels (Robot Builder CAD Kernel
 // Phase 6) -- both hollow out or taper an already-placed box or cylinder
@@ -24,6 +33,11 @@ export interface CadFacePickEditorProps {
   defaultValue: string;
   validateValue: (raw: string) => { ok: true; value: number } | { ok: false; message: string };
   computeMesh: (shape: FilletBaseShape, picks: FacePick[], value: number) => Promise<{ vertices: number[]; faces: number[] }>;
+  /** CAD Kernel Phase 7.1: builds this step's own Feature entry (a "shell"
+   * or "draft" operation) from the picks (already wrapped into CadPick) and
+   * the parsed thickness/angle value -- supplied by whichever tool
+   * (Shell/Draft) BuilderPanel.tsx has wired this shared editor up for. */
+  buildFeature: (picks: CadPick[], value: number) => Feature;
   robot: RobotDef;
   targetBodyId: string;
   onApply: (nextRobot: RobotDef) => void;
@@ -41,6 +55,7 @@ export function CadFacePickEditor({
   defaultValue,
   validateValue,
   computeMesh,
+  buildFeature,
   robot,
   targetBodyId,
   onApply,
@@ -97,7 +112,10 @@ export function CadFacePickEditor({
 
   const apply = () => {
     if (status !== "ready" || !mesh) return;
-    onApply(replaceBodyGeometry(robot, targetBodyId, mesh));
+    const value = validateValue(valueDraft);
+    if (!value.ok) return;
+    const feature = buildFeature(cadPicksFromFacePicks(facePicks, 0), value.value);
+    onApply(replaceBodyGeometry(robot, targetBodyId, mesh, [feature]));
   };
 
   if (!targetBody) return null;

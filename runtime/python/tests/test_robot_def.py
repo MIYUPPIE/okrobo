@@ -1,8 +1,8 @@
-"""Gate tests for the robot-def v1 reference model and validator.
+"""Gate tests for the robot-def v2 reference model and validator.
 Mirrors engine/tests/test_robot_def.cpp and apps/studio/src/contracts/robotDef.test.ts:
-all three read the same fixtures under contracts/robot-def/v1/ (v1's own
-examples/invalid include v0's fixtures verbatim, since v1 is a strict
-additive superset -- see docs/decisions/cad-kernel-foundation.md)."""
+all three read the same fixtures under contracts/robot-def/v2/ (v2's own
+examples/invalid include v1's fixtures verbatim, since v2 is a strict
+additive superset -- see docs/decisions/cad-kernel-feature-tree-data-model.md)."""
 
 import json
 from pathlib import Path
@@ -11,7 +11,7 @@ import pytest
 
 from okrobo import CadMeshGeometry, parse_robot_def, robot_def_to_dict, validate_robot_def
 
-CONTRACT_DIR = Path(__file__).resolve().parents[3] / "contracts" / "robot-def" / "v1"
+CONTRACT_DIR = Path(__file__).resolve().parents[3] / "contracts" / "robot-def" / "v2"
 EXAMPLES_DIR = CONTRACT_DIR / "examples"
 INVALID_DIR = CONTRACT_DIR / "invalid"
 
@@ -75,6 +75,7 @@ _EXPECTED_MESSAGES = {
     "sensor-unknown-body": "Sensor 's1': body 'ghost' does not exist",
     "sensor-encoder-missing-joint": "Sensor 's1': encoder sensors must set 'joint'",
     "sensor-unknown-joint": "Sensor 's1': joint 'ghost' does not exist",
+    "body-features-without-cad-mesh": "Body 'base': features is only meaningful alongside a cad_mesh visual/collision",
 }
 
 
@@ -165,3 +166,97 @@ def test_cad_mesh_raises_on_a_non_numeric_vertices_array():
 def test_cad_mesh_raises_on_a_negative_face_index():
     with pytest.raises(ValueError):
         parse_robot_def(_make_robot_with({"type": "cad_mesh", "vertices": _TETRAHEDRON["vertices"], "faces": [-1, 0, 0]}))
+
+
+# CAD Kernel Phase 7.1 (v2): the new Body.features construction history.
+# See docs/decisions/cad-kernel-feature-tree-data-model.md.
+_CAD_MESH = {"type": "cad_mesh", **_TETRAHEDRON}
+_PICK = {"source_step": 0, "local_index": 0, "point": [0.05, 0.0, 0.0]}
+
+
+def _make_robot_with_features(features):
+    return {
+        "id": "cad-test",
+        "name": "CAD Test",
+        "description": "",
+        "root_placement": _IDENTITY,
+        "bodies": [
+            {
+                "id": "part",
+                "name": "Part",
+                "transform": _IDENTITY,
+                "visual": _CAD_MESH,
+                "collision": _CAD_MESH,
+                "features": features,
+                "mass": 0.1,
+                "inertia": {"ixx": 0.001, "iyy": 0.001, "izz": 0.001},
+            }
+        ],
+        "joints": [],
+        "actuators": [],
+        "sensors": [],
+    }
+
+
+_FEATURE_CASES = [
+    ("extrude", {"operation": "extrude", "profile": {"type": "rectangle", "width": 0.1, "height": 0.06}, "depth": 0.04}),
+    ("revolve", {"operation": "revolve", "profile": {"type": "circle", "radius": 0.02}, "offset": 0.05, "angle_deg": 360}),
+    (
+        "loft",
+        {
+            "operation": "loft",
+            "start_profile": {"type": "circle", "radius": 0.03},
+            "end_profile": {"type": "rectangle", "width": 0.05, "height": 0.05},
+            "height": 0.08,
+        },
+    ),
+    ("box", {"operation": "box", "size": [0.1, 0.06, 0.04]}),
+    ("cylinder", {"operation": "cylinder", "radius": 0.03, "length": 0.08}),
+    (
+        "cut",
+        {
+            "operation": "cut",
+            "tool": {"operation": "extrude", "profile": {"type": "circle", "radius": 0.01}, "depth": 0.2},
+            "position": [0.0, 0.0, 0.0],
+        },
+    ),
+    ("fillet_chamfer", {"operation": "fillet_chamfer", "picks": [{**_PICK, "operation": "fillet", "value": 0.005}]}),
+    ("shell", {"operation": "shell", "picks": [_PICK], "thickness": 0.005}),
+    ("draft", {"operation": "draft", "picks": [_PICK], "angle_deg": 5}),
+]
+
+
+@pytest.mark.parametrize("kind,feature", _FEATURE_CASES, ids=[c[0] for c in _FEATURE_CASES])
+def test_feature_parses_validates_cleanly_and_round_trips(kind, feature):
+    robot = parse_robot_def(_make_robot_with_features([feature]))
+    assert validate_robot_def(robot) == []
+    assert robot_def_to_dict(robot)["bodies"][0]["features"] == [feature]
+
+    reparsed = parse_robot_def(robot_def_to_dict(robot))
+    assert reparsed == robot
+
+
+def test_features_preserves_a_multi_step_ordered_history():
+    features = [
+        {"operation": "box", "size": [0.1, 0.06, 0.04]},
+        {"operation": "shell", "picks": [_PICK], "thickness": 0.005},
+        {"operation": "draft", "picks": [_PICK], "angle_deg": 5},
+    ]
+    robot = parse_robot_def(_make_robot_with_features(features))
+    assert robot_def_to_dict(robot)["bodies"][0]["features"] == features
+
+
+def test_features_raises_on_an_unknown_operation():
+    with pytest.raises(ValueError):
+        parse_robot_def(_make_robot_with_features([{"operation": "bogus"}]))
+
+
+def test_features_raises_on_a_fillet_chamfer_feature_with_no_picks():
+    with pytest.raises(ValueError):
+        parse_robot_def(_make_robot_with_features([{"operation": "fillet_chamfer", "picks": []}]))
+
+
+def test_features_omits_empty_features_from_serialization():
+    robot = parse_robot_def(_make_robot_with_features([]))
+    assert robot.bodies[0].features == ()
+    assert "features" not in robot_def_to_dict(robot)["bodies"][0]

@@ -6,7 +6,7 @@
 // only previewFaces needs mocking from cadClient itself.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RobotDef } from "../contracts/robotDef";
+import type { CadPick, Feature, RobotDef } from "../contracts/robotDef";
 import { CadFacePickEditor } from "./CadFacePickEditor";
 import { CAD_PREVIEW_DEBOUNCE_MS } from "./useCadPreview";
 
@@ -67,6 +67,7 @@ function renderShellEditor(overrides: Partial<Parameters<typeof CadFacePickEdito
     defaultValue: "0.005",
     validateValue: positiveNumber,
     computeMesh,
+    buildFeature: (picks: CadPick[], value: number): Feature => ({ operation: "shell", picks, thickness: value }),
     robot: makeRobot({ type: "box" as const, size: [0.1, 0.06, 0.04] as [number, number, number] }),
     targetBodyId: "chassis",
     onApply: vi.fn(),
@@ -154,6 +155,22 @@ describe("CadFacePickEditor", () => {
     expect(nextRobot.bodies).toHaveLength(1);
     expect(nextRobot.bodies[0].id).toBe("chassis");
     expect(nextRobot.bodies[0].visual).toEqual({ type: "cad_mesh", vertices: resultMesh.vertices, faces: resultMesh.faces });
+  });
+
+  it("records a synthesized box root plus the buildFeature result in the body's own features (CAD Kernel Phase 7.1)", async () => {
+    vi.useFakeTimers();
+    const onApply = vi.fn();
+    const robot = makeRobot({ type: "box", size: [0.1, 0.06, 0.04] });
+    renderShellEditor({ robot, onApply, facePicks: [[0.05, 0, 0]] });
+
+    await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    const [nextRobot] = onApply.mock.calls[0] as [RobotDef];
+    expect(nextRobot.bodies[0].features).toEqual([
+      { operation: "box", size: [0.1, 0.06, 0.04] },
+      { operation: "shell", picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] }], thickness: 0.005 },
+    ]);
   });
 
   it("Cancel calls onCancel without calling onApply", () => {

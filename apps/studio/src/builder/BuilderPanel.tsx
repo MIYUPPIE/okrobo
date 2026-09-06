@@ -3,7 +3,7 @@ import { BlocksPanel } from "../BlocksPanel";
 import { setBuiltRobotFields } from "../blocks/okroboBlocks";
 import type { CadEdgeOverlay, CadFaceOverlay, CadPreview, FacePick } from "../cad/cadClient";
 import { draft, shell } from "../cad/cadClient";
-import { validateRobotDef, type RobotDef, type Transform } from "../contracts/robotDef";
+import { validateRobotDef, type CadPick, type Feature, type RobotDef, type Transform } from "../contracts/robotDef";
 import type { WorldDef } from "../contracts/worldDef";
 import { EngineBuiltRobot } from "../engine/EngineBuiltRobot";
 import { ENGINE_MISSING_MESSAGE, loadEngine } from "../engine/loader";
@@ -738,6 +738,7 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
               defaultValue="0.005"
               validateValue={shellValidate}
               computeMesh={shell}
+              buildFeature={(picks: CadPick[], value: number): Feature => ({ operation: "shell", picks, thickness: value })}
               robot={robot}
               targetBodyId={pickTargetId}
               onApply={applyTargetEditResult}
@@ -755,6 +756,7 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
               defaultValue="5"
               validateValue={draftValidate}
               computeMesh={draft}
+              buildFeature={(picks: CadPick[], value: number): Feature => ({ operation: "draft", picks, angle_deg: value })}
               robot={robot}
               targetBodyId={pickTargetId}
               onApply={applyTargetEditResult}

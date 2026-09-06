@@ -120,6 +120,12 @@ describe("CadExtrudedCutCreator", () => {
     expect(body.transform).toEqual(robot.bodies[0].transform);
     expect(body.visual).toEqual({ type: "cad_mesh", vertices: cutMesh.vertices, faces: cutMesh.faces });
     expect(body.collision).toEqual({ type: "cad_mesh", vertices: cutMesh.vertices, faces: cutMesh.faces });
+    // CAD Kernel Phase 7.1: a synthesized box root (the target had no prior
+    // features), then this cut's own feature.
+    expect(body.features).toEqual([
+      { operation: "box", size: [0.1, 0.1, 0.1] },
+      { operation: "cut", tool: { operation: "extrude", profile: { type: "circle", radius: 0.015 }, depth: 0.2 }, position: [0, 0, 0] },
+    ]);
   });
 
   it("onPreviewChange receives the mesh at the target body's own world position once ready", async () => {

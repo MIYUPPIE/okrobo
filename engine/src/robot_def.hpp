@@ -1,13 +1,16 @@
 #pragma once
 
-// Robot Builder Phase 1: contracts/robot-def/v1 (v1 adds cad_mesh geometry
-// for the CAD Kernel initiative -- see
-// docs/decisions/cad-kernel-foundation.md). Structural parse + semantic
-// validation only -- no simulation behavior. Reference spec:
-// runtime/python/okrobo/robot_def.py. No nlohmann type appears in this
-// header; only robot_def.cpp includes <nlohmann/json.hpp> (see
-// docs/decisions/robot-definition-schema.md for why it's vendored and how
-// it's scoped).
+// Robot Builder Phase 1: contracts/robot-def/v2 (v1 adds cad_mesh geometry
+// for the CAD Kernel initiative; CAD Kernel Phase 7.1 adds Body::features,
+// an ordered construction-history record layered on top of a cad_mesh
+// body's own baked vertices/faces -- see
+// docs/decisions/cad-kernel-foundation.md and
+// docs/decisions/cad-kernel-feature-tree-data-model.md). Structural parse +
+// semantic validation only -- no simulation behavior; BuiltRobot never
+// reads features at all. Reference spec: runtime/python/okrobo/robot_def.py.
+// No nlohmann type appears in this header; only robot_def.cpp includes
+// <nlohmann/json.hpp> (see docs/decisions/robot-definition-schema.md for
+// why it's vendored and how it's scoped).
 //
 // Units: meters, kilograms, radians, seconds. Rotation is roll-pitch-yaw
 // (intrinsic XYZ Euler, radians). The kinematic tree is defined entirely by
@@ -77,6 +80,94 @@ struct Material {
     bool operator==(const Material&) const = default;
 };
 
+// ---- CAD feature history (v2, CAD Kernel Phase 7.1) ----
+//
+// An ordered, additive RECORD of the operations that produced a cad_mesh
+// body's own baked vertices/faces -- layered on top of that baked data,
+// never replacing it. Nothing here reads a feature back into a live,
+// re-editable, recomputing shape yet -- that is CAD Kernel Phase 7.2/7.3.
+// Flat aggregate structs (same "one struct per kind, unused fields left at
+// zero" idiom Geometry already uses above), not std::variant.
+
+enum class ProfileType { kRectangle, kCircle };
+
+struct Profile {
+    ProfileType type = ProfileType::kRectangle;
+    double width = 0.0;   // rectangle
+    double height = 0.0;  // rectangle
+    double radius = 0.0;  // circle
+
+    bool operator==(const Profile&) const = default;
+};
+
+enum class PickOperation { kFillet, kChamfer };
+
+// A picked edge or face reference. source_step/local_index are
+// forward-looking and unused this phase -- reserved for CAD Kernel Phase
+// 7.2's real topological identity; point is the geometric descriptor
+// every picking tool already computes today. has_operation/operation/value
+// are only meaningful for a fillet_chamfer feature's own picks (shell/draft
+// picks leave them at their zero default and never serialize them).
+struct Pick {
+    int32_t source_step = 0;
+    int32_t local_index = 0;
+    Vec3 point{};
+    bool has_operation = false;
+    PickOperation operation = PickOperation::kFillet;
+    double value = 0.0;
+
+    bool operator==(const Pick&) const = default;
+};
+
+enum class BossOperationType { kExtrude, kRevolve, kLoft };
+
+// A fresh-shape-creating operation -- Extrude/Revolve/Boundary. Mirrors
+// apps/studio/src/cad/kernel.ts's own BossOperation type, including its
+// kLoft variant for what Build mode's own toolbar calls Boundary. Kept as
+// its own (non-recursive) struct, embedded by value in Feature::tool for
+// a cut feature -- Feature itself can't nest by value (it holds a
+// std::vector<Pick>, so a Feature-inside-a-Feature would be infinitely
+// sized without indirection this codebase's flat-struct idiom avoids).
+struct BossOperation {
+    BossOperationType operation = BossOperationType::kExtrude;
+    Profile profile{};        // extrude, revolve
+    double depth = 0.0;       // extrude
+    double offset = 0.0;      // revolve
+    double angle_deg = 0.0;   // revolve
+    Profile start_profile{};  // loft
+    Profile end_profile{};    // loft
+    double height = 0.0;      // loft
+
+    bool operator==(const BossOperation&) const = default;
+};
+
+enum class FeatureType { kExtrude, kRevolve, kLoft, kBox, kCylinder, kCut, kFilletChamfer, kShell, kDraft };
+
+// One step in a cad_mesh body's own construction history. The first entry
+// in a body's own features is always a root (a BossOperation-shaped
+// feature, or a plain box/cylinder primitive a modifier tool was applied
+// to directly); every later entry is a modifier applied to the previous
+// entry's own result.
+struct Feature {
+    FeatureType type = FeatureType::kExtrude;
+    Profile profile{};        // extrude, revolve
+    double depth = 0.0;       // extrude
+    double offset = 0.0;      // revolve
+    double angle_deg = 0.0;   // revolve, draft
+    Profile start_profile{};  // loft
+    Profile end_profile{};    // loft
+    double height = 0.0;      // loft
+    Vec3 size{};              // box
+    double radius = 0.0;      // cylinder
+    double length = 0.0;      // cylinder
+    BossOperation tool{};     // cut
+    Vec3 position{};          // cut
+    std::vector<Pick> picks;  // fillet_chamfer, shell, draft
+    double thickness = 0.0;   // shell
+
+    bool operator==(const Feature&) const = default;
+};
+
 struct Body {
     std::string id;
     std::string name;
@@ -85,6 +176,11 @@ struct Body {
     Geometry visual{};
     bool has_collision = false;
     Geometry collision{};
+    // Ordered CAD-kernel construction history (v2, CAD Kernel Phase 7.1).
+    // Empty means a hand-authored primitive with no CAD history -- the
+    // status quo for every non-CAD body. Only meaningful alongside a
+    // cad_mesh visual/collision.
+    std::vector<Feature> features;
     double mass = 0.0;
     Inertia inertia{};
     Material material{};

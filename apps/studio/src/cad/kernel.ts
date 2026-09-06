@@ -1,7 +1,7 @@
 // CAD Kernel Phase 1: Foundation. The real replicad/OpenCascade integration
 // -- sketch -> extrude -> mesh, producing flat {vertices, faces} data shaped
-// exactly for robot-def v1's cad_mesh geometry variant (see
-// contracts/robot-def/v1/schema.json and docs/decisions/cad-kernel-foundation.md).
+// exactly for robot-def's cad_mesh geometry variant (introduced in v1, see
+// contracts/robot-def/v2/schema.json and docs/decisions/cad-kernel-foundation.md).
 //
 // Deliberately portable to both plain Node (this repo's offline authoring
 // script, scripts/generate-cad-examples.mjs, and this module's own gate

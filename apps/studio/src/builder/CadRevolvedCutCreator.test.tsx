@@ -83,6 +83,10 @@ describe("CadRevolvedCutCreator", () => {
     const [nextRobot] = onApply.mock.calls[0] as [RobotDef];
     expect(nextRobot.bodies[0].id).toBe("chassis");
     expect(nextRobot.bodies[0].visual).toEqual({ type: "cad_mesh", vertices: cutMesh.vertices, faces: cutMesh.faces });
+    expect(nextRobot.bodies[0].features).toEqual([
+      { operation: "box", size: [0.1, 0.1, 0.1] },
+      { operation: "cut", tool: { operation: "revolve", profile: { type: "circle", radius: 0.01 }, offset: 0.03, angle_deg: 360 }, position: [0, 0, 0] },
+    ]);
   });
 
   it("Cancel calls onCancel without calling onApply", () => {

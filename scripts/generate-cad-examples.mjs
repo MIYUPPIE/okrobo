@@ -1,5 +1,5 @@
 // CAD Kernel Phase 1: authors the shipped cad_mesh example bodies under
-// contracts/robot-def/v1/examples/ by running the real replicad/OpenCascade
+// contracts/robot-def/v2/examples/ by running the real replicad/OpenCascade
 // pipeline offline (see apps/studio/src/cad/extrude.ts) -- no sketch UI
 // exists yet (that's Phase 2), so this script is how a cad_mesh body gets
 // authored this phase. Run: node scripts/generate-cad-examples.mjs
@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { extrudeRectangle } from "../apps/studio/src/cad/extrude.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const EXAMPLES_DIR = join(ROOT, "contracts", "robot-def", "v1", "examples");
+const EXAMPLES_DIR = join(ROOT, "contracts", "robot-def", "v2", "examples");
 
 const identity = { position: [0, 0, 0], rotation_rpy: [0, 0, 0] };
 

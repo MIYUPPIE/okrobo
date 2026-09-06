@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Body, RobotDef } from "../contracts/robotDef";
+import type { Body, Feature, RobotDef } from "../contracts/robotDef";
 import type { CadEdgeOverlay, CadPreview, ShapeEdgeMesh } from "../cad/cadClient";
 import { fillet, loft, previewEdges } from "../cad/cadClient";
 import { CadProfileDimensionFields, parseProfileDraft, positiveNumber, type ProfileDraft, type ProfileShape } from "./CadProfileFields";
 import { FilletEdgeList } from "./FilletEdgeList";
-import { parseFilletPicks, type FilletPickDraft } from "./filletPicks";
+import { filletChamferFeatureFromPicks, parseFilletPicks, type FilletPickDraft } from "./filletPicks";
 import { makeCadBody, nextBodyId } from "./robotEdits";
 import { useCadPreview } from "./useCadPreview";
 
@@ -98,7 +98,7 @@ export function CadBoundaryCreator({ robot, near, onApply, onCancel, onPreviewCh
 
   useEffect(() => {
     if (status === "ready" && mesh) {
-      const body = makeCadBody(bodyId, near, mesh);
+      const body = makeCadBody(bodyId, near, mesh, []);
       onPreviewChange({ mesh, position: body.transform.position });
     } else if (status === "error") {
       onPreviewChange(null);
@@ -115,7 +115,7 @@ export function CadBoundaryCreator({ robot, near, onApply, onCancel, onPreviewCh
 
   useEffect(() => {
     if (edgesPreview.status === "ready" && edgesPreview.mesh) {
-      const body = makeCadBody(bodyId, near, { vertices: [], faces: [] });
+      const body = makeCadBody(bodyId, near, { vertices: [], faces: [] }, []);
       onEdgeOverlayChange({ edgeMesh: edgesPreview.mesh, position: body.transform.position, rotation: [0, 0, 0] });
     } else if (edgesPreview.status === "error") {
       onEdgeOverlayChange(null);
@@ -130,7 +130,17 @@ export function CadBoundaryCreator({ robot, near, onApply, onCancel, onPreviewCh
 
   const apply = () => {
     if (status !== "ready" || !mesh) return;
-    const body = makeCadBody(bodyId, near, mesh);
+    const parsed = parseDraft(draft);
+    if (!parsed.ok) return;
+    const rootFeature: Feature = {
+      operation: "loft",
+      start_profile: parsed.value.start,
+      end_profile: parsed.value.end,
+      height: parsed.value.loftHeight,
+    };
+    const picks = parseFilletPicks(edgePicks);
+    const features: Feature[] = picks.ok && picks.value.length > 0 ? [rootFeature, filletChamferFeatureFromPicks(picks.value, 0)] : [rootFeature];
+    const body = makeCadBody(bodyId, near, mesh, features);
     onApply({ ...robot, bodies: [...robot.bodies, body] }, body.id);
   };
 

@@ -1537,3 +1537,62 @@ docstring warns about, fixed the same established way (a real DOM
 typecheck`, `npm run build` (no new WASM asset), and the full
 `test-all.sh` gate suite (including the new E2E checks, run for real
 against a live dev server and headless Chrome) all green.
+
+## CAD Kernel — Phase 7.1: Feature tree data model (2026-09-06)
+
+The user chose the most ambitious of three presented Phase 7 scopes: a
+genuinely reorderable, live-recomputing feature tree. Large enough to need
+its own internal roadmap (4 sub-phases); this is 7.1 only -- the data
+model, every existing creator writing its own feature entry, and a new
+read-only panel. No editing, no recompute, no reordering yet.
+
+`contracts/robot-def` forked v1 -> v2 (per its own frozen-versioning
+policy): one new optional `Body.features: Feature[]`, a discriminated
+union covering every operation Build mode's CAD tools already perform
+(root kinds `extrude`/`revolve`/`loft`/`box`/`cylinder`; modifier kinds
+`cut`/`fillet_chamfer`/`shell`/`draft`), plus `Profile`/`CadPick`/
+`FilletChamferPick`/`BossOperation`. `CadPick.source_step`/`local_index`
+are stored but read by nothing yet -- reserved for Phase 7.2's real
+topological identity (OpenCascade's own `Modified`/`Generated`/
+`IsDeleted` history via replicad's own exported `getOC()`, verified
+empirically this session as reachable with no fork of replicad needed,
+including a two-step cut-then-fillet chain correctly tracking one face's
+identity through both operations). One new validation rule,
+`body-features-without-cad-mesh`. All three mirrors (TypeScript, Python,
+C++) updated in the same commit, same as every prior contract version
+bump.
+
+Every standalone modifier tool (Fillet/Chamfer, Shell, Draft, Cut) can
+only ever target a bare box/cylinder body (Phase 5/6's own
+`shapeFromGeometry` restriction), and once touched, that body permanently
+stops being a valid target again -- so in every real call path, a
+modifier's own target has no recorded history yet, but does have exactly-known
+prior geometry. `robotEdits.ts`'s `replaceBodyGeometry` synthesizes that
+missing root once, generically (`implicitRootFeatures`), rather than
+silently dropping it. The three Boss creators (Extrude/Revolve/Boundary)
+can already bake two features in one Apply, since each supports an
+embedded Fillet/Chamfer step (Phase 5) on its own not-yet-baked shape --
+`makeCadBody`/`replaceBodyGeometry` both take a `Feature[]`, not a single
+`Feature`, for exactly this reason.
+
+New read-only `FeatureTreeList.tsx`, wired into `BodyInspector.tsx` right
+below the existing "CAD part -- baked mesh, not editable here" note: one
+line per feature, in order, naming the same tools/labels Build mode's own
+toolbar already uses ("Boundary" for a `loft`, "Extruded"/"Revolved"/
+"Boundary" for a `cut`'s own tool kind) -- nothing clickable or
+reorderable yet (7.3/7.4's job).
+
+Tests: `robotEdits.test.ts` (+9: makeCadBody/replaceBodyGeometry feature
+writes, synthesized-root cases for box/cylinder/sphere, appending to an
+existing history), all three Boss creator test files, all three Cut
+creator test files, `CadFilletChamferEditor.test.tsx`,
+`CadFacePickEditor.test.tsx`, `BodyInspector.test.tsx` (+2), and the new
+`FeatureTreeList.test.tsx` (new, 6 cases covering every feature kind's own
+label). 4 new `studio-e2e-check.mjs` checks against a live CAD worker --
+an Extrude-with-embedded-fillet body and three separately-modified plain
+boxes (Fillet/Chamfer, Shell, Draft), each confirming the Construction
+history panel renders the synthesized root plus the real applied step, in
+order. `npm run test` (600 passed across 61 files), `npm run typecheck`,
+`python3 -m pytest` (204 passed, 1 skipped), `ctest` (13/13), and the full
+`test-all.sh` gate suite (including the new E2E checks, run for real
+against a live dev server and headless Chrome) all green.

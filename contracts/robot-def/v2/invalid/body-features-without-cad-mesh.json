@@ -1,0 +1,14 @@
+{
+  "id": "invalid-fixture",
+  "name": "body-features-without-cad-mesh",
+  "bodies": [
+    {
+      "id": "base",
+      "name": "Base",
+      "visual": { "type": "box", "size": [0.1, 0.1, 0.1] },
+      "features": [{ "operation": "box", "size": [0.1, 0.1, 0.1] }],
+      "mass": 1.0,
+      "inertia": { "ixx": 0.01, "iyy": 0.01, "izz": 0.01 }
+    }
+  ]
+}

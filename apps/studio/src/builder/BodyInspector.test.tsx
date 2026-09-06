@@ -108,4 +108,29 @@ describe("BodyInspector", () => {
     await user.click(screen.getByRole("button", { name: "delete?" }));
     expect(onRequestDelete).toHaveBeenCalledWith("chassis");
   });
+
+  // CAD Kernel Phase 7.1: the read-only construction-history panel, shown
+  // only for a cad_mesh body that actually has a recorded features list.
+  it("shows the construction history for a cad_mesh body with a recorded features list", () => {
+    const robot = makeRobot();
+    robot.bodies[0] = {
+      ...robot.bodies[0],
+      visual: { type: "cad_mesh", vertices: [0, 0, 0, 0.1, 0, 0, 0, 0.1, 0], faces: [0, 1, 2] },
+      features: [
+        { operation: "box", size: [0.1, 0.06, 0.04] },
+        { operation: "shell", picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] }], thickness: 0.005 },
+      ],
+    };
+    render(<BodyInspector robot={robot} bodyId="chassis" onApply={() => {}} onRequestDelete={() => {}} />);
+    expect(screen.getByText("Construction history")).toBeInTheDocument();
+    expect(screen.getByText(/Box \(/)).toBeInTheDocument();
+    expect(screen.getByText(/Shell \(1 face, thickness 0.005m\)/)).toBeInTheDocument();
+  });
+
+  it("shows no construction history section for a cad_mesh body with no recorded features", () => {
+    const robot = makeRobot();
+    robot.bodies[0] = { ...robot.bodies[0], visual: { type: "cad_mesh", vertices: [0, 0, 0, 0.1, 0, 0, 0, 0.1, 0], faces: [0, 1, 2] } };
+    render(<BodyInspector robot={robot} bodyId="chassis" onApply={() => {}} onRequestDelete={() => {}} />);
+    expect(screen.queryByText("Construction history")).not.toBeInTheDocument();
+  });
 });

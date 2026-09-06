@@ -1,7 +1,7 @@
-// Gate tests for the robot-def v1 engine core. Plain asserts, no framework,
+// Gate tests for the robot-def v2 engine core. Plain asserts, no framework,
 // run by ctest. Mirrors runtime/python/tests/test_robot_def.py and
 // apps/studio/src/contracts/robotDef.test.ts: all three read the same
-// fixtures under contracts/robot-def/v1/ (path baked in at configure time,
+// fixtures under contracts/robot-def/v2/ (path baked in at configure time,
 // see engine/CMakeLists.txt's OKROBO_ROBOT_DEF_CONTRACT_DIR).
 
 #include "robot_def.hpp"
@@ -142,6 +142,192 @@ void TestCadMeshParseThrowsOnNegativeFaceIndex() {
     assert(threw);
 }
 
+// ---- CAD Kernel Phase 7.1 (v2): the new Body.features construction
+// history. See docs/decisions/cad-kernel-feature-tree-data-model.md.
+
+okrobo::RobotDef MakeRobotWithFeatures(const std::vector<okrobo::Feature>& features) {
+    okrobo::Geometry cad_mesh;
+    cad_mesh.type = okrobo::GeometryType::kCadMesh;
+    cad_mesh.vertices = kTetrahedronVertices;
+    cad_mesh.faces = kTetrahedronFaces;
+
+    okrobo::RobotDef robot;
+    robot.id = "cad-test";
+    robot.name = "CAD Test";
+
+    okrobo::Body part;
+    part.id = "part";
+    part.name = "Part";
+    part.has_visual = true;
+    part.visual = cad_mesh;
+    part.has_collision = true;
+    part.collision = cad_mesh;
+    part.features = features;
+    part.mass = 0.1;
+    part.inertia = {0.001, 0.001, 0.001};
+    robot.bodies.push_back(part);
+    return robot;
+}
+
+okrobo::Profile MakeRectangleProfile(double width, double height) {
+    okrobo::Profile p;
+    p.type = okrobo::ProfileType::kRectangle;
+    p.width = width;
+    p.height = height;
+    return p;
+}
+
+okrobo::Profile MakeCircleProfile(double radius) {
+    okrobo::Profile p;
+    p.type = okrobo::ProfileType::kCircle;
+    p.radius = radius;
+    return p;
+}
+
+okrobo::Pick MakeCadPick() {
+    okrobo::Pick p;
+    p.source_step = 0;
+    p.local_index = 0;
+    p.point = okrobo::Vec3{0.05, 0.0, 0.0};
+    return p;
+}
+
+okrobo::Feature MakeExtrudeFeature() {
+    okrobo::Feature f;
+    f.type = okrobo::FeatureType::kExtrude;
+    f.profile = MakeRectangleProfile(0.1, 0.06);
+    f.depth = 0.04;
+    return f;
+}
+
+okrobo::Feature MakeRevolveFeature() {
+    okrobo::Feature f;
+    f.type = okrobo::FeatureType::kRevolve;
+    f.profile = MakeCircleProfile(0.02);
+    f.offset = 0.05;
+    f.angle_deg = 360.0;
+    return f;
+}
+
+okrobo::Feature MakeLoftFeature() {
+    okrobo::Feature f;
+    f.type = okrobo::FeatureType::kLoft;
+    f.start_profile = MakeCircleProfile(0.03);
+    f.end_profile = MakeRectangleProfile(0.05, 0.05);
+    f.height = 0.08;
+    return f;
+}
+
+okrobo::Feature MakeBoxFeature() {
+    okrobo::Feature f;
+    f.type = okrobo::FeatureType::kBox;
+    f.size = okrobo::Vec3{0.1, 0.06, 0.04};
+    return f;
+}
+
+okrobo::Feature MakeCylinderFeature() {
+    okrobo::Feature f;
+    f.type = okrobo::FeatureType::kCylinder;
+    f.radius = 0.03;
+    f.length = 0.08;
+    return f;
+}
+
+okrobo::Feature MakeCutFeature() {
+    okrobo::Feature f;
+    f.type = okrobo::FeatureType::kCut;
+    f.tool.operation = okrobo::BossOperationType::kExtrude;
+    f.tool.profile = MakeCircleProfile(0.01);
+    f.tool.depth = 0.2;
+    f.position = okrobo::Vec3{0.0, 0.0, 0.0};
+    return f;
+}
+
+okrobo::Feature MakeFilletChamferFeature() {
+    okrobo::Pick pick = MakeCadPick();
+    pick.has_operation = true;
+    pick.operation = okrobo::PickOperation::kFillet;
+    pick.value = 0.005;
+
+    okrobo::Feature f;
+    f.type = okrobo::FeatureType::kFilletChamfer;
+    f.picks = {pick};
+    return f;
+}
+
+okrobo::Feature MakeShellFeature() {
+    okrobo::Feature f;
+    f.type = okrobo::FeatureType::kShell;
+    f.picks = {MakeCadPick()};
+    f.thickness = 0.005;
+    return f;
+}
+
+okrobo::Feature MakeDraftFeature() {
+    okrobo::Feature f;
+    f.type = okrobo::FeatureType::kDraft;
+    f.picks = {MakeCadPick()};
+    f.angle_deg = 5.0;
+    return f;
+}
+
+void TestFeatureParsesValidatesCleanlyAndRoundTrips() {
+    const std::vector<okrobo::Feature> cases = {
+        MakeExtrudeFeature(),       MakeRevolveFeature(), MakeLoftFeature(),         MakeBoxFeature(),  MakeCylinderFeature(),
+        MakeCutFeature(),           MakeFilletChamferFeature(), MakeShellFeature(),  MakeDraftFeature(),
+    };
+    for (const auto& feature : cases) {
+        const okrobo::RobotDef robot = MakeRobotWithFeatures({feature});
+        assert(okrobo::ValidateRobotDef(robot).empty());
+        const okrobo::RobotDef reparsed = okrobo::ParseRobotDef(okrobo::RobotDefToJson(robot));
+        assert(reparsed == robot);
+    }
+}
+
+void TestFeaturesPreservesAMultiStepOrderedHistory() {
+    const okrobo::RobotDef robot = MakeRobotWithFeatures({MakeBoxFeature(), MakeShellFeature(), MakeDraftFeature()});
+    const okrobo::RobotDef reparsed = okrobo::ParseRobotDef(okrobo::RobotDefToJson(robot));
+    assert(reparsed.bodies[0].features.size() == 3);
+    assert(reparsed.bodies[0].features == robot.bodies[0].features);
+}
+
+void TestFeaturesThrowsOnUnknownOperation() {
+    const std::string json =
+        R"({"id":"cad-test","name":"CAD Test","bodies":[{"id":"part","name":"Part","mass":0.1,)"
+        R"("inertia":{"ixx":0.001,"iyy":0.001,"izz":0.001},)"
+        R"("visual":{"type":"cad_mesh","vertices":[0,0,0,0.1,0,0,0,0.1,0,0,0,0.1],"faces":[0,1,2,0,1,3,0,2,3,1,2,3]},)"
+        R"("features":[{"operation":"bogus"}]}]})";
+    bool threw = false;
+    try {
+        okrobo::ParseRobotDef(json);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    assert(threw);
+}
+
+void TestFeaturesThrowsOnFilletChamferWithNoPicks() {
+    const std::string json =
+        R"({"id":"cad-test","name":"CAD Test","bodies":[{"id":"part","name":"Part","mass":0.1,)"
+        R"("inertia":{"ixx":0.001,"iyy":0.001,"izz":0.001},)"
+        R"("visual":{"type":"cad_mesh","vertices":[0,0,0,0.1,0,0,0,0.1,0,0,0,0.1],"faces":[0,1,2,0,1,3,0,2,3,1,2,3]},)"
+        R"("features":[{"operation":"fillet_chamfer","picks":[]}]}]})";
+    bool threw = false;
+    try {
+        okrobo::ParseRobotDef(json);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    assert(threw);
+}
+
+void TestFeaturesOmitsEmptyFeaturesFromSerialization() {
+    const okrobo::RobotDef robot = MakeRobotWithFeatures({});
+    assert(robot.bodies[0].features.empty());
+    const std::string serialized = okrobo::RobotDefToJson(robot);
+    assert(serialized.find("\"features\"") == std::string::npos);
+}
+
 }  // namespace
 
 int main() {
@@ -153,6 +339,11 @@ int main() {
     TestCadMeshRejectsNonMultipleOf3Vertices();
     TestCadMeshRejectsFaceIndexOutOfRange();
     TestCadMeshParseThrowsOnNegativeFaceIndex();
+    TestFeatureParsesValidatesCleanlyAndRoundTrips();
+    TestFeaturesPreservesAMultiStepOrderedHistory();
+    TestFeaturesThrowsOnUnknownOperation();
+    TestFeaturesThrowsOnFilletChamferWithNoPicks();
+    TestFeaturesOmitsEmptyFeaturesFromSerialization();
     std::puts("robot_def: all tests passed");
     return 0;
 }

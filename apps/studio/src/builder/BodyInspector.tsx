@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Body, Geometry, Issue, RobotDef } from "../contracts/robotDef";
 import { validateRobotDef } from "../contracts/robotDef";
+import { FeatureTreeList } from "./FeatureTreeList";
 
 // The Build-mode properties panel for the selected body. Same pattern as
 // WorldPanel.tsx: a draft in friendly string form (so a half-typed number
@@ -258,6 +259,8 @@ export function BodyInspector({ robot, bodyId, onApply, onRequestDelete }: BodyI
             </button>
           </div>
         )}
+
+        {draft.geometryType === "cad_mesh" && <FeatureTreeList features={body.features} />}
 
         {draft.geometryType === "mesh" && (
           <div className="inspector-mesh-note">

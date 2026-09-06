@@ -77,6 +77,127 @@ Geometry ParseGeometry(const json& data) {
     return g;
 }
 
+// ---- CAD feature history parsing (v2, CAD Kernel Phase 7.1) ----
+
+Profile ParseProfile(const json& data) {
+    Profile p{};
+    const std::string type = data.at("type").get<std::string>();
+    if (type == "rectangle") {
+        p.type = ProfileType::kRectangle;
+        p.width = data.at("width").get<double>();
+        p.height = data.at("height").get<double>();
+    } else if (type == "circle") {
+        p.type = ProfileType::kCircle;
+        p.radius = data.at("radius").get<double>();
+    } else {
+        throw std::runtime_error("robot-def: unknown profile type '" + type + "'");
+    }
+    return p;
+}
+
+Pick ParseCadPick(const json& data) {
+    Pick p{};
+    p.source_step = data.at("source_step").get<int32_t>();
+    p.local_index = data.at("local_index").get<int32_t>();
+    p.point = ParseVec3(data.at("point"), "pick.point");
+    return p;
+}
+
+Pick ParseFilletChamferPick(const json& data) {
+    Pick p = ParseCadPick(data);
+    p.has_operation = true;
+    const std::string operation = data.at("operation").get<std::string>();
+    if (operation == "fillet") {
+        p.operation = PickOperation::kFillet;
+    } else if (operation == "chamfer") {
+        p.operation = PickOperation::kChamfer;
+    } else {
+        throw std::runtime_error("robot-def: unknown pick operation '" + operation + "'");
+    }
+    p.value = data.at("value").get<double>();
+    return p;
+}
+
+BossOperation ParseBossOperation(const json& data) {
+    BossOperation op{};
+    const std::string operation = data.at("operation").get<std::string>();
+    if (operation == "extrude") {
+        op.operation = BossOperationType::kExtrude;
+        op.profile = ParseProfile(data.at("profile"));
+        op.depth = data.at("depth").get<double>();
+    } else if (operation == "revolve") {
+        op.operation = BossOperationType::kRevolve;
+        op.profile = ParseProfile(data.at("profile"));
+        op.offset = data.at("offset").get<double>();
+        op.angle_deg = data.at("angle_deg").get<double>();
+    } else if (operation == "loft") {
+        op.operation = BossOperationType::kLoft;
+        op.start_profile = ParseProfile(data.at("start_profile"));
+        op.end_profile = ParseProfile(data.at("end_profile"));
+        op.height = data.at("height").get<double>();
+    } else {
+        throw std::runtime_error("robot-def: unknown boss operation '" + operation + "'");
+    }
+    return op;
+}
+
+Feature ParseFeature(const json& data) {
+    Feature f{};
+    const std::string operation = data.at("operation").get<std::string>();
+    if (operation == "extrude") {
+        f.type = FeatureType::kExtrude;
+        f.profile = ParseProfile(data.at("profile"));
+        f.depth = data.at("depth").get<double>();
+    } else if (operation == "revolve") {
+        f.type = FeatureType::kRevolve;
+        f.profile = ParseProfile(data.at("profile"));
+        f.offset = data.at("offset").get<double>();
+        f.angle_deg = data.at("angle_deg").get<double>();
+    } else if (operation == "loft") {
+        f.type = FeatureType::kLoft;
+        f.start_profile = ParseProfile(data.at("start_profile"));
+        f.end_profile = ParseProfile(data.at("end_profile"));
+        f.height = data.at("height").get<double>();
+    } else if (operation == "box") {
+        f.type = FeatureType::kBox;
+        f.size = ParseVec3(data.at("size"), "feature.size");
+    } else if (operation == "cylinder") {
+        f.type = FeatureType::kCylinder;
+        f.radius = data.at("radius").get<double>();
+        f.length = data.at("length").get<double>();
+    } else if (operation == "cut") {
+        f.type = FeatureType::kCut;
+        f.tool = ParseBossOperation(data.at("tool"));
+        f.position = ParseVec3(data.at("position"), "feature.position");
+    } else if (operation == "fillet_chamfer") {
+        f.type = FeatureType::kFilletChamfer;
+        const auto& picks = data.at("picks");
+        if (!picks.is_array() || picks.empty()) {
+            throw std::runtime_error("robot-def: fillet_chamfer feature needs at least one pick");
+        }
+        for (const auto& pick : picks) f.picks.push_back(ParseFilletChamferPick(pick));
+    } else if (operation == "shell") {
+        f.type = FeatureType::kShell;
+        const auto& picks = data.at("picks");
+        if (!picks.is_array() || picks.empty()) {
+            throw std::runtime_error("robot-def: shell feature needs at least one pick");
+        }
+        for (const auto& pick : picks) f.picks.push_back(ParseCadPick(pick));
+        f.thickness = data.at("thickness").get<double>();
+    } else if (operation == "draft") {
+        f.type = FeatureType::kDraft;
+        const auto& picks = data.at("picks");
+        if (!picks.is_array() || picks.empty()) {
+            throw std::runtime_error("robot-def: draft feature needs at least one pick");
+        }
+        for (const auto& pick : picks) f.picks.push_back(ParseCadPick(pick));
+        f.angle_deg = data.at("angle_deg").get<double>();
+    } else {
+        throw std::runtime_error("robot-def: unknown feature operation '" + operation + "'");
+    }
+    return f;
+}
+
 Body ParseBody(const json& data) {
     Body b{};
     b.id = data.at("id").get<std::string>();
@@ -89,6 +210,9 @@ Body ParseBody(const json& data) {
     if (data.contains("collision")) {
         b.has_collision = true;
         b.collision = ParseGeometry(data.at("collision"));
+    }
+    if (data.contains("features")) {
+        for (const auto& f : data.at("features")) b.features.push_back(ParseFeature(f));
     }
     b.mass = data.at("mass").get<double>();
     const auto& inertia = data.at("inertia");
@@ -204,6 +328,80 @@ json GeometryToJson(const Geometry& g) {
     throw std::runtime_error("robot-def: unknown geometry type");
 }
 
+// ---- CAD feature history serialization (v2, CAD Kernel Phase 7.1) ----
+
+json ProfileToJson(const Profile& p) {
+    switch (p.type) {
+        case ProfileType::kRectangle:
+            return json{{"type", "rectangle"}, {"width", p.width}, {"height", p.height}};
+        case ProfileType::kCircle:
+            return json{{"type", "circle"}, {"radius", p.radius}};
+    }
+    throw std::runtime_error("robot-def: unknown profile type");
+}
+
+json CadPickToJson(const Pick& p) {
+    return json{{"source_step", p.source_step}, {"local_index", p.local_index}, {"point", {p.point.x, p.point.y, p.point.z}}};
+}
+
+json FilletChamferPickToJson(const Pick& p) {
+    json out = CadPickToJson(p);
+    out["operation"] = p.operation == PickOperation::kFillet ? "fillet" : "chamfer";
+    out["value"] = p.value;
+    return out;
+}
+
+json BossOperationToJson(const BossOperation& op) {
+    switch (op.operation) {
+        case BossOperationType::kExtrude:
+            return json{{"operation", "extrude"}, {"profile", ProfileToJson(op.profile)}, {"depth", op.depth}};
+        case BossOperationType::kRevolve:
+            return json{{"operation", "revolve"}, {"profile", ProfileToJson(op.profile)}, {"offset", op.offset}, {"angle_deg", op.angle_deg}};
+        case BossOperationType::kLoft:
+            return json{{"operation", "loft"},
+                        {"start_profile", ProfileToJson(op.start_profile)},
+                        {"end_profile", ProfileToJson(op.end_profile)},
+                        {"height", op.height}};
+    }
+    throw std::runtime_error("robot-def: unknown boss operation type");
+}
+
+json FeatureToJson(const Feature& f) {
+    switch (f.type) {
+        case FeatureType::kExtrude:
+            return json{{"operation", "extrude"}, {"profile", ProfileToJson(f.profile)}, {"depth", f.depth}};
+        case FeatureType::kRevolve:
+            return json{{"operation", "revolve"}, {"profile", ProfileToJson(f.profile)}, {"offset", f.offset}, {"angle_deg", f.angle_deg}};
+        case FeatureType::kLoft:
+            return json{{"operation", "loft"},
+                        {"start_profile", ProfileToJson(f.start_profile)},
+                        {"end_profile", ProfileToJson(f.end_profile)},
+                        {"height", f.height}};
+        case FeatureType::kBox:
+            return json{{"operation", "box"}, {"size", {f.size.x, f.size.y, f.size.z}}};
+        case FeatureType::kCylinder:
+            return json{{"operation", "cylinder"}, {"radius", f.radius}, {"length", f.length}};
+        case FeatureType::kCut:
+            return json{{"operation", "cut"}, {"tool", BossOperationToJson(f.tool)}, {"position", {f.position.x, f.position.y, f.position.z}}};
+        case FeatureType::kFilletChamfer: {
+            json picks = json::array();
+            for (const auto& p : f.picks) picks.push_back(FilletChamferPickToJson(p));
+            return json{{"operation", "fillet_chamfer"}, {"picks", picks}};
+        }
+        case FeatureType::kShell: {
+            json picks = json::array();
+            for (const auto& p : f.picks) picks.push_back(CadPickToJson(p));
+            return json{{"operation", "shell"}, {"picks", picks}, {"thickness", f.thickness}};
+        }
+        case FeatureType::kDraft: {
+            json picks = json::array();
+            for (const auto& p : f.picks) picks.push_back(CadPickToJson(p));
+            return json{{"operation", "draft"}, {"picks", picks}, {"angle_deg", f.angle_deg}};
+        }
+    }
+    throw std::runtime_error("robot-def: unknown feature type");
+}
+
 json BodyToJson(const Body& b) {
     json out{{"id", b.id},
              {"name", b.name},
@@ -212,6 +410,11 @@ json BodyToJson(const Body& b) {
              {"inertia", {{"ixx", b.inertia.ixx}, {"iyy", b.inertia.iyy}, {"izz", b.inertia.izz}}}};
     if (b.has_visual) out["visual"] = GeometryToJson(b.visual);
     if (b.has_collision) out["collision"] = GeometryToJson(b.collision);
+    if (!b.features.empty()) {
+        json features = json::array();
+        for (const auto& f : b.features) features.push_back(FeatureToJson(f));
+        out["features"] = features;
+    }
     if (b.material.has_color) out["material"] = json{{"color", b.material.color}};
     return out;
 }
@@ -381,6 +584,12 @@ std::vector<ValidationIssue> ValidateRobotDef(const RobotDef& robot) {
         }
         if (!std::isfinite(body.mass) || body.mass <= 0) {
             issues.push_back(ValidationIssue{"body-invalid-mass", "error", "body", body.id, "Body '" + body.id + "' has no valid mass"});
+        }
+        const bool has_cad_mesh = (body.has_visual && body.visual.type == GeometryType::kCadMesh) ||
+                                   (body.has_collision && body.collision.type == GeometryType::kCadMesh);
+        if (!body.features.empty() && !has_cad_mesh) {
+            issues.push_back(ValidationIssue{"body-features-without-cad-mesh", "error", "body", body.id,
+                                              "Body '" + body.id + "': features is only meaningful alongside a cad_mesh visual/collision"});
         }
         for (const auto& [axis_name, value] :
              std::vector<std::pair<std::string, double>>{{"ixx", body.inertia.ixx}, {"iyy", body.inertia.iyy}, {"izz", body.inertia.izz}}) {

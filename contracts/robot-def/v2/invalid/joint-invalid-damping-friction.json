@@ -1,0 +1,11 @@
+{
+  "id": "invalid-fixture",
+  "name": "joint-invalid-damping-friction",
+  "bodies": [
+    { "id": "base", "name": "Base", "mass": 1.0, "inertia": { "ixx": 0.01, "iyy": 0.01, "izz": 0.01 } },
+    { "id": "link1", "name": "Link 1", "mass": 0.5, "inertia": { "ixx": 0.005, "iyy": 0.005, "izz": 0.005 } }
+  ],
+  "joints": [
+    { "id": "joint1", "name": "Joint 1", "type": "hinge", "parent": "base", "child": "link1", "axis": [0, 1, 0], "limits": { "lower": -1.0, "upper": 1.0 }, "damping": -0.1 }
+  ]
+}

@@ -4,7 +4,7 @@ import type { CadEdgeOverlay, CadPreview, ShapeEdgeMesh } from "../cad/cadClient
 import { fillet, previewEdges } from "../cad/cadClient";
 import { shapeFromGeometry } from "./cadTargetShape";
 import { FilletEdgeList } from "./FilletEdgeList";
-import { parseFilletPicks, type FilletPickDraft } from "./filletPicks";
+import { filletChamferFeatureFromPicks, parseFilletPicks, type FilletPickDraft } from "./filletPicks";
 import { replaceBodyGeometry } from "./robotEdits";
 import { useCadPreview } from "./useCadPreview";
 
@@ -86,7 +86,9 @@ export function CadFilletChamferEditor({
 
   const apply = () => {
     if (status !== "ready" || !mesh) return;
-    onApply(replaceBodyGeometry(robot, targetBodyId, mesh));
+    const picks = parseFilletPicks(edgePicks);
+    if (!picks.ok) return;
+    onApply(replaceBodyGeometry(robot, targetBodyId, mesh, [filletChamferFeatureFromPicks(picks.value, 0)]));
   };
 
   if (!targetBody) return null;

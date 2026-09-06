@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { RobotDef } from "../contracts/robotDef";
+import type { Feature, RobotDef } from "../contracts/robotDef";
 import type { CadPreview } from "../cad/cadClient";
 import { cut } from "../cad/cadClient";
 import { CadProfileDimensionFields, parseProfileDraft, positiveNumber, type ProfileDraft, type ProfileShape } from "./CadProfileFields";
@@ -113,7 +113,14 @@ export function CadRevolvedCutCreator({ robot, targetBodyId, onApply, onCancel, 
 
   const apply = () => {
     if (status !== "ready" || !mesh) return;
-    onApply(replaceBodyGeometry(robot, targetBodyId, mesh));
+    const parsed = parseDraft(draft);
+    if (!parsed.ok) return;
+    const feature: Feature = {
+      operation: "cut",
+      tool: { operation: "revolve", profile: parsed.value.profile, offset: parsed.value.offset, angle_deg: parsed.value.angleDeg },
+      position: parsed.value.position,
+    };
+    onApply(replaceBodyGeometry(robot, targetBodyId, mesh, [feature]));
   };
 
   if (!targetBody) return null;
