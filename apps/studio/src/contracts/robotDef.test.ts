@@ -241,3 +241,59 @@ describe("body.features (v2)", () => {
     expect(json.bodies[0]).not.toHaveProperty("features");
   });
 });
+
+// App.tsx's own project-save path (collectPayload/actionSave/saveProject)
+// does NOT call robotDefToJson -- it sends the raw in-memory RobotDef object
+// straight through as `robot_def: robotDef`, and Tauri's invoke() JSON-
+// serializes whatever plain object it's given over IPC (src-tauri's own
+// ProjectPayload.robot_def is an opaque serde_json::Value, never validated
+// or transformed Rust-side). On load, applyProjectRobotDef calls
+// parseRobotDef(payload.robot_def) on whatever comes back. Every other
+// round-trip test above goes through the explicit robotDefToJson serializer
+// first -- this is the one gate that proves the RAW object survives that
+// exact real path with no explicit serialization step, for a realistic
+// multi-step CAD history (investigated directly in response to a user
+// report of a Build-mode CAD part "not saving" -- this path checked out;
+// see the CAD Kernel Phase 7 project memory for the fuller investigation,
+// including real-browser screenshots proving visibility and simulation
+// both already work once a body has a joint attaching it to the robot).
+describe("a raw RobotDef object survives App.tsx's actual save path (JSON-over-Tauri-IPC, no explicit serializer)", () => {
+  it("a multi-step cad_mesh body (extrude -> fillet_chamfer -> shell -> draft) round-trips byte-for-byte", () => {
+    const identity = { position: [0.1, 0.2, 0.3] as [number, number, number], rotation_rpy: [0.1, 0, 0] as [number, number, number] };
+    const cadMesh = { type: "cad_mesh" as const, vertices: [0, 0, 0, 0.1, 0, 0, 0, 0.1, 0, 0, 0, 0.1], faces: [0, 1, 2, 0, 1, 3, 0, 2, 3, 1, 2, 3] };
+    const robot = {
+      id: "my-robot",
+      name: "My Robot",
+      description: "",
+      root_placement: { position: [0, 0, 0] as [number, number, number], rotation_rpy: [0, 0, 0] as [number, number, number] },
+      bodies: [
+        {
+          id: "part",
+          name: "Part",
+          transform: identity,
+          visual: cadMesh,
+          collision: cadMesh,
+          mass: 0.12,
+          inertia: { ixx: 0.001, iyy: 0.001, izz: 0.001 },
+          material: { color: [0.3, 0.5, 0.9] as [number, number, number] },
+          features: [
+            { operation: "extrude" as const, profile: { type: "rectangle" as const, width: 0.1, height: 0.06 }, depth: 0.04 },
+            { operation: "fillet_chamfer" as const, picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] as [number, number, number], operation: "fillet" as const, value: 0.005 }] },
+            { operation: "shell" as const, picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] as [number, number, number] }], thickness: 0.005 },
+            { operation: "draft" as const, picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] as [number, number, number] }], angle_deg: 5 },
+          ],
+        },
+      ],
+      joints: [],
+      actuators: [],
+      sensors: [],
+    };
+
+    const payload = { robot_def: robot as unknown }; // exactly App.tsx's collectPayload()
+    const overIpc = JSON.parse(JSON.stringify(payload)) as { robot_def: unknown }; // exactly Tauri's invoke() IPC
+    const reloaded = parseRobotDef(overIpc.robot_def); // exactly App.tsx's applyProjectRobotDef()
+
+    expect(reloaded).toEqual(robot);
+    expect(validateRobotDef(reloaded)).toEqual([]);
+  });
+});
