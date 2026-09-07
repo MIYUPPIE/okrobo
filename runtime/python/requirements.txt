@@ -15,3 +15,14 @@ pyserial>=3.5
 # optional viewer, which this project never calls, but pip installs them
 # unconditionally since mujoco declares them as required, not extras.
 mujoco==3.9.0
+# okrobo.vision's own detect_objects() -- real object detection (YOLOX-Nano,
+# see runtime/python/okrobo/models/NOTICE.md), decoupled from the robot's own
+# simulated camera (see docs/decisions/vision-lab-object-detection.md for
+# why: the simulated camera only ever renders flat-shaded colour bands, not
+# anything a COCO-trained detector would recognise). No version-parity
+# constraint the way mujoco has (no C++/WASM mirror of this capability), so
+# left at >= like the rest of this file. onnxruntime installs ~66 MB
+# unpacked; Pillow decodes real JPEG/PNG sample/uploaded photos into the
+# same raw-RGB Frame shape find_color already expects.
+onnxruntime>=1.29
+Pillow>=11

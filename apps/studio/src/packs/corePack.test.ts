@@ -123,10 +123,11 @@ describe("core pack", () => {
       /robot\.(forward|backward|turn_left|turn_right|wait|distance|lidar|camera|heading|position|stop)\(/,
       /arm\.(move|move_all|angles|tip|wait|stop|grip|release|holding|object_position)\(/,
       /drone\.(takeoff|land|forward|backward|up|down|turn_left|turn_right|altitude|distance|heading|position|wait|stop)\(/,
-      /(find_color|find_color_opencv)\(/,
+      /(find_color|find_color_opencv|load_image|detect_objects)\(/,
       /(frame|picture)\.(pixel|width|height|pixels)/,
       /target\.(bearing|coverage|area|color|x|y)/,
-      /^(from okrobo|import |robot = Robot\(\)|arm = Arm\(\)|drone = Drone\(\)|frame = |target = |print\(|while |if |elif |else:|for |x, y, z =|x, y =|$)/,
+      /obj\.(label|confidence|x|y|width|height)/,
+      /^(from okrobo|import |robot = Robot\(\)|arm = Arm\(\)|drone = Drone\(\)|frame = |target = |results = |print\(|while |if |elif |else:|for |x, y, z =|x, y =|$)/,
     ];
 
     const packsDir = join(process.cwd(), "..", "..", "packs");

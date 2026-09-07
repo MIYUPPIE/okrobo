@@ -31,6 +31,13 @@ __pycache__/
 .venv/
 runtime/python/.deps/
 
+# Vision Lab's own model weight -- fetched by scripts/fetch-vision-model.sh
+# (auto-run by scripts/test-all.sh, same "gitignored, fetched at setup time"
+# treatment as runtime/python/.deps and tools/mujoco), never committed
+# (CLAUDE.md: no model weights in the repo). LICENSE/NOTICE.md alongside it
+# ARE committed.
+runtime/python/okrobo/models/yolox_nano.onnx
+
 # Editors / OS
 .vscode/
 .idea/

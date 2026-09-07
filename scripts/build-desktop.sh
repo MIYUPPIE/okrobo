@@ -10,6 +10,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 if [ ! -d "$ROOT/runtime/python/.deps" ]; then
   (cd "$ROOT/runtime/python" && python3 -m pip install --quiet --target=.deps -r requirements.txt)
 fi
+"$ROOT/scripts/fetch-vision-model.sh"
 if [ ! -x "$ROOT/apps/studio/src-tauri/runtime-dist/cpython/bin/python3" ]; then
   echo "note: no bundled CPython (run scripts/fetch-python-runtime.sh for fully offline installs);"
   echo "      the packaged app will fall back to the target machine's python3."

@@ -34,6 +34,20 @@ def serial_ports() -> list:
         return []
 
 WORKER_PATH = str(Path(__file__).resolve().parent / "worker.py")
+# Mirrors _deps.py's own path computation exactly, so the worker subprocess
+# sees the same .deps this process does (sys.path is process-local; the
+# child only inherits real environment variables).
+_DEPS = Path(__file__).resolve().parent.parent / ".deps"
+
+
+def _worker_env() -> dict:
+    env = dict(os.environ)
+    if _DEPS.is_dir():
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = f"{_DEPS}{os.pathsep}{existing}" if existing else str(_DEPS)
+    return env
+
+
 DEFAULT_PORT = 8355
 # Set by the desktop shell (apps/studio/src-tauri/src/sidecar.rs) to the
 # bundled or dev-tree location of firmware/okrobo_car; this fallback covers
@@ -198,6 +212,16 @@ class Session:
             pass_fds=(child_sock.fileno(),),
             # Student code gets its own neutral cwd, not the sidecar's.
             cwd=tempfile.gettempdir(),
+            # This sidecar process sees .deps (mujoco, onnxruntime, ...) via
+            # `from . import _deps` above, which patches sys.path -- a
+            # process-local change a subprocess never inherits (only real
+            # environment variables do). Every worker.py capability before
+            # okrobo.vision.detect_objects happened to need nothing from
+            # .deps (find_color/Frame are dependency-free pure Python), so
+            # this went uncaught: a real "Run" of a Vision Lab lesson would
+            # fail with ModuleNotFoundError in the worker subprocess even
+            # though the sidecar itself imports onnxruntime just fine.
+            env=_worker_env(),
         )
         child_sock.close()
         rpc_reader, self.rpc_writer = await asyncio.open_connection(sock=parent_sock)

@@ -1825,3 +1825,95 @@ across 64 files), `npm run typecheck`, `npm run build`, and the full
 `test-all.sh` gate all green. No contract, Python, or C++ changes this
 phase -- the CAD Kernel Phase 7 roadmap (data model, live-recompute
 executor, edit-any-step, reorder/insert/delete) is now complete.
+
+## Vision Lab: real object detection (2026-09-07)
+
+The "Not done: YOLO/torch models" line from the Phase-8 era assumed
+bundling a full PyTorch/Ultralytics training framework (~500 MB) to run a
+model that needs only inference. Re-researched with real, current numbers
+(WebSearch/PyPI/GitHub, not memory) rather than re-asserting the old
+estimate: an inference-only stack (onnxruntime + a pretrained ONNX model)
+costs ~76 MB, smaller than the MuJoCo integration's own ~135 MB pull.
+Verified feasible first via a real spike (background agent, confined to
+gitignored `tools/yolox-spike/`, same discipline as the MuJoCo spike):
+real download, real onnxruntime inference against a real photo (correctly
+found dog/car/bicycle), real onnxruntime-web WASM cross-check (9.89e-5 max
+diff -- floating-point noise), real license check -- full pass before any
+application code was written.
+
+Model: **YOLOX-Nano** (Megvii-BaseDetection, Apache-2.0), not Ultralytics
+YOLO -- every Ultralytics YOLO variant (v5n through the current YOLO26) is
+AGPL-3.0 by default, which would force this project (no LICENSE file today,
+private/commercial posture) to open-source entirely or buy an Enterprise
+license. This was a real, previously-unflagged legal blocker independent of
+the size question. YOLOX-Nano's own COCO-80 pretrained ONNX (3.5 MB) is a
+direct official-release download, no training/export needed.
+
+**Deliberately not wired to `robot.camera()`.** Checked
+`runtime/python/okrobo/camera.py`'s own `render()` first: it's a 1D
+raycaster drawing flat-shaded colour bands, nothing else -- no shape, no
+texture, nothing a COCO-trained detector would ever recognise. Pointing a
+real object detector at that feed would return garbage or nothing, always.
+`find_color` already works there because it's built for exactly that
+imagery; a general detector needs real photos instead. So
+`okrobo.vision.detect_objects()` works on any `Frame` -- `load_image()`
+reads a real photo file (a student's own upload, no bundled samples --
+sourcing verifiably-licensed sample photos wasn't worth the risk under time
+pressure, see the decision doc) into the same `Frame` shape
+`camera.render()` already produces, decoupled entirely from the robot's own
+simulated feed. A new lesson, `packs/ai/lessons/02-detect-real-objects.md`
+(pack bumped to 1.1.0), teaches it.
+
+**Python-only, deliberately -- no Blockly block, no TS/C++ mirror.**
+Surveyed the full existing vision-block architecture first
+(`apps/studio/src/blocks/okroboBlocks.ts`, `program/execute.ts`): Blockly's
+own generated JS runs as `new AsyncFunction("robot", code)` with nothing
+else in scope -- there's no sandbox reachability for a non-robot capability,
+and no C++ Blockly call site to mirror either. `find_color_opencv` already
+established this exact "Python-only enhancement, no block" precedent in the
+same file. The proven onnxruntime-web parity (9.89e-5) stays banked for if
+a real reason to add a JS/C++ mirror shows up later.
+
+`detect_objects()`'s own grid-decode and NMS are a direct Python port of
+YOLOX's own reference demo (`demo/ONNXRuntime/onnx_inference.py`,
+`data_augment.py`, `demo_utils.py`) -- a modified file per the Apache
+License's own Section 4(b), documented in
+`runtime/python/okrobo/models/NOTICE.md` alongside the model's own exact
+provenance (sha256-verified download) and `LICENSE` (Apache-2.0, Megvii
+Inc.).
+
+Tests split across CLAUDE.md's own two lanes: gate tests
+(`test_vision.py`, +13 -- decode/NMS math against hand-built numpy arrays
+with known-correct answers, structural/robustness checks on a synthetic
+image, no network/photo needed) vs. a real-photo accuracy eval
+(`tests/eval_vision_lab.py`, deliberately NOT `test_*.py` so pytest's
+default collection and `test-all.sh`'s own on-disk-file-count guard both
+skip it -- fetches a real photo at run time, never bundled, asserts a pass
+threshold, run by hand before shipping a vision.py change, not per-commit).
+Plus a real worker-subprocess smoke test (`test_worker.py`, +1) and an
+extended pack-lesson API allowlist (`corePack.test.ts`).
+
+**A real, previously-latent production bug this surfaced:**
+`sidecar.py`'s own `start_program()` spawns the worker subprocess with no
+`env=` at all -- it silently inherited whatever `PYTHONPATH` happened to be
+set on the sidecar process itself. The sidecar sees `.deps` via `from .
+import _deps`, which patches `sys.path` -- a process-local change a
+subprocess never inherits, only real environment variables do. Every
+worker-executed capability before `detect_objects()` needed nothing from
+`.deps` (`find_color`/`Frame` are dependency-free pure Python by design),
+so this was fully latent: a real student "Run" of a Vision Lab lesson would
+have failed with `ModuleNotFoundError` inside the worker subprocess even
+though the sidecar process itself imports onnxruntime fine. Caught by
+`test_worker.py`'s own harness failing under `test-all.sh`'s bare `python3
+-m pytest` invocation while passing when run manually with `PYTHONPATH`
+pre-set -- fixed at the actual production call site (`sidecar.py`, not just
+the test harness), verified with `env -u PYTHONPATH pytest
+tests/test_sidecar.py tests/test_worker.py` (both green) plus a new
+full-stack regression test running the real `serve()`/`start_program` path
+end to end.
+
+`pytest` (`test_vision.py` 22 passed/1 skipped, `test_worker.py` 13 passed,
+`test_sidecar.py` +1, full suite 214 passed/4 skipped with no `PYTHONPATH`
+pre-set in the shell), eval passing 3/3 expected classes, `corePack.test.ts`
+6/6. See docs/decisions/vision-lab-object-detection.md for the full
+reasoning.

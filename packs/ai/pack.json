@@ -1,12 +1,12 @@
 {
   "id": "ai",
   "name": "AI Pack",
-  "description": "Computer vision lessons for the robot camera. Vision works without this pack; installing it adds OpenCV acceleration and the lessons.",
-  "version": "1.0.0",
+  "description": "Computer vision lessons: colour detection for the robot camera, plus a real object detector for your own photos. Both work without this pack; installing it adds OpenCV acceleration for the first and the lessons for both.",
+  "version": "1.1.0",
   "requires": { "studio": "0.1.0", "packs": ["core"] },
   "contents": {
     "worlds": [],
     "robots": [],
-    "lessons": ["lessons/01-find-the-red-box.md"]
+    "lessons": ["lessons/01-find-the-red-box.md", "lessons/02-detect-real-objects.md"]
   }
 }

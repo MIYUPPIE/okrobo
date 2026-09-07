@@ -89,6 +89,33 @@ def test_program_drives_the_robot_and_streams_output():
     asyncio.run(scenario())
 
 
+def test_program_can_import_a_deps_only_package_through_the_real_worker_subprocess():
+    """Regression: start_program's own asyncio.create_subprocess_exec had no
+    env= at all, so the worker subprocess only ever saw .deps if the sidecar
+    process itself happened to be launched with PYTHONPATH already set --
+    _deps.py's own sys.path.insert() is process-local and a subprocess never
+    inherits it. Every worker capability before okrobo.vision.detect_objects
+    needed nothing from .deps (find_color/Frame are dependency-free pure
+    Python), so this went uncaught until a real .deps-only import
+    (onnxruntime) was added. Runs the FULL production path (sidecar's own
+    serve()/start_program, not test_worker.py's own lower-level harness) to
+    prove the fix for real, not just in isolation."""
+
+    async def scenario():
+        async with studio_session() as studio:
+            code = (
+                "from okrobo.vision import object_detection_available\n"
+                "print('available:', object_detection_available())\n"
+            )
+            await asyncio.wait_for(studio.run(code), RUN_TIMEOUT)
+            stdout = "".join(text for stream, text in studio.outputs if stream == "stdout")
+            stderr = "".join(text for stream, text in studio.outputs if stream == "stderr")
+            assert studio.done == 0, stderr
+            assert "available: True" in stdout
+
+    asyncio.run(scenario())
+
+
 def test_student_error_streams_traceback():
     async def scenario():
         async with studio_session() as studio:

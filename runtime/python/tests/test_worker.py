@@ -1,6 +1,7 @@
 """Gate tests for the student-code worker subprocess (contracts/robot-remote/v0)."""
 
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -8,6 +9,26 @@ import tempfile
 from pathlib import Path
 
 WORKER = str(Path(__file__).resolve().parents[1] / "okrobo" / "worker.py")
+
+# Mirrors conftest.py's own .deps discovery -- that file only patches the
+# CURRENT process's sys.path, which a subprocess.Popen child never inherits
+# (only real environment variables do). Every worker test before
+# test_student_code_can_import_object_detection happened to need nothing
+# from .deps (find_color/Frame are dependency-free pure Python, the whole
+# point of find_color's own design) -- detect_objects is the first one that
+# does, and it surfaced this for real: a bare `python3 -m pytest` run (no
+# PYTHONPATH already set in the invoking shell, e.g. scripts/test-all.sh's
+# own invocation) left the worker subprocess unable to `import onnxruntime`
+# even though the parent test process could see it fine via conftest.py.
+_DEPS = Path(__file__).resolve().parents[1] / ".deps"
+
+
+def _worker_env() -> dict:
+    env = dict(os.environ)
+    if _DEPS.is_dir():
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = f"{_DEPS}{os.pathsep}{existing}" if existing else str(_DEPS)
+    return env
 
 
 def run_worker(code: str, answer):
@@ -27,6 +48,7 @@ def run_worker(code: str, answer):
         stderr=subprocess.PIPE,
         pass_fds=(child.fileno(),),
         close_fds=True,
+        env=_worker_env(),
     )
     child.close()
 
@@ -136,6 +158,27 @@ def test_student_code_can_import_okrobo_submodules():
     assert exit_code == 0, stderr
     assert "colors: 4" in stdout
     assert "found: True" in stdout
+
+
+def test_student_code_can_import_object_detection():
+    """detect_objects/load_image live in the same okrobo.vision submodule as
+    find_color -- proves a Vision Lab lesson works through the real
+    worker/RPC boundary too. Needs no RPC call at all (unlike find_color,
+    which needs robot.camera()'s own frame) -- see vision.py's own header on
+    why detect_objects() is deliberately standalone, not wired to the
+    robot's camera."""
+    code = (
+        "from okrobo.vision import detect_objects, object_detection_available\n"
+        "from okrobo.camera import Frame\n"
+        "print('available:', object_detection_available())\n"
+        "frame = Frame(width=4, height=4, pixels=bytes([120, 120, 120] * 16))\n"
+        "results = detect_objects(frame)\n"
+        "print('ran ok:', isinstance(results, list))\n"
+    )
+    _, stdout, stderr, exit_code = run_worker(code, lambda r: {"ok": True, "result": None})
+    assert exit_code == 0, stderr
+    assert "available: True" in stdout
+    assert "ran ok: True" in stdout
 
 
 def test_camera_frames_cross_the_rpc_boundary():

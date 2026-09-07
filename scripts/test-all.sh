@@ -17,6 +17,9 @@ echo "== runtime/python =="
 if [ ! -d "$ROOT/runtime/python/.deps" ]; then
   (cd "$ROOT/runtime/python" && python3 -m pip install --quiet --target=.deps -r requirements.txt)
 fi
+# Vision Lab's own model weight -- gitignored, fetched here the same way
+# .deps just was above (see scripts/fetch-vision-model.sh's own doc).
+bash "$ROOT/scripts/fetch-vision-model.sh"
 # Guard against tests silently disappearing. tests/ is a package, so one
 # module-level importorskip (a missing dependency) can abort collection of
 # every file and the suite still "passes" with nothing run. Compare the number
