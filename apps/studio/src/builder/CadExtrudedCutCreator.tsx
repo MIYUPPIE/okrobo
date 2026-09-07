@@ -81,6 +81,21 @@ export interface CadExtrudedCutCreatorProps {
     allFeatures: Feature[];
     onApply: (nextFeature: Feature) => void;
   };
+  /** CAD Kernel Phase 7.4 (reorder/insert/delete): inserts a BRAND-NEW cut
+   * step right after `afterIndex` of `allFeatures` instead of replacing an
+   * existing one -- draft starts from `initialDraft` (no feature to seed
+   * from), the live preview replays the WHOLE chain with the new step
+   * spliced in, Apply calls `onApply` with the freshly built Feature.
+   * Mutually exclusive with `editing`. Cut needs no prefix-replayed
+   * geometry to pick from (its tool is positioned in space, not picked off
+   * the target's own faces/edges), so this is otherwise identical to
+   * `editing` minus the seeding. See
+   * docs/decisions/cad-kernel-reorder-insert-delete.md. */
+  inserting?: {
+    afterIndex: number;
+    allFeatures: Feature[];
+    onApply: (newFeature: Feature) => void;
+  };
 }
 
 function draftFromFeature(feature: Extract<Feature, { operation: "cut" }>): Draft {
@@ -98,7 +113,7 @@ function draftFromFeature(feature: Extract<Feature, { operation: "cut" }>): Draf
   };
 }
 
-export function CadExtrudedCutCreator({ robot, targetBodyId, onApply, onCancel, onPreviewChange, editing }: CadExtrudedCutCreatorProps) {
+export function CadExtrudedCutCreator({ robot, targetBodyId, onApply, onCancel, onPreviewChange, editing, inserting }: CadExtrudedCutCreatorProps) {
   const targetBody = robot.bodies.find((b) => b.id === targetBodyId);
   const targetMesh = useMemo(() => geometryToMesh(targetBody?.visual ?? targetBody?.collision), [targetBody]);
   const [draft, setDraft] = useState<Draft>(() => (editing ? draftFromFeature(editing.feature) : initialDraft));
@@ -112,6 +127,11 @@ export function CadExtrudedCutCreator({ robot, targetBodyId, onApply, onCancel, 
       const nextFeatures = editing.allFeatures.map((f, i) => (i === editing.stepIndex ? nextFeature : f));
       return { ok: true, call: () => replayFeatures(nextFeatures).then((r) => r.mesh) };
     }
+    if (inserting) {
+      const nextFeature: Feature = { operation: "cut", tool: { operation: "extrude", profile: parsed.value.profile, depth: parsed.value.depth }, position: parsed.value.position };
+      const nextFeatures = [...inserting.allFeatures.slice(0, inserting.afterIndex + 1), nextFeature, ...inserting.allFeatures.slice(inserting.afterIndex + 1)];
+      return { ok: true, call: () => replayFeatures(nextFeatures).then((r) => r.mesh) };
+    }
     const call = () =>
       cut({
         targetMesh,
@@ -120,7 +140,7 @@ export function CadExtrudedCutCreator({ robot, targetBodyId, onApply, onCancel, 
       });
     return { ok: true, call };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.profile, draft.depth, draft.x, draft.y, draft.z, targetMesh, editing]);
+  }, [draft.profile, draft.depth, draft.x, draft.y, draft.z, targetMesh, editing?.stepIndex, editing?.allFeatures, inserting?.afterIndex, inserting?.allFeatures]);
 
   useEffect(() => {
     if (!targetBody) return;
@@ -144,6 +164,10 @@ export function CadExtrudedCutCreator({ robot, targetBodyId, onApply, onCancel, 
       editing.onApply(feature);
       return;
     }
+    if (inserting) {
+      inserting.onApply(feature);
+      return;
+    }
     onApply(replaceBodyGeometry(robot, targetBodyId, mesh, [feature]));
   };
 
@@ -151,7 +175,7 @@ export function CadExtrudedCutCreator({ robot, targetBodyId, onApply, onCancel, 
 
   return (
     <div className="body-inspector cad-extrude-creator">
-      <h4>{editing ? "Edit Cut (Extruded)" : "New CAD part (Extruded Cut)"}</h4>
+      <h4>{editing ? "Edit Cut (Extruded)" : inserting ? "Insert Cut (Extruded)" : "New CAD part (Extruded Cut)"}</h4>
       <p className="inspector-note">Cutting into {targetBody.name}</p>
 
       <section className="inspector-section">

@@ -106,4 +106,97 @@ describe("FeatureTreeList", () => {
       expect(screen.getAllByRole("listitem")).toHaveLength(2);
     });
   });
+
+  // CAD Kernel Phase 7.4 (reorder/insert/delete).
+  describe("onMoveStep / onDeleteStep", () => {
+    const features: Feature[] = [
+      { operation: "box", size: [0.1, 0.06, 0.04] },
+      { operation: "shell", picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] }], thickness: 0.005 },
+      { operation: "draft", picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] }], angle_deg: 5 },
+    ];
+
+    it("shows no move/delete buttons for the root row, only for modifier rows", () => {
+      render(<FeatureTreeList features={features} onMoveStep={() => {}} onDeleteStep={() => {}} />);
+      expect(screen.queryByLabelText("move step 0 up")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("delete step 0")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("move step 1 down")).toBeInTheDocument();
+      expect(screen.getByLabelText("delete step 1")).toBeInTheDocument();
+    });
+
+    it("disables move-up for the first modifier row and move-down for the last row", () => {
+      render(<FeatureTreeList features={features} onMoveStep={() => {}} />);
+      expect(screen.getByLabelText("move step 1 up")).toBeDisabled();
+      expect(screen.getByLabelText("move step 1 down")).toBeEnabled();
+      expect(screen.getByLabelText("move step 2 up")).toBeEnabled();
+      expect(screen.getByLabelText("move step 2 down")).toBeDisabled();
+    });
+
+    it("clicking move up/down calls onMoveStep with that row's own index and direction", () => {
+      const onMoveStep = vi.fn();
+      render(<FeatureTreeList features={features} onMoveStep={onMoveStep} />);
+      fireEvent.click(screen.getByLabelText("move step 2 up"));
+      expect(onMoveStep).toHaveBeenCalledWith(2, "up");
+      fireEvent.click(screen.getByLabelText("move step 1 down"));
+      expect(onMoveStep).toHaveBeenCalledWith(1, "down");
+    });
+
+    it("deletes only after a second confirming click, per row", () => {
+      const onDeleteStep = vi.fn();
+      render(<FeatureTreeList features={features} onDeleteStep={onDeleteStep} />);
+      const deleteBtn = screen.getByLabelText("delete step 1");
+      fireEvent.click(deleteBtn);
+      expect(onDeleteStep).not.toHaveBeenCalled();
+      expect(screen.getByLabelText("delete step 1")).toHaveTextContent("delete?");
+      fireEvent.click(screen.getByLabelText("delete step 1"));
+      expect(onDeleteStep).toHaveBeenCalledWith(1);
+    });
+
+    it("disables every move/delete button while actionPending", () => {
+      render(<FeatureTreeList features={features} onMoveStep={() => {}} onDeleteStep={() => {}} actionPending />);
+      expect(screen.getByLabelText("move step 2 up")).toBeDisabled();
+      expect(screen.getByLabelText("delete step 1")).toBeDisabled();
+    });
+
+    it("shows actionError near the top of the list", () => {
+      render(<FeatureTreeList features={features} actionError="cad executor: step 1 (shell) failed to rebuild: no face found near [1, 1, 1]" />);
+      expect(screen.getByText(/no face found near/)).toBeInTheDocument();
+    });
+  });
+
+  describe("onInsertStep", () => {
+    const features: Feature[] = [
+      { operation: "box", size: [0.1, 0.06, 0.04] },
+      { operation: "shell", picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] }], thickness: 0.005 },
+    ];
+
+    it("shows an Insert step affordance on every row, root included", () => {
+      render(<FeatureTreeList features={features} onInsertStep={() => {}} />);
+      expect(screen.getAllByText("+ Insert step")).toHaveLength(2);
+    });
+
+    it("clicking Insert step opens a kind menu with every insertable operation", () => {
+      render(<FeatureTreeList features={features} onInsertStep={() => {}} />);
+      fireEvent.click(screen.getAllByText("+ Insert step")[0]);
+      for (const label of ["Fillet/Chamfer", "Shell", "Draft", "Extruded Cut", "Revolved Cut", "Boundary Cut"]) {
+        expect(screen.getByText(label)).toBeInTheDocument();
+      }
+    });
+
+    it("choosing a kind calls onInsertStep with that row's own index and the chosen kind", () => {
+      const onInsertStep = vi.fn();
+      render(<FeatureTreeList features={features} onInsertStep={onInsertStep} />);
+      fireEvent.click(screen.getAllByText("+ Insert step")[1]);
+      fireEvent.click(screen.getByText("Draft"));
+      expect(onInsertStep).toHaveBeenCalledWith(1, "draft");
+    });
+
+    it("Cancel closes the menu without calling onInsertStep", () => {
+      const onInsertStep = vi.fn();
+      render(<FeatureTreeList features={features} onInsertStep={onInsertStep} />);
+      fireEvent.click(screen.getAllByText("+ Insert step")[0]);
+      fireEvent.click(screen.getByText("Cancel"));
+      expect(onInsertStep).not.toHaveBeenCalled();
+      expect(screen.getAllByText("+ Insert step")).toHaveLength(2);
+    });
+  });
 });

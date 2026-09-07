@@ -1169,10 +1169,20 @@ body {
 }
 
 /* CAD Kernel Phase 7.3: a Construction history row, clickable to edit that
-   step -- same "block button styled as a plain row" idiom as .hierarchy-row. */
-.feature-tree-step {
-  display: block;
-  width: 100%;
+   step -- same "block button styled as a plain row" idiom as .hierarchy-row.
+   CAD Kernel Phase 7.4 (reorder/insert/delete): now shares its row with
+   move/delete buttons (.feature-tree-row), so it flex-grows instead of
+   taking the row's own full width itself. */
+.feature-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.feature-tree-step,
+.feature-tree-step-label {
+  flex: 1;
+  min-width: 0;
   text-align: left;
   background: none;
   border: 1px solid transparent;
@@ -1181,12 +1191,89 @@ body {
   font-size: 12px;
   font-family: inherit;
   padding: 4px 6px;
+}
+
+.feature-tree-step {
   cursor: pointer;
 }
 
 .feature-tree-step:hover {
   background: var(--panel-2);
   color: var(--text);
+}
+
+.feature-tree-step:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.feature-tree-move,
+.feature-tree-delete,
+.feature-tree-insert-toggle {
+  flex: none;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-family: inherit;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.feature-tree-move:hover,
+.feature-tree-insert-toggle:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.feature-tree-move:disabled,
+.feature-tree-delete:disabled,
+.feature-tree-insert-toggle:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.feature-tree-delete:hover {
+  color: #ff7a7a;
+}
+
+.feature-tree-delete.confirm {
+  color: #ff7a7a;
+  border-color: #ff7a7a;
+}
+
+.feature-tree-insert-toggle {
+  display: block;
+  width: 100%;
+  margin: 2px 0 8px;
+  text-align: center;
+}
+
+.feature-tree-insert-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 2px 0 8px;
+  padding: 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.feature-tree-insert-menu button {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 11px;
+  font-family: inherit;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.feature-tree-insert-menu button:hover {
+  background: var(--panel);
 }
 
 .builder-add-body {

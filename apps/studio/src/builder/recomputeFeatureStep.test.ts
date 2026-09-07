@@ -6,7 +6,7 @@ vi.mock("../cad/cadClient", () => ({
   replayFeatures: (...args: unknown[]) => replayFeaturesMock(...args),
 }));
 
-const { recomputeFeatureStep } = await import("./recomputeFeatureStep");
+const { recomputeFeatureStep, deleteFeatureStep, moveFeatureStep, insertFeatureStep } = await import("./recomputeFeatureStep");
 
 // No beforeEach here, deliberately: calling mockReset()/mockClear() on
 // replayFeaturesMock from a beforeEach hook was empirically found to trip
@@ -104,5 +104,151 @@ describe("recomputeFeatureStep", () => {
     const result = await recomputeFeatureStep(robot, "part", 5, boxFeature);
     expect(result.ok).toBe(false);
     expect(replayFeaturesMock).not.toHaveBeenCalled();
+  });
+});
+
+// CAD Kernel Phase 7.4 (reorder/insert/delete).
+const draftFeature: Feature = { operation: "draft", picks: [{ source_step: 1, local_index: 0, point: [0.05, 0, 0] }], angle_deg: 5 };
+
+describe("deleteFeatureStep", () => {
+  it("removes the target step and rebuilds visual/collision/features from what remains", async () => {
+    const resultMesh = { vertices: [1, 1, 1, 2, 2, 2, 3, 3, 3], faces: [0, 1, 2] };
+    replayFeaturesMock.mockResolvedValue({ mesh: resultMesh, steps: [] });
+    const robot = makeRobot([boxFeature, shellFeature, draftFeature]);
+
+    const result = await deleteFeatureStep(robot, "part", 1);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    expect(replayFeaturesMock).toHaveBeenCalledWith([boxFeature, draftFeature]);
+    expect(result.robot.bodies[0].features).toEqual([boxFeature, draftFeature]);
+  });
+
+  it("refuses to delete the root (step 0), without calling the executor", async () => {
+    replayFeaturesMock.mockClear();
+    const robot = makeRobot([boxFeature, shellFeature]);
+    const result = await deleteFeatureStep(robot, "part", 0);
+    expect(result).toEqual({ ok: false, message: expect.stringContaining("part") });
+    expect(replayFeaturesMock).not.toHaveBeenCalled();
+  });
+
+  it("returns a readable error for an out-of-range step index, without calling the executor", async () => {
+    replayFeaturesMock.mockClear();
+    const robot = makeRobot([boxFeature, shellFeature]);
+    const result = await deleteFeatureStep(robot, "part", 5);
+    expect(result.ok).toBe(false);
+    expect(replayFeaturesMock).not.toHaveBeenCalled();
+  });
+
+  it("returns a real rebuild-error message instead of throwing when a downstream pick no longer resolves", async () => {
+    replayFeaturesMock.mockImplementation(() => Promise.reject(new Error("cad executor: step 1 (draft) failed to rebuild: no face found near [1, 1, 1]")));
+    const robot = makeRobot([boxFeature, shellFeature, draftFeature]);
+
+    const result = await deleteFeatureStep(robot, "part", 1);
+
+    expect(result).toEqual({ ok: false, message: "cad executor: step 1 (draft) failed to rebuild: no face found near [1, 1, 1]" });
+  });
+});
+
+describe("moveFeatureStep", () => {
+  it("swaps a step with its predecessor moving up and rebuilds", async () => {
+    const resultMesh = { vertices: [4, 4, 4], faces: [0, 0, 0] };
+    replayFeaturesMock.mockResolvedValue({ mesh: resultMesh, steps: [] });
+    const robot = makeRobot([boxFeature, shellFeature, draftFeature]);
+
+    const result = await moveFeatureStep(robot, "part", 2, "up");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    expect(replayFeaturesMock).toHaveBeenCalledWith([boxFeature, draftFeature, shellFeature]);
+    expect(result.robot.bodies[0].features).toEqual([boxFeature, draftFeature, shellFeature]);
+  });
+
+  it("swaps a step with its successor moving down and rebuilds", async () => {
+    replayFeaturesMock.mockResolvedValue({ mesh: { vertices: [5, 5, 5], faces: [0, 0, 0] }, steps: [] });
+    const robot = makeRobot([boxFeature, shellFeature, draftFeature]);
+
+    const result = await moveFeatureStep(robot, "part", 1, "down");
+
+    expect(result.ok).toBe(true);
+    expect(replayFeaturesMock).toHaveBeenCalledWith([boxFeature, draftFeature, shellFeature]);
+  });
+
+  it("refuses to move the root, without calling the executor", async () => {
+    replayFeaturesMock.mockClear();
+    const robot = makeRobot([boxFeature, shellFeature, draftFeature]);
+    const result = await moveFeatureStep(robot, "part", 0, "down");
+    expect(result.ok).toBe(false);
+    expect(replayFeaturesMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses to move a step up past the root, without calling the executor", async () => {
+    replayFeaturesMock.mockClear();
+    const robot = makeRobot([boxFeature, shellFeature, draftFeature]);
+    const result = await moveFeatureStep(robot, "part", 1, "up");
+    expect(result.ok).toBe(false);
+    expect(replayFeaturesMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses to move the last step down past the tail, without calling the executor", async () => {
+    replayFeaturesMock.mockClear();
+    const robot = makeRobot([boxFeature, shellFeature, draftFeature]);
+    const result = await moveFeatureStep(robot, "part", 2, "down");
+    expect(result.ok).toBe(false);
+    expect(replayFeaturesMock).not.toHaveBeenCalled();
+  });
+
+  it("returns a real rebuild-error message instead of throwing when the new order breaks a pick", async () => {
+    replayFeaturesMock.mockImplementation(() => Promise.reject(new Error("cad executor: step 2 (draft) failed to rebuild: no face found near [9, 9, 9]")));
+    const robot = makeRobot([boxFeature, shellFeature, draftFeature]);
+
+    const result = await moveFeatureStep(robot, "part", 1, "down");
+
+    expect(result).toEqual({ ok: false, message: "cad executor: step 2 (draft) failed to rebuild: no face found near [9, 9, 9]" });
+  });
+});
+
+describe("insertFeatureStep", () => {
+  it("splices a brand-new step in right after afterIndex and rebuilds the whole chain", async () => {
+    const resultMesh = { vertices: [6, 6, 6], faces: [0, 0, 0] };
+    replayFeaturesMock.mockResolvedValue({ mesh: resultMesh, steps: [] });
+    const robot = makeRobot([boxFeature, shellFeature]);
+    const newDraft: Feature = { operation: "draft", picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] }], angle_deg: 3 };
+
+    const result = await insertFeatureStep(robot, "part", 0, newDraft);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    expect(replayFeaturesMock).toHaveBeenCalledWith([boxFeature, newDraft, shellFeature]);
+    expect(result.robot.bodies[0].features).toEqual([boxFeature, newDraft, shellFeature]);
+  });
+
+  it("appends at the tail when afterIndex is the last existing step", async () => {
+    replayFeaturesMock.mockResolvedValue({ mesh: { vertices: [7, 7, 7], faces: [0, 0, 0] }, steps: [] });
+    const robot = makeRobot([boxFeature, shellFeature]);
+    const newDraft: Feature = { operation: "draft", picks: [{ source_step: 1, local_index: 0, point: [0, 0, 0] }], angle_deg: 3 };
+
+    const result = await insertFeatureStep(robot, "part", 1, newDraft);
+
+    expect(result.ok).toBe(true);
+    expect(replayFeaturesMock).toHaveBeenCalledWith([boxFeature, shellFeature, newDraft]);
+  });
+
+  it("returns a readable error for an out-of-range afterIndex, without calling the executor", async () => {
+    replayFeaturesMock.mockClear();
+    const robot = makeRobot([boxFeature]);
+    const result = await insertFeatureStep(robot, "part", 5, boxFeature);
+    expect(result.ok).toBe(false);
+    expect(replayFeaturesMock).not.toHaveBeenCalled();
+  });
+
+  it("returns a real rebuild-error message instead of throwing when the new step's own picks don't resolve", async () => {
+    replayFeaturesMock.mockImplementation(() => Promise.reject(new Error("cad executor: step 1 (draft) failed to rebuild: no face found near [8, 8, 8]")));
+    const robot = makeRobot([boxFeature, shellFeature]);
+    const newDraft: Feature = { operation: "draft", picks: [{ source_step: 0, local_index: 0, point: [8, 8, 8] }], angle_deg: 3 };
+
+    const result = await insertFeatureStep(robot, "part", 0, newDraft);
+
+    expect(result).toEqual({ ok: false, message: "cad executor: step 1 (draft) failed to rebuild: no face found near [8, 8, 8]" });
   });
 });

@@ -1154,7 +1154,7 @@ try {
   check(
     "Build mode: an Extrude with an embedded fillet records both steps in the Construction history panel, in order",
     await waitForCondition(
-      `(() => { const rows = [...document.querySelectorAll('.feature-tree-list li')].map((r) => r.textContent); ` +
+      `(() => { const rows = [...document.querySelectorAll('.feature-tree-list .feature-tree-step')].map((r) => r.textContent); ` +
         `return rows[0] === 'Extrude (0.05×0.05m rect, depth 0.02m)' && rows[1] === 'Fillet/Chamfer (1 fillet)'; })()`,
       5000,
     ),
@@ -1164,7 +1164,7 @@ try {
   check(
     "Build mode: a plain box Fillet/Chamfered in place gets a synthesized Box root plus its own fillet_chamfer step",
     await waitForCondition(
-      `(() => { const rows = [...document.querySelectorAll('.feature-tree-list li')].map((r) => r.textContent); ` +
+      `(() => { const rows = [...document.querySelectorAll('.feature-tree-list .feature-tree-step')].map((r) => r.textContent); ` +
         `return rows[0] === 'Box (0.05 × 0.05 × 0.05 m)' && rows[1] === 'Fillet/Chamfer (1 fillet, 1 chamfer)'; })()`,
       5000,
     ),
@@ -1174,7 +1174,7 @@ try {
   check(
     "Build mode: a plain box Shelled in place gets a synthesized Box root plus its own shell step",
     await waitForCondition(
-      `(() => { const rows = [...document.querySelectorAll('.feature-tree-list li')].map((r) => r.textContent); ` +
+      `(() => { const rows = [...document.querySelectorAll('.feature-tree-list .feature-tree-step')].map((r) => r.textContent); ` +
         `return rows[0] === 'Box (0.05 × 0.05 × 0.05 m)' && rows[1] === 'Shell (1 face, thickness 0.005m)'; })()`,
       5000,
     ),
@@ -1184,7 +1184,7 @@ try {
   check(
     "Build mode: a plain box Drafted in place gets a synthesized Box root plus its own draft step",
     await waitForCondition(
-      `(() => { const rows = [...document.querySelectorAll('.feature-tree-list li')].map((r) => r.textContent); ` +
+      `(() => { const rows = [...document.querySelectorAll('.feature-tree-list .feature-tree-step')].map((r) => r.textContent); ` +
         `return rows[0] === 'Box (0.05 × 0.05 × 0.05 m)' && rows[1] === 'Draft (1 face, angle 5°)'; })()`,
       5000,
     ),
@@ -1227,7 +1227,7 @@ try {
   check(
     "Build mode: the shell step survives the edit, recorded right after the resized root",
     await waitForCondition(
-      "(() => { const rows = [...document.querySelectorAll('.feature-tree-list li')].map((r) => r.textContent); " +
+      "(() => { const rows = [...document.querySelectorAll('.feature-tree-list .feature-tree-step')].map((r) => r.textContent); " +
         "return rows[0]?.includes('0.09') && rows[1] === 'Shell (1 face, thickness 0.005m)'; })()",
       2000,
     ),
@@ -1257,6 +1257,141 @@ try {
   check(
     "Build mode: Cancel from the broken edit returns to the Construction history view with the document unchanged (still 0.09, not 0.08)",
     await waitForCondition("document.querySelector('.feature-tree-list')?.textContent?.includes('0.09') ?? false", 5000),
+  );
+
+  // -- robot builder: reorder/insert/delete a step (CAD Kernel Phase 7.4) --
+  // Re-selects draftBoxId (features: [Box, Draft] from the Phase 6 section
+  // above, untouched by Phase 7.3's own edits to shellBoxId). Every new
+  // step inserted here is a Cut -- deliberately, not a Shell/Draft/
+  // Fillet-Chamfer: a cut carries no picks at all (executor.ts's own
+  // applyCut always returns resolvedPicks: []), and set-difference is
+  // commutative regardless of overlap (A-B-C == A-C-B always) -- so two
+  // inserted cuts can be freely reordered or deleted with zero risk of
+  // tripping the same real geometric-tolerance limitation the edit-any-step
+  // section above deliberately exercises. That failure mode belongs to
+  // picks, not to reordering itself -- this section proves the reorder/
+  // insert/delete MECHANISM independent of it. See
+  // docs/decisions/cad-kernel-reorder-insert-delete.md.
+  // Reuses draftBoxId (already a cad_mesh body with its own recorded
+  // history, [Box, Draft] -- the Construction history panel, and the
+  // Insert-step mechanism it hosts, only ever shows for a cad_mesh body;
+  // a bare, never-yet-modified primitive has no features/panel at all).
+  // Every step inserted here is a Cut -- deliberately, not another Shell/
+  // Draft/Fillet-Chamfer: a cut carries no picks at all (executor.ts's own
+  // applyCut always returns resolvedPicks: []), so it can never depend on
+  // (or be broken by) whatever picks the existing Draft step already has,
+  // and set-difference is commutative regardless of overlap (A-B-C ==
+  // A-C-B always) -- so the two cuts inserted here can be freely reordered
+  // or deleted with zero risk of tripping the same real geometric-
+  // tolerance limitation the edit-any-step section above deliberately
+  // exercises for picks. That failure mode belongs to picks, not to
+  // reordering itself -- this section proves the reorder/insert/delete
+  // MECHANISM independent of it. See
+  // docs/decisions/cad-kernel-reorder-insert-delete.md.
+  await page.evalClickText(".hierarchy-row", `/^${draftBoxId}$/`);
+  check(
+    "Build mode: draftBoxId still has its own 2-step history (Box, Draft) from the Phase 6 section",
+    await waitForCondition(
+      "(() => { const rows = [...document.querySelectorAll('.feature-tree-list .feature-tree-step')].map((r) => r.textContent); " +
+        "return rows.length === 2 && rows[0]?.startsWith('Box') && rows[1]?.startsWith('Draft'); })()",
+      5000,
+    ),
+  );
+
+  // Insert an Extruded Cut right after the Draft step (afterIndex 1 --
+  // append at the tail). Every row has its own identically-labeled
+  // "+ Insert step" button, so this targets the SECOND li's own toggle
+  // (Draft's row) directly by position rather than by (ambiguous) text --
+  // same default profile/depth/position already proven safe on an
+  // identical fresh box in the standalone Extruded Cut section above.
+  await page.evalClick(".feature-tree-list li:nth-child(2) .feature-tree-insert-toggle");
+  await page.evalClickText(".feature-tree-insert-menu button", "/^Extruded Cut$/");
+  check(
+    "Build mode: choosing Extruded Cut from the Insert menu opens it in insert mode",
+    await waitForCondition("document.querySelector('.builder-inspector h4')?.textContent === 'Insert Cut (Extruded)'", 5000),
+  );
+  // Replaying [Box, Draft, Cut] through the executor -- a real taper plus a
+  // real boolean subtraction -- takes noticeably longer than a single fresh
+  // op's own preview, and this machine's own desktop load varies enough
+  // (confirmed via repeated timed diagnostics -- genuinely just slow under
+  // contention, never actually stuck) to need the same generous 45s budget
+  // extrude.test.ts's own cold-WASM-load check above uses.
+  check(
+    "Build mode: the default cutting tool computes a real preview through the warm CAD worker (Apply enables)",
+    await waitForCondition("!document.querySelector('.cad-extrude-creator .inspector-actions button.primary')?.disabled", 45000),
+  );
+  await page.evalClickText(".inspector-actions button", "/^Apply$/");
+  check(
+    "Build mode: Apply splices the new Cut step in right after Draft -- 3 rows now, in order",
+    await waitForCondition(
+      "(() => { const rows = [...document.querySelectorAll('.feature-tree-list .feature-tree-step')].map((r) => r.textContent); " +
+        "return rows.length === 3 && rows[0]?.startsWith('Box') && rows[1]?.startsWith('Draft') && rows[2] === 'Cut (Extruded)'; })()",
+      // Apply's own commit calls insertFeatureStep, which replays the whole
+      // chain again -- same real cost as the preview above.
+      45000,
+    ),
+  );
+
+  // Insert a Revolved Cut after the Extruded Cut (afterIndex 2 -- append
+  // again -- now the THIRD li's own toggle). Same default offset/angle/
+  // radius already proven safe on an identical fresh box in the
+  // standalone Revolved Cut section above.
+  await page.evalClick(".feature-tree-list li:nth-child(3) .feature-tree-insert-toggle");
+  await page.evalClickText(".feature-tree-insert-menu button", "/^Revolved Cut$/");
+  check(
+    "Build mode: choosing Revolved Cut from the Insert menu opens it in insert mode",
+    await waitForCondition("document.querySelector('.builder-inspector h4')?.textContent === 'Insert Cut (Revolved)'", 5000),
+  );
+  check(
+    "Build mode: the default revolved cutting tool computes a real preview (Apply enables)",
+    // Replaying [Box, Draft, Cut, Cut] on this machine's own real, variable
+    // desktop load (confirmed via repeated timed diagnostics: genuinely
+    // just slow under contention, never actually stuck) -- same generous
+    // 45s budget extrude.test.ts's own cold-WASM-load check above uses,
+    // not a special case just for this step.
+    await waitForCondition("!document.querySelector('.cad-extrude-creator .inspector-actions button.primary')?.disabled", 45000),
+  );
+  await page.evalClickText(".inspector-actions button", "/^Apply$/");
+  check(
+    "Build mode: Apply splices the second new Cut step in at the tail -- 4 rows now, in order",
+    await waitForCondition(
+      "(() => { const rows = [...document.querySelectorAll('.feature-tree-list .feature-tree-step')].map((r) => r.textContent); " +
+        "return rows.length === 4 && rows[2] === 'Cut (Extruded)' && rows[3] === 'Cut (Revolved)'; })()",
+      45000,
+    ),
+  );
+
+  // Move: swap the two cuts (step 3 up, into step 2's own slot).
+  await page.evalClick('[aria-label="move step 3 up"]');
+  check(
+    "Build mode: moving the Revolved Cut step up swaps it with the Extruded Cut step -- order now Revolved, then Extruded",
+    await waitForCondition(
+      "(() => { const rows = [...document.querySelectorAll('.feature-tree-list .feature-tree-step')].map((r) => r.textContent); " +
+        "return rows.length === 4 && rows[2] === 'Cut (Revolved)' && rows[3] === 'Cut (Extruded)'; })()",
+      // Same reasoning as the insert checks above -- a 4-feature replay.
+      45000,
+    ),
+  );
+
+  // Delete: the (now-last) Extruded Cut step, two-click confirm -- same
+  // confirm/commit convention as Body Inspector's own Delete body.
+  await page.evalClick('[aria-label="delete step 3"]');
+  check(
+    "Build mode: a first click on Delete asks for confirmation, without deleting yet",
+    await waitForCondition(
+      "document.querySelector('[aria-label=\"delete step 3\"]')?.textContent === 'delete?' && " +
+        "document.querySelectorAll('.feature-tree-list li').length === 4",
+      3000,
+    ),
+  );
+  await page.evalClick('[aria-label="delete step 3"]');
+  check(
+    "Build mode: the second confirming click deletes the step -- 3 rows now, Revolved Cut last",
+    await waitForCondition(
+      "(() => { const rows = [...document.querySelectorAll('.feature-tree-list .feature-tree-step')].map((r) => r.textContent); " +
+        "return rows.length === 3 && rows[2] === 'Cut (Revolved)'; })()",
+      45000,
+    ),
   );
 
   await page.clickText(".mode-toggle button", "/^Simulate$/");

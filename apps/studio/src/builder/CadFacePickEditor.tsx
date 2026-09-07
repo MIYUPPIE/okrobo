@@ -64,6 +64,22 @@ export interface CadFacePickEditorProps {
     allFeatures: Feature[];
     onApply: (nextFeature: Feature) => void;
   };
+  /** CAD Kernel Phase 7.4 (reorder/insert/delete): when set, this editor
+   * inserts a BRAND-NEW shell/draft step right after `afterIndex` of
+   * `allFeatures`, rather than replacing an existing one -- no `feature`
+   * to seed `valueDraft` from (falls back to `defaultValue`, same as
+   * fresh create-mode), the faces to pick from are replayed from
+   * `allFeatures.slice(0, afterIndex + 1)` (the state right AFTER the
+   * insertion point -- what the new step will actually operate on), the
+   * live preview replays the WHOLE chain with the new step spliced in,
+   * and Apply calls `onApply` with the freshly built Feature. Mutually
+   * exclusive with `editing`. See
+   * docs/decisions/cad-kernel-reorder-insert-delete.md. */
+  inserting?: {
+    afterIndex: number;
+    allFeatures: Feature[];
+    onApply: (newFeature: Feature) => void;
+  };
 }
 
 function valueOf(feature: Extract<Feature, { operation: "shell" } | { operation: "draft" }>): number {
@@ -87,11 +103,24 @@ export function CadFacePickEditor({
   onFacePicksChange,
   onFaceOverlayChange,
   editing,
+  inserting,
 }: CadFacePickEditorProps) {
   const targetBody = robot.bodies.find((b) => b.id === targetBodyId);
-  const shape = useMemo(() => (editing ? null : shapeFromGeometry(targetBody?.visual ?? targetBody?.collision)), [targetBody, editing]);
+  const shape = useMemo(() => (editing || inserting ? null : shapeFromGeometry(targetBody?.visual ?? targetBody?.collision)), [targetBody, !!editing, !!inserting]);
   const [valueDraft, setValueDraft] = useState(() => (editing ? String(valueOf(editing.feature)) : defaultValue));
 
+  // Depends on editing/inserting's own STABLE inner fields, never the
+  // wrapper object itself -- see CadFilletChamferEditor.tsx's own doc on
+  // exactly this, a real bug found (and fixed here too) via
+  // studio-e2e-check.mjs: BuilderPanel constructs `editing`/`inserting`
+  // fresh, inline, on every render, so depending on the wrapper directly
+  // re-fires this effect (restarting the debounce) on every parent
+  // re-render, including the one this same effect's own onPreviewChange
+  // call below triggers -- a self-sustaining loop that only rarely lets
+  // status settle on "ready" long enough to observe once a preview takes
+  // more than a trivial fraction of a second (insert mode's own
+  // multi-step replay, always). See
+  // docs/decisions/cad-kernel-reorder-insert-delete.md.
   const { status, error, mesh } = useCadPreview(() => {
     const value = validateValue(valueDraft);
     if (!value.ok) return value;
@@ -100,10 +129,15 @@ export function CadFacePickEditor({
       const nextFeatures = editing.allFeatures.map((f, i) => (i === editing.stepIndex ? nextFeature : f));
       return { ok: true, call: () => replayFeatures(nextFeatures).then((r) => r.mesh) };
     }
+    if (inserting) {
+      const nextFeature = buildFeature(cadPicksFromFacePicks(facePicks, inserting.afterIndex), value.value);
+      const nextFeatures = [...inserting.allFeatures.slice(0, inserting.afterIndex + 1), nextFeature, ...inserting.allFeatures.slice(inserting.afterIndex + 1)];
+      return { ok: true, call: () => replayFeatures(nextFeatures).then((r) => r.mesh) };
+    }
     if (!shape) return { ok: false, message: "" };
     return { ok: true, call: () => computeMesh(shape, facePicks, value.value) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shape, facePicks, valueDraft, editing]);
+  }, [shape, facePicks, valueDraft, editing?.feature, editing?.stepIndex, editing?.allFeatures, inserting?.afterIndex, inserting?.allFeatures]);
 
   useEffect(() => {
     if (!targetBody) return;
@@ -120,10 +154,11 @@ export function CadFacePickEditor({
   // off `shape` with no picks involved, and never needs to be cleared.
   const facesPreview = useCadPreview<FacePreview>(() => {
     if (editing) return { ok: true, call: () => previewFacesAtStep(editing.allFeatures, editing.stepIndex) };
+    if (inserting) return { ok: true, call: () => previewFacesAtStep(inserting.allFeatures, inserting.afterIndex + 1) };
     if (!shape) return { ok: false, message: "" };
     return { ok: true, call: () => previewFaces(shape) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shape, editing]);
+  }, [shape, editing?.allFeatures, editing?.stepIndex, inserting?.allFeatures, inserting?.afterIndex]);
 
   useEffect(() => {
     if (!targetBody) return;
@@ -147,13 +182,17 @@ export function CadFacePickEditor({
       editing.onApply(buildFeature(cadPicksFromFacePicks(facePicks, editing.feature.picks[0]?.source_step ?? 0), value.value));
       return;
     }
+    if (inserting) {
+      inserting.onApply(buildFeature(cadPicksFromFacePicks(facePicks, inserting.afterIndex), value.value));
+      return;
+    }
     const feature = buildFeature(cadPicksFromFacePicks(facePicks, 0), value.value);
     onApply(replaceBodyGeometry(robot, targetBodyId, mesh, [feature]));
   };
 
   if (!targetBody) return null;
 
-  if (!editing && !shape) {
+  if (!editing && !inserting && !shape) {
     return (
       <div className="body-inspector cad-extrude-creator">
         <h4>{title}</h4>

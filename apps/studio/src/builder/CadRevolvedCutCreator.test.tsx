@@ -167,4 +167,71 @@ describe("CadRevolvedCutCreator", () => {
       expect(onApply).not.toHaveBeenCalled();
     });
   });
+
+  // CAD Kernel Phase 7.4 (reorder/insert/delete).
+  describe("inserting", () => {
+    const rootFeature = { operation: "box" as const, size: [0.1, 0.1, 0.1] as [number, number, number] };
+    const insertedFeature = {
+      operation: "cut" as const,
+      tool: { operation: "revolve" as const, profile: { type: "circle" as const, radius: 0.01 }, offset: 0.03, angle_deg: 360 },
+      position: [0, 0, 0] as [number, number, number],
+    };
+
+    it("shows the Insert title, seeded from the default draft, not any existing feature", () => {
+      render(
+        <CadRevolvedCutCreator
+          robot={makeRobot()}
+          targetBodyId="chassis"
+          onApply={() => {}}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          inserting={{ afterIndex: 0, allFeatures: [rootFeature], onApply: () => {} }}
+        />,
+      );
+      expect(screen.getByText("Insert Cut (Revolved)")).toBeInTheDocument();
+      expect(screen.getByLabelText("cad radius")).toHaveValue(0.01);
+      expect(screen.getByLabelText("cad offset")).toHaveValue(0.03);
+      expect(screen.getByLabelText("cad angle")).toHaveValue(360);
+    });
+
+    it("previews the whole chain via replayFeatures with the new step spliced in after afterIndex, not cut() against the target's own current mesh", async () => {
+      vi.useFakeTimers();
+      replayFeaturesMock.mockResolvedValue({ mesh: cutMesh, steps: [] });
+      render(
+        <CadRevolvedCutCreator
+          robot={makeRobot()}
+          targetBodyId="chassis"
+          onApply={() => {}}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          inserting={{ afterIndex: 0, allFeatures: [rootFeature], onApply: () => {} }}
+        />,
+      );
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      expect(replayFeaturesMock).toHaveBeenCalledWith([rootFeature, insertedFeature]);
+      expect(cutMock).not.toHaveBeenCalled();
+    });
+
+    it("Apply calls inserting.onApply with the freshly built Feature, not replaceBodyGeometry", async () => {
+      vi.useFakeTimers();
+      replayFeaturesMock.mockResolvedValue({ mesh: cutMesh, steps: [] });
+      const insertApply = vi.fn();
+      const onApply = vi.fn();
+      render(
+        <CadRevolvedCutCreator
+          robot={makeRobot()}
+          targetBodyId="chassis"
+          onApply={onApply}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          inserting={{ afterIndex: 0, allFeatures: [rootFeature], onApply: insertApply }}
+        />,
+      );
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+      expect(insertApply).toHaveBeenCalledWith(insertedFeature);
+      expect(onApply).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -261,4 +261,60 @@ describe("CadFacePickEditor", () => {
       expect(onApply).not.toHaveBeenCalled();
     });
   });
+
+  // CAD Kernel Phase 7.4 (reorder/insert/delete).
+  describe("inserting", () => {
+    const rootFeature: Feature = { operation: "box", size: [0.1, 0.06, 0.04] };
+    const insertedFeature: Feature = { operation: "shell", picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] }], thickness: 0.005 };
+
+    it("seeds valueDraft from defaultValue, not any existing feature", () => {
+      renderShellEditor({ inserting: { afterIndex: 0, allFeatures: [rootFeature], onApply: () => {} } });
+      expect(screen.getByLabelText("shell thickness")).toHaveValue(0.005);
+    });
+
+    it("shows a Faces section from previewFacesAtStep(allFeatures, afterIndex + 1), the state right AFTER the insertion point", async () => {
+      vi.useFakeTimers();
+      previewFacesAtStepMock.mockResolvedValue(faces);
+      replayFeaturesMock.mockResolvedValue({ mesh: resultMesh, steps: [] });
+      renderShellEditor({
+        facePicks: [[0.05, 0, 0]],
+        inserting: { afterIndex: 0, allFeatures: [rootFeature], onApply: () => {} },
+      });
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      expect(previewFacesAtStepMock).toHaveBeenCalledWith([rootFeature], 1);
+      expect(previewFacesMock).not.toHaveBeenCalled();
+      expect(screen.getByText("Face 1")).toBeInTheDocument();
+    });
+
+    it("previews the whole chain via replayFeatures with the new step spliced in after afterIndex, not computeMesh against a reconstructed shape", async () => {
+      vi.useFakeTimers();
+      previewFacesAtStepMock.mockResolvedValue(faces);
+      replayFeaturesMock.mockResolvedValue({ mesh: resultMesh, steps: [] });
+      const { computeMesh } = renderShellEditor({
+        facePicks: [[0.05, 0, 0]],
+        inserting: { afterIndex: 0, allFeatures: [rootFeature], onApply: () => {} },
+      });
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      expect(replayFeaturesMock).toHaveBeenCalledWith([rootFeature, insertedFeature]);
+      expect(computeMesh).not.toHaveBeenCalled();
+    });
+
+    it("Apply calls inserting.onApply with the freshly built Feature, not replaceBodyGeometry", async () => {
+      vi.useFakeTimers();
+      previewFacesAtStepMock.mockResolvedValue(faces);
+      replayFeaturesMock.mockResolvedValue({ mesh: resultMesh, steps: [] });
+      const insertApply = vi.fn();
+      const onApply = vi.fn();
+      renderShellEditor({
+        facePicks: [[0.05, 0, 0]],
+        onApply,
+        inserting: { afterIndex: 0, allFeatures: [rootFeature], onApply: insertApply },
+      });
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+      expect(insertApply).toHaveBeenCalledWith(insertedFeature);
+      expect(onApply).not.toHaveBeenCalled();
+    });
+  });
 });

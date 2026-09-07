@@ -304,4 +304,84 @@ describe("CadFilletChamferEditor", () => {
       expect(onApply).not.toHaveBeenCalled();
     });
   });
+
+  // CAD Kernel Phase 7.4 (reorder/insert/delete).
+  describe("inserting", () => {
+    const rootFeature = { operation: "box" as const, size: [0.1, 0.06, 0.04] as [number, number, number] };
+    const insertedFeature = {
+      operation: "fillet_chamfer" as const,
+      picks: [{ source_step: 0, local_index: 0, point: [5, 0, 0] as [number, number, number], operation: "fillet" as const, value: 0.005 }],
+    };
+
+    it("shows an Edges section from previewEdgesAtStep(allFeatures, afterIndex + 1), the state right AFTER the insertion point", async () => {
+      vi.useFakeTimers();
+      previewEdgesAtStepMock.mockResolvedValue(edges);
+      replayFeaturesMock.mockResolvedValue({ mesh: resultMesh, steps: [] });
+      render(
+        <CadFilletChamferEditor
+          robot={makeRobot({ type: "cad_mesh", vertices: [], faces: [] })}
+          targetBodyId="chassis"
+          onApply={() => {}}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          edgePicks={[{ point: [5, 0, 0], operation: "fillet", value: "0.005" }]}
+          onEdgePicksChange={() => {}}
+          onEdgeOverlayChange={() => {}}
+          inserting={{ afterIndex: 0, allFeatures: [rootFeature], onApply: () => {} }}
+        />,
+      );
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      expect(previewEdgesAtStepMock).toHaveBeenCalledWith([rootFeature], 1);
+      expect(previewEdgesMock).not.toHaveBeenCalled();
+      expect(screen.getByText("Edge 1")).toBeInTheDocument();
+    });
+
+    it("previews the whole chain via replayFeatures with the new step spliced in after afterIndex, not fillet() against a reconstructed shape", async () => {
+      vi.useFakeTimers();
+      previewEdgesAtStepMock.mockResolvedValue(edges);
+      replayFeaturesMock.mockResolvedValue({ mesh: resultMesh, steps: [] });
+      render(
+        <CadFilletChamferEditor
+          robot={makeRobot({ type: "cad_mesh", vertices: [], faces: [] })}
+          targetBodyId="chassis"
+          onApply={() => {}}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          edgePicks={[{ point: [5, 0, 0], operation: "fillet", value: "0.005" }]}
+          onEdgePicksChange={() => {}}
+          onEdgeOverlayChange={() => {}}
+          inserting={{ afterIndex: 0, allFeatures: [rootFeature], onApply: () => {} }}
+        />,
+      );
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      expect(replayFeaturesMock).toHaveBeenCalledWith([rootFeature, insertedFeature]);
+      expect(filletMock).not.toHaveBeenCalled();
+    });
+
+    it("Apply calls inserting.onApply with the freshly built Feature, not replaceBodyGeometry", async () => {
+      vi.useFakeTimers();
+      previewEdgesAtStepMock.mockResolvedValue(edges);
+      replayFeaturesMock.mockResolvedValue({ mesh: resultMesh, steps: [] });
+      const insertApply = vi.fn();
+      const onApply = vi.fn();
+      render(
+        <CadFilletChamferEditor
+          robot={makeRobot({ type: "cad_mesh", vertices: [], faces: [] })}
+          targetBodyId="chassis"
+          onApply={onApply}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          edgePicks={[{ point: [5, 0, 0], operation: "fillet", value: "0.005" }]}
+          onEdgePicksChange={() => {}}
+          onEdgeOverlayChange={() => {}}
+          inserting={{ afterIndex: 0, allFeatures: [rootFeature], onApply: insertApply }}
+        />,
+      );
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+      expect(insertApply).toHaveBeenCalledWith(insertedFeature);
+      expect(onApply).not.toHaveBeenCalled();
+    });
+  });
 });

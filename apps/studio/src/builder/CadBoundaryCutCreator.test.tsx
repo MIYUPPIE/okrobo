@@ -182,4 +182,76 @@ describe("CadBoundaryCutCreator", () => {
       expect(onApply).not.toHaveBeenCalled();
     });
   });
+
+  // CAD Kernel Phase 7.4 (reorder/insert/delete).
+  describe("inserting", () => {
+    const rootFeature = { operation: "box" as const, size: [0.1, 0.1, 0.1] as [number, number, number] };
+    const insertedFeature = {
+      operation: "cut" as const,
+      tool: {
+        operation: "loft" as const,
+        start_profile: { type: "circle" as const, radius: 0.02 },
+        end_profile: { type: "circle" as const, radius: 0.01 },
+        height: 0.2,
+      },
+      position: [0, 0, 0] as [number, number, number],
+    };
+
+    it("shows the Insert title, seeded from the default draft, not any existing feature", () => {
+      render(
+        <CadBoundaryCutCreator
+          robot={makeRobot()}
+          targetBodyId="chassis"
+          onApply={() => {}}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          inserting={{ afterIndex: 0, allFeatures: [rootFeature], onApply: () => {} }}
+        />,
+      );
+      expect(screen.getByText("Insert Cut (Boundary)")).toBeInTheDocument();
+      expect(screen.getByLabelText("cad start radius")).toHaveValue(0.02);
+      expect(screen.getByLabelText("cad end radius")).toHaveValue(0.01);
+      expect(screen.getByLabelText("cad loft height")).toHaveValue(0.2);
+    });
+
+    it("previews the whole chain via replayFeatures with the new step spliced in after afterIndex, not cut() against the target's own current mesh", async () => {
+      vi.useFakeTimers();
+      replayFeaturesMock.mockResolvedValue({ mesh: cutMesh, steps: [] });
+      render(
+        <CadBoundaryCutCreator
+          robot={makeRobot()}
+          targetBodyId="chassis"
+          onApply={() => {}}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          inserting={{ afterIndex: 0, allFeatures: [rootFeature], onApply: () => {} }}
+        />,
+      );
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      expect(replayFeaturesMock).toHaveBeenCalledWith([rootFeature, insertedFeature]);
+      expect(cutMock).not.toHaveBeenCalled();
+    });
+
+    it("Apply calls inserting.onApply with the freshly built Feature, not replaceBodyGeometry", async () => {
+      vi.useFakeTimers();
+      replayFeaturesMock.mockResolvedValue({ mesh: cutMesh, steps: [] });
+      const insertApply = vi.fn();
+      const onApply = vi.fn();
+      render(
+        <CadBoundaryCutCreator
+          robot={makeRobot()}
+          targetBodyId="chassis"
+          onApply={onApply}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          inserting={{ afterIndex: 0, allFeatures: [rootFeature], onApply: insertApply }}
+        />,
+      );
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+      expect(insertApply).toHaveBeenCalledWith(insertedFeature);
+      expect(onApply).not.toHaveBeenCalled();
+    });
+  });
 });

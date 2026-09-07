@@ -25,9 +25,10 @@ import { CadRevolveCreator } from "./CadRevolveCreator";
 import { CadRevolvedCutCreator } from "./CadRevolvedCutCreator";
 import { exportRobotDef } from "./exportRobot";
 import type { FilletPickDraft } from "./filletPicks";
+import type { FeatureInsertKind } from "./FeatureTreeList";
 import { HierarchyList } from "./HierarchyList";
 import { JointCreator } from "./JointCreator";
-import { recomputeFeatureStep } from "./recomputeFeatureStep";
+import { deleteFeatureStep, insertFeatureStep, moveFeatureStep, recomputeFeatureStep } from "./recomputeFeatureStep";
 import { makeDefaultBody, nextBodyId, removeBody } from "./robotEdits";
 import { SensorPanel } from "./SensorPanel";
 import { TestViewport } from "./TestViewport";
@@ -126,6 +127,18 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   const [editingStep, setEditingStep] = useState<{ bodyId: string; index: number } | null>(null);
   const [recomputing, setRecomputing] = useState(false);
   const [recomputeError, setRecomputeError] = useState<string | null>(null);
+  // Robot Builder CAD Kernel Phase 7.4 (reorder/insert/delete): which body
+  // is getting a brand-new step spliced in right after `afterIndex`, of
+  // which `kind` -- mutually exclusive with editingStep (opening one always
+  // closes the other), same dispatch priority, and shares recomputing/
+  // recomputeError's own "attempt through the executor, revert to the
+  // editor with a real message on failure" posture. Reorder and delete
+  // don't open a separate editor at all (they act directly from the
+  // Construction history list still visible in BodyInspector), so they get
+  // their own separate pending/error pair instead.
+  const [insertingStep, setInsertingStep] = useState<{ bodyId: string; afterIndex: number; kind: FeatureInsertKind } | null>(null);
+  const [treeActionPending, setTreeActionPending] = useState(false);
+  const [treeActionError, setTreeActionError] = useState<string | null>(null);
   // Bumped only on a gizmo commit (not on the inspector's own Apply), so
   // BodyInspector resyncs its draft when a drag moved the body it's
   // showing -- mirrors App.tsx's existing worldEpoch convention.
@@ -153,10 +166,12 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   const selectedBody = selectedBodyId ? (robot.bodies.find((b) => b.id === selectedBodyId) ?? null) : null;
   const isCutTool = CUT_TOOLS.has(builderTool);
   const isTargetPickTool = TARGET_PICK_TOOLS.has(builderTool);
-  const isCadTool = isTargetPickTool || builderTool === "extrude" || builderTool === "revolve" || builderTool === "boundary" || editingStep !== null;
+  const isCadTool = isTargetPickTool || builderTool === "extrude" || builderTool === "revolve" || builderTool === "boundary" || editingStep !== null || insertingStep !== null;
   // Robot Builder CAD Kernel Phase 7.3 (edit-any-step).
   const editingBody = editingStep ? robot.bodies.find((b) => b.id === editingStep.bodyId) : undefined;
   const editingFeature = editingStep ? editingBody?.features?.[editingStep.index] : undefined;
+  // Robot Builder CAD Kernel Phase 7.4 (reorder/insert/delete).
+  const insertingBody = insertingStep ? robot.bodies.find((b) => b.id === insertingStep.bodyId) : undefined;
 
   useEffect(() => {
     if (builderMode !== "test") return;
@@ -449,6 +464,89 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
     });
   };
 
+  /** CAD Kernel Phase 7.4 (reorder/insert/delete): opens the insert-mode
+   * editor for a brand-new `kind` step, spliced in right after `afterIndex`
+   * -- same lifted-pick-state reset as handleSelectFeatureStep, minus any
+   * seeding (there's no existing feature to seed from). */
+  const handleInsertStep = (bodyId: string, afterIndex: number, kind: FeatureInsertKind) => {
+    setInsertingStep({ bodyId, afterIndex, kind });
+    setRecomputeError(null);
+    setRecomputing(false);
+    setCadPreview(null);
+    setEdgeOverlay(null);
+    setFaceOverlay(null);
+    setFilletPicks([]);
+    setFacePicks([]);
+  };
+
+  const cancelInsertingStep = () => {
+    setInsertingStep(null);
+    setRecomputing(false);
+    setRecomputeError(null);
+    clearCadPickState();
+  };
+
+  /** The single onApply every insert-mode editor calls -- splices the
+   * freshly built Feature in and recomputes the whole chain, same
+   * attempt-then-revert-with-a-real-message posture as handleRecomputeStep. */
+  const handleInsertNewFeature = (newFeature: Feature) => {
+    if (!insertingStep) return;
+    setRecomputing(true);
+    setRecomputeError(null);
+    insertFeatureStep(robot, insertingStep.bodyId, insertingStep.afterIndex, newFeature).then((result) => {
+      setRecomputing(false);
+      if (!result.ok) {
+        setRecomputeError(result.message);
+        return;
+      }
+      onChange(result.robot);
+      setInsertingStep(null);
+      clearCadPickState();
+    });
+  };
+
+  /** CAD Kernel Phase 7.4: delete and reorder act directly from the
+   * Construction history list, with no separate editor panel -- so they
+   * get their own pending/error pair (treeActionPending/treeActionError)
+   * rather than reusing recomputing/recomputeError, which are scoped to
+   * whichever editingStep/insertingStep panel is currently open (neither is,
+   * during a plain delete/reorder click). */
+  const handleDeleteFeatureStep = (bodyId: string, index: number) => {
+    setTreeActionPending(true);
+    setTreeActionError(null);
+    deleteFeatureStep(robot, bodyId, index).then((result) => {
+      setTreeActionPending(false);
+      if (!result.ok) {
+        setTreeActionError(result.message);
+        return;
+      }
+      onChange(result.robot);
+    });
+  };
+
+  const handleMoveFeatureStep = (bodyId: string, index: number, direction: "up" | "down") => {
+    setTreeActionPending(true);
+    setTreeActionError(null);
+    moveFeatureStep(robot, bodyId, index, direction).then((result) => {
+      setTreeActionPending(false);
+      if (!result.ok) {
+        setTreeActionError(result.message);
+        return;
+      }
+      onChange(result.robot);
+    });
+  };
+
+  /** Clears a stale tree-action error from a previously-viewed body when
+   * switching to a different one -- treeActionError lives here in
+   * BuilderPanel, not inside BodyInspector, so it would otherwise survive
+   * a body switch and misleadingly attach to the newly-selected body's own
+   * Construction history panel. */
+  const selectBody = (id: string | null) => {
+    setSelectedBodyId(id);
+    setTreeActionError(null);
+  };
+
   // Robot Builder Phase 6: mirrors App.tsx's own run()/stop() shape for the
   // Car/Arm/Drone pipeline -- abort-if-already-running, arm(), set status,
   // runProgram().then/.catch/.finally, zero every actuator on the way out
@@ -520,7 +618,7 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
         <HierarchyList
           robot={robot}
           selectedBodyId={builderTool === "add-joint" ? (jointDraft?.parentId ?? null) : isTargetPickTool ? pickTargetId : selectedBodyId}
-          onSelect={builderTool === "add-joint" ? handleJointPick : isTargetPickTool && pickTargetId === null ? handleTargetPick : setSelectedBodyId}
+          onSelect={builderTool === "add-joint" ? handleJointPick : isTargetPickTool && pickTargetId === null ? handleTargetPick : selectBody}
         />
         {builderMode === "edit" && (
           <button type="button" className="builder-add-body" onClick={addBody}>
@@ -534,13 +632,13 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
           <BuilderViewport
             robot={robot}
             selectedBodyId={selectedBodyId}
-            onSelectBody={setSelectedBodyId}
+            onSelectBody={selectBody}
             onTransformBody={transformBody}
             gizmoMode={gizmoMode}
             jointPick={builderTool === "add-joint" ? { parentId: jointDraft?.parentId ?? null, onPick: handleJointPick } : undefined}
             bodyPick={isTargetPickTool && pickTargetId === null ? { selectedId: null, onPick: handleTargetPick } : undefined}
             cadPreview={isCadTool ? cadPreview : null}
-            suppressedBodyId={isTargetPickTool ? pickTargetId : editingStep ? editingStep.bodyId : null}
+            suppressedBodyId={isTargetPickTool ? pickTargetId : editingStep ? editingStep.bodyId : insertingStep ? insertingStep.bodyId : null}
             edgeOverlay={isCadTool && edgeOverlay ? { ...edgeOverlay, pickedPoints: filletPicks.map((p) => p.point) } : null}
             faceOverlay={isCadTool && faceOverlay ? { ...faceOverlay, pickedPoints: facePicks } : null}
           />
@@ -885,6 +983,95 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
                 )}
               </>
             )
+          ) : insertingStep && insertingBody ? (
+            recomputing ? (
+              <div className="body-inspector cad-extrude-creator">
+                <h4>Recomputing…</h4>
+                <p className="cad-status">Rebuilding the whole chain -- this can take a moment.</p>
+              </div>
+            ) : (
+              <>
+                {recomputeError && <p className="cad-status error">Could not insert this step: {recomputeError}</p>}
+                {insertingStep.kind === "fillet_chamfer" ? (
+                  <CadFilletChamferEditor
+                    robot={robot}
+                    targetBodyId={insertingStep.bodyId}
+                    onApply={() => {}}
+                    onCancel={cancelInsertingStep}
+                    onPreviewChange={setCadPreview}
+                    edgePicks={filletPicks}
+                    onEdgePicksChange={setFilletPicks}
+                    onEdgeOverlayChange={setEdgeOverlay}
+                    inserting={{ afterIndex: insertingStep.afterIndex, allFeatures: insertingBody.features ?? [], onApply: handleInsertNewFeature }}
+                  />
+                ) : insertingStep.kind === "shell" ? (
+                  <CadFacePickEditor
+                    title="Insert Shell"
+                    valueLabel="Thickness (m)"
+                    ariaLabel="shell thickness"
+                    defaultValue="0.005"
+                    validateValue={shellValidate}
+                    computeMesh={shell}
+                    buildFeature={(picks: CadPick[], value: number): Feature => ({ operation: "shell", picks, thickness: value })}
+                    robot={robot}
+                    targetBodyId={insertingStep.bodyId}
+                    onApply={() => {}}
+                    onCancel={cancelInsertingStep}
+                    onPreviewChange={setCadPreview}
+                    facePicks={facePicks}
+                    onFacePicksChange={setFacePicks}
+                    onFaceOverlayChange={setFaceOverlay}
+                    inserting={{ afterIndex: insertingStep.afterIndex, allFeatures: insertingBody.features ?? [], onApply: handleInsertNewFeature }}
+                  />
+                ) : insertingStep.kind === "draft" ? (
+                  <CadFacePickEditor
+                    title="Insert Draft"
+                    valueLabel="Angle (°)"
+                    ariaLabel="draft angle"
+                    defaultValue="5"
+                    validateValue={draftValidate}
+                    computeMesh={draft}
+                    buildFeature={(picks: CadPick[], value: number): Feature => ({ operation: "draft", picks, angle_deg: value })}
+                    robot={robot}
+                    targetBodyId={insertingStep.bodyId}
+                    onApply={() => {}}
+                    onCancel={cancelInsertingStep}
+                    onPreviewChange={setCadPreview}
+                    facePicks={facePicks}
+                    onFacePicksChange={setFacePicks}
+                    onFaceOverlayChange={setFaceOverlay}
+                    inserting={{ afterIndex: insertingStep.afterIndex, allFeatures: insertingBody.features ?? [], onApply: handleInsertNewFeature }}
+                  />
+                ) : insertingStep.kind === "cut_extruded" ? (
+                  <CadExtrudedCutCreator
+                    robot={robot}
+                    targetBodyId={insertingStep.bodyId}
+                    onApply={() => {}}
+                    onCancel={cancelInsertingStep}
+                    onPreviewChange={setCadPreview}
+                    inserting={{ afterIndex: insertingStep.afterIndex, allFeatures: insertingBody.features ?? [], onApply: handleInsertNewFeature }}
+                  />
+                ) : insertingStep.kind === "cut_revolved" ? (
+                  <CadRevolvedCutCreator
+                    robot={robot}
+                    targetBodyId={insertingStep.bodyId}
+                    onApply={() => {}}
+                    onCancel={cancelInsertingStep}
+                    onPreviewChange={setCadPreview}
+                    inserting={{ afterIndex: insertingStep.afterIndex, allFeatures: insertingBody.features ?? [], onApply: handleInsertNewFeature }}
+                  />
+                ) : (
+                  <CadBoundaryCutCreator
+                    robot={robot}
+                    targetBodyId={insertingStep.bodyId}
+                    onApply={() => {}}
+                    onCancel={cancelInsertingStep}
+                    onPreviewChange={setCadPreview}
+                    inserting={{ afterIndex: insertingStep.afterIndex, allFeatures: insertingBody.features ?? [], onApply: handleInsertNewFeature }}
+                  />
+                )}
+              </>
+            )
           ) : builderTool === "extrude" ? (
             <CadExtrudeCreator
               robot={robot}
@@ -979,6 +1166,11 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
               onApply={onChange}
               onRequestDelete={deleteBody}
               onSelectFeatureStep={(index) => handleSelectFeatureStep(selectedBody.id, index)}
+              onMoveFeatureStep={(index, direction) => handleMoveFeatureStep(selectedBody.id, index, direction)}
+              onDeleteFeatureStep={(index) => handleDeleteFeatureStep(selectedBody.id, index)}
+              onInsertFeatureStep={(afterIndex, kind) => handleInsertStep(selectedBody.id, afterIndex, kind)}
+              featureActionPending={treeActionPending}
+              featureActionError={treeActionError}
             />
           ) : (
             <p className="builder-empty-inspector">

@@ -74,6 +74,13 @@ export interface CadBoundaryCutCreatorProps {
     allFeatures: Feature[];
     onApply: (nextFeature: Feature) => void;
   };
+  /** CAD Kernel Phase 7.4 (reorder/insert/delete): see
+   * CadExtrudedCutCreator's own doc -- identical insert-mode shape. */
+  inserting?: {
+    afterIndex: number;
+    allFeatures: Feature[];
+    onApply: (newFeature: Feature) => void;
+  };
 }
 
 function draftFromFeature(feature: Extract<Feature, { operation: "cut" }>): Draft {
@@ -116,7 +123,7 @@ function ProfileSection({ label, draft, onChange }: { label: string; draft: Prof
   );
 }
 
-export function CadBoundaryCutCreator({ robot, targetBodyId, onApply, onCancel, onPreviewChange, editing }: CadBoundaryCutCreatorProps) {
+export function CadBoundaryCutCreator({ robot, targetBodyId, onApply, onCancel, onPreviewChange, editing, inserting }: CadBoundaryCutCreatorProps) {
   const targetBody = robot.bodies.find((b) => b.id === targetBodyId);
   const targetMesh = useMemo(() => geometryToMesh(targetBody?.visual ?? targetBody?.collision), [targetBody]);
   const [draft, setDraft] = useState<Draft>(() => (editing ? draftFromFeature(editing.feature) : initialDraft));
@@ -130,10 +137,15 @@ export function CadBoundaryCutCreator({ robot, targetBodyId, onApply, onCancel, 
       const nextFeatures = editing.allFeatures.map((f, i) => (i === editing.stepIndex ? nextFeature : f));
       return { ok: true, call: () => replayFeatures(nextFeatures).then((r) => r.mesh) };
     }
+    if (inserting) {
+      const nextFeature: Feature = { operation: "cut", tool: { operation: "loft", start_profile: start, end_profile: end, height: loftHeight }, position };
+      const nextFeatures = [...inserting.allFeatures.slice(0, inserting.afterIndex + 1), nextFeature, ...inserting.allFeatures.slice(inserting.afterIndex + 1)];
+      return { ok: true, call: () => replayFeatures(nextFeatures).then((r) => r.mesh) };
+    }
     const call = () => cut({ targetMesh, tool: { operation: "loft", startProfile: start, endProfile: end, height: loftHeight }, position });
     return { ok: true, call };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.start, draft.end, draft.loftHeight, draft.x, draft.y, draft.z, targetMesh, editing]);
+  }, [draft.start, draft.end, draft.loftHeight, draft.x, draft.y, draft.z, targetMesh, editing?.stepIndex, editing?.allFeatures, inserting?.afterIndex, inserting?.allFeatures]);
 
   useEffect(() => {
     if (!targetBody) return;
@@ -157,6 +169,10 @@ export function CadBoundaryCutCreator({ robot, targetBodyId, onApply, onCancel, 
       editing.onApply(feature);
       return;
     }
+    if (inserting) {
+      inserting.onApply(feature);
+      return;
+    }
     onApply(replaceBodyGeometry(robot, targetBodyId, mesh, [feature]));
   };
 
@@ -164,7 +180,7 @@ export function CadBoundaryCutCreator({ robot, targetBodyId, onApply, onCancel, 
 
   return (
     <div className="body-inspector cad-extrude-creator">
-      <h4>{editing ? "Edit Cut (Boundary)" : "New CAD part (Boundary Cut)"}</h4>
+      <h4>{editing ? "Edit Cut (Boundary)" : inserting ? "Insert Cut (Boundary)" : "New CAD part (Boundary Cut)"}</h4>
       <p className="inspector-note">Cutting into {targetBody.name}</p>
 
       <ProfileSection label="Start" draft={draft.start} onChange={(start) => setDraft((d) => ({ ...d, start }))} />

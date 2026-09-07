@@ -1732,3 +1732,96 @@ unchanged. `npm run test` (675 passed across 64 files), `npm run typecheck`,
 pytest, TS vitest/typecheck/build, and the E2E checks run for real
 against a live dev server and headless Chrome) all green. No contract,
 Python, or C++ changes this phase.
+
+## CAD Kernel — Phase 7.4: Reorder/insert/delete (2026-09-07)
+
+The last Phase 7 sub-phase: every Construction history row can now move
+up/down, be permanently deleted (modifier rows only -- the root always
+stays feature 0), and any row (root included) can have a brand-new step
+inserted right after it, at any position, not just the tail. No contract
+change needed -- delete/move/insert are just operations on the existing
+`Feature[]` array (filter an index out, swap two adjacent entries, splice
+a new one in); this is the first CAD Kernel sub-phase since 7.1 that
+touches zero contract/Python/C++ code.
+
+`recomputeFeatureStep.ts`'s own Phase 7.3 shape (build a candidate
+`Feature[]`, call `replayFeatures` off the main thread, commit or report
+a real rebuild-error message) is now a shared `recomputeFeatures` core
+behind four thin callers: `recomputeFeatureStep` (replace, unchanged),
+`deleteFeatureStep` (refuses the root -- nothing to replay from, and a
+full CAD-history wipe is already the Body Inspector's own separate
+"change to box" escape hatch), `moveFeatureStep` (refuses moving the
+root, or moving anything INTO the root's own slot), and
+`insertFeatureStep` (splices a new feature in after `afterIndex`, 0
+through the current tail). Insert reuses Phase 7.3's own
+`previewEdgesAtStep`/`previewFacesAtStep` prefix-replay verbatim (called
+at `afterIndex + 1` -- the state right after the insertion point) -- no
+new executor code this phase.
+
+The 5 modifier creators/editors that can meaningfully become a new step
+(Fillet/Chamfer, the shared Shell/Draft editor, all 3 Cut creators) each
+grew a sibling `inserting?: {afterIndex, allFeatures, onApply}` prop next
+to Phase 7.3's own `editing` -- same shape minus the seed feature (a fresh
+default draft, same as create-mode), same "preview the WHOLE chain via
+replayFeatures, never an isolated op" principle. The 2 Boss root creators
+and CadPrimitiveRootEditor got no `inserting` prop -- a root is never
+insertable, only ever fixed at feature 0.
+
+New UI in `FeatureTreeList.tsx`: inline ↑/↓ and a two-click-confirm
+Delete per modifier row (mirroring Body Inspector's own "Delete body"
+convention exactly), and a "+ Insert step" button on every row that
+expands into a menu of the same six insertable kinds the toolbar's own
+standalone tools already use (Fillet/Chamfer, Shell, Draft, Extruded/
+Revolved/Boundary Cut) -- the same vocabulary, not a second one. Move/
+delete act directly from this list with no separate editor panel, so
+they got their own pending/error pair (`treeActionPending`/
+`treeActionError`) rather than reusing `editingStep`/`insertingStep`'s
+own -- cleared automatically when a different body is selected, so a
+stale error can never misleadingly linger on the wrong body's own panel.
+
+Every e2e check that proves reorder/insert/delete actually recomputes
+correctly uses Cut, deliberately, never Shell/Draft/Fillet-Chamfer: a cut
+carries no picks at all, and set-difference is commutative regardless of
+overlap (A-B-C == A-C-B, always) -- reordering or deleting a cut is
+mathematically guaranteed safe, isolating the check to the mechanism
+itself, independent of the real pick-tolerance limitation Phase 7.3's own
+edit-any-step section already found and documents (an edit or reorder
+that moves a picked face/edge along its own dependent axis will almost
+always break that specific pick -- a Shell/Draft/Fillet-Chamfer concern,
+not a reorder-mechanism one). See
+docs/decisions/cad-kernel-reorder-insert-delete.md.
+
+A real, latent bug caught by exactly this real-browser E2E (present since
+Phase 7.3, just never manifesting until now): all 5 modifier creator/
+editor components' own `useCadPreview` call depended on the WHOLE
+`editing`/`inserting` prop object, which `BuilderPanel.tsx` constructs
+fresh, inline, on every render -- so a successful preview's own
+`onPreviewChange` call (triggering one more parent render) reconstructed
+that object, re-fired the SAME effect, and restarted the debounce right
+as it would have gone "ready", forever. Fast single-op previews (Phase
+7.3's edit mode) still landed in that vanishing "ready" window often
+enough for a test's poll to usually catch it; insert mode's own longer
+multi-feature chains made it rare enough to reliably miss, surfacing as
+misleading, load-dependent timeouts no amount of timeout-bumping fixed.
+Root-caused via timed diagnostics (ruled out a genuine hang) and fixed
+everywhere at once: every `useCadPreview`-family dependency array now
+lists `editing`/`inserting`'s own STABLE inner fields (`.feature`,
+`.stepIndex`, `.allFeatures`, `.afterIndex`) instead of the wrapper
+object. Confirmed via two independent full E2E runs back to back, both
+green.
+
+Tests: `recomputeFeatureStep.test.ts` (+20, deleteFeatureStep/
+moveFeatureStep/insertFeatureStep), `FeatureTreeList.test.tsx` (+15,
+move/delete/insert UI), `BodyInspector.test.tsx` (+1, prop threading), 3
+new "inserting" cases in each of the 5 modifier creator/editor test files
+(+15), `BuilderPanel.test.tsx` (+10, the full insert-kind-menu dispatch
+and the delete/reorder wiring, including a test that switching bodies
+clears a stale tree-action error). New `studio-e2e-check.mjs` section:
+inserts an Extruded Cut then a Revolved Cut into an already-existing
+2-step body's own history (not appended via the old toolbar -- spliced
+via the tree), swaps their order, and deletes one with a two-click
+confirm, all through the real CAD worker. `npm run test` (726 passed
+across 64 files), `npm run typecheck`, `npm run build`, and the full
+`test-all.sh` gate all green. No contract, Python, or C++ changes this
+phase -- the CAD Kernel Phase 7 roadmap (data model, live-recompute
+executor, edit-any-step, reorder/insert/delete) is now complete.

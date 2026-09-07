@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Feature, RobotDef } from "../contracts/robotDef";
@@ -153,8 +153,16 @@ function makeCadCutCreatorStub(testId: string) {
     onApply: (next: RobotDef) => void;
     onCancel: () => void;
     editing?: { feature: unknown; stepIndex: number; allFeatures: unknown[]; onApply: (next: unknown) => void };
+    inserting?: { afterIndex: number; allFeatures: unknown[]; onApply: (next: unknown) => void };
   }) => (
-    <div data-testid={testId} data-target={props.targetBodyId} data-editing={props.editing ? "1" : ""} data-step-index={props.editing?.stepIndex ?? ""}>
+    <div
+      data-testid={testId}
+      data-target={props.targetBodyId}
+      data-editing={props.editing ? "1" : ""}
+      data-step-index={props.editing?.stepIndex ?? ""}
+      data-inserting={props.inserting ? "1" : ""}
+      data-after-index={props.inserting?.afterIndex ?? ""}
+    >
       <button
         onClick={() => {
           const cutGeometry = { type: "cad_mesh" as const, vertices: [0, 0, 0], faces: [0, 0, 0] };
@@ -170,6 +178,11 @@ function makeCadCutCreatorStub(testId: string) {
       {props.editing && (
         <button onClick={() => props.editing!.onApply({ operation: "fillet_chamfer", picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0], operation: "fillet", value: 0.01 }] })}>
           stub editing apply
+        </button>
+      )}
+      {props.inserting && (
+        <button onClick={() => props.inserting!.onApply({ operation: "fillet_chamfer", picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0], operation: "fillet", value: 0.01 }] })}>
+          stub inserting apply
         </button>
       )}
     </div>
@@ -196,8 +209,16 @@ vi.mock("./CadFacePickEditor", () => ({
     onCancel: () => void;
     robot: RobotDef;
     editing?: { feature: unknown; stepIndex: number; allFeatures: unknown[]; onApply: (next: unknown) => void };
+    inserting?: { afterIndex: number; allFeatures: unknown[]; onApply: (next: unknown) => void };
   }) => (
-    <div data-testid="cad-face-pick-editor-stub" data-title={props.title} data-target={props.targetBodyId} data-editing={props.editing ? "1" : ""}>
+    <div
+      data-testid="cad-face-pick-editor-stub"
+      data-title={props.title}
+      data-target={props.targetBodyId}
+      data-editing={props.editing ? "1" : ""}
+      data-inserting={props.inserting ? "1" : ""}
+      data-after-index={props.inserting?.afterIndex ?? ""}
+    >
       <button
         onClick={() => {
           const geometry = { type: "cad_mesh" as const, vertices: [0, 0, 0], faces: [0, 0, 0] };
@@ -211,6 +232,7 @@ vi.mock("./CadFacePickEditor", () => ({
       </button>
       <button onClick={props.onCancel}>stub cancel</button>
       {props.editing && <button onClick={() => props.editing!.onApply({ operation: "shell", picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] }], thickness: 0.01 })}>stub editing apply</button>}
+      {props.inserting && <button onClick={() => props.inserting!.onApply({ operation: "shell", picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] }], thickness: 0.01 })}>stub inserting apply</button>}
     </div>
   ),
 }));
@@ -245,8 +267,18 @@ vi.mock("./exportRobot", () => ({ exportRobotDef: vi.fn().mockResolvedValue(unde
 // tests only need to prove the WIRING (it's called with the right args,
 // and the result -- success or a real rebuild error -- is handled right).
 const recomputeFeatureStepMock = vi.fn();
+// CAD Kernel Phase 7.4 (reorder/insert/delete): same reasoning -- each
+// function's own real behavior is tested directly in
+// recomputeFeatureStep.test.ts; BuilderPanel's own tests only prove the
+// wiring.
+const deleteFeatureStepMock = vi.fn();
+const moveFeatureStepMock = vi.fn();
+const insertFeatureStepMock = vi.fn();
 vi.mock("./recomputeFeatureStep", () => ({
   recomputeFeatureStep: (...args: unknown[]) => recomputeFeatureStepMock(...args),
+  deleteFeatureStep: (...args: unknown[]) => deleteFeatureStepMock(...args),
+  moveFeatureStep: (...args: unknown[]) => moveFeatureStepMock(...args),
+  insertFeatureStep: (...args: unknown[]) => insertFeatureStepMock(...args),
 }));
 
 const identity = { position: [0, 0, 0] as [number, number, number], rotation_rpy: [0, 0, 0] as [number, number, number] };
@@ -997,6 +1029,222 @@ describe("BuilderPanel", () => {
       expect(screen.queryByTestId("cad-primitive-root-editor-stub")).not.toBeInTheDocument();
       expect(onChange).not.toHaveBeenCalled();
       expect(recomputeFeatureStepMock).not.toHaveBeenCalled();
+    });
+  });
+
+  function makeCadRobotWithFeatures(features: RobotDef["bodies"][number]["features"]): RobotDef {
+    return {
+      id: "r",
+      name: "My Robot",
+      description: "",
+      root_placement: identity,
+      bodies: [
+        {
+          id: "part",
+          name: "Part",
+          transform: identity,
+          mass: 0.05,
+          inertia: { ixx: 0.0001, iyy: 0.0001, izz: 0.0001 },
+          visual: { type: "cad_mesh", vertices: [0, 0, 0], faces: [0, 0, 0] },
+          collision: { type: "cad_mesh", vertices: [0, 0, 0], faces: [0, 0, 0] },
+          features,
+        },
+      ],
+      joints: [],
+      actuators: [],
+      sensors: [],
+    };
+  }
+
+  // CAD Kernel Phase 7.4 (reorder/insert/delete): the Construction history
+  // panel's own "+ Insert step" affordance opens a kind menu, then the
+  // matching creator/editor in insert mode -- Apply splices the new
+  // Feature in via insertFeatureStep (mocked here; its own real behavior is
+  // tested in recomputeFeatureStep.test.ts) and recomputes the whole chain.
+  // The insert-kind menu's own button labels deliberately match the
+  // toolbar's own tool button labels ("Shell", "Fillet/Chamfer", etc.) --
+  // scoped to the menu's own container so a query doesn't also match the
+  // (still-rendered, if disabled) toolbar button of the same name.
+  function chooseInsertKind(label: string): HTMLElement {
+    const menu = document.querySelector(".feature-tree-insert-menu");
+    if (!menu) throw new Error("insert menu is not open");
+    return within(menu as HTMLElement).getByText(label);
+  }
+
+  describe("Feature step inserting", () => {
+    it("choosing Fillet/Chamfer from the root row's Insert menu opens CadFilletChamferEditor in insert mode, after step 0", async () => {
+      const user = userEvent.setup();
+      const features: Feature[] = [{ operation: "box", size: [0.1, 0.06, 0.04] }];
+      render(<BuilderPanel robot={makeCadRobotWithFeatures(features)} onChange={() => {}} />);
+
+      await user.click(screen.getByText("+ Insert step"));
+      await user.click(chooseInsertKind("Fillet/Chamfer"));
+
+      const stub = screen.getByTestId("cad-fillet-chamfer-editor-stub");
+      expect(stub).toHaveAttribute("data-target", "part");
+      expect(stub).toHaveAttribute("data-inserting", "1");
+      expect(stub).toHaveAttribute("data-after-index", "0");
+      expect(screen.getByTestId("builder-viewport-stub")).toHaveAttribute("data-suppressed", "part");
+    });
+
+    it("choosing Shell opens CadFacePickEditor in insert mode with the 'Insert Shell' title", async () => {
+      const user = userEvent.setup();
+      const features: Feature[] = [{ operation: "box", size: [0.1, 0.06, 0.04] }];
+      render(<BuilderPanel robot={makeCadRobotWithFeatures(features)} onChange={() => {}} />);
+
+      await user.click(screen.getByText("+ Insert step"));
+      await user.click(chooseInsertKind("Shell"));
+
+      const stub = screen.getByTestId("cad-face-pick-editor-stub");
+      expect(stub).toHaveAttribute("data-title", "Insert Shell");
+      expect(stub).toHaveAttribute("data-inserting", "1");
+    });
+
+    it("choosing Extruded Cut opens CadExtrudedCutCreator in insert mode", async () => {
+      const user = userEvent.setup();
+      const features: Feature[] = [{ operation: "box", size: [0.1, 0.06, 0.04] }];
+      render(<BuilderPanel robot={makeCadRobotWithFeatures(features)} onChange={() => {}} />);
+
+      await user.click(screen.getByText("+ Insert step"));
+      await user.click(chooseInsertKind("Extruded Cut"));
+
+      expect(screen.getByTestId("cad-extruded-cut-creator-stub")).toHaveAttribute("data-inserting", "1");
+    });
+
+    it("Apply (success): insertFeatureStep resolving ok commits the result via onChange and closes the editor", async () => {
+      insertFeatureStepMock.mockReset();
+      const insertedFeature: Feature = {
+        operation: "fillet_chamfer",
+        picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0], operation: "fillet", value: 0.01 }],
+      };
+      const nextRobot = makeCadRobotWithFeatures([{ operation: "box", size: [0.1, 0.06, 0.04] }, insertedFeature]);
+      insertFeatureStepMock.mockResolvedValue({ ok: true, robot: nextRobot });
+      const onChange = vi.fn();
+      const user = userEvent.setup();
+      const features: Feature[] = [{ operation: "box", size: [0.1, 0.06, 0.04] }];
+      render(<BuilderPanel robot={makeCadRobotWithFeatures(features)} onChange={onChange} />);
+
+      await user.click(screen.getByText("+ Insert step"));
+      await user.click(chooseInsertKind("Fillet/Chamfer"));
+      await user.click(screen.getByRole("button", { name: "stub inserting apply" }));
+
+      expect(insertFeatureStepMock).toHaveBeenCalledWith(expect.objectContaining({ id: "r" }), "part", 0, insertedFeature);
+      await waitFor(() => expect(onChange).toHaveBeenCalledWith(nextRobot));
+      expect(screen.queryByTestId("cad-fillet-chamfer-editor-stub")).not.toBeInTheDocument();
+    });
+
+    it("Apply (failure): a real rebuild error shows a message and keeps the editor open, without calling onChange", async () => {
+      insertFeatureStepMock.mockReset();
+      insertFeatureStepMock.mockResolvedValue({ ok: false, message: "cad executor: step 1 (fillet_chamfer) failed to rebuild: no edge found near [0.05, 0, 0]" });
+      const onChange = vi.fn();
+      const user = userEvent.setup();
+      const features: Feature[] = [{ operation: "box", size: [0.1, 0.06, 0.04] }];
+      render(<BuilderPanel robot={makeCadRobotWithFeatures(features)} onChange={onChange} />);
+
+      await user.click(screen.getByText("+ Insert step"));
+      await user.click(chooseInsertKind("Fillet/Chamfer"));
+      await user.click(screen.getByRole("button", { name: "stub inserting apply" }));
+
+      await waitFor(() => expect(screen.getByText(/Could not insert this step/)).toBeInTheDocument());
+      expect(screen.getByText(/no edge found near/)).toBeInTheDocument();
+      expect(screen.getByTestId("cad-fillet-chamfer-editor-stub")).toBeInTheDocument();
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it("Cancel closes the editor without calling onChange or insertFeatureStep", async () => {
+      insertFeatureStepMock.mockReset();
+      const onChange = vi.fn();
+      const user = userEvent.setup();
+      const features: Feature[] = [{ operation: "box", size: [0.1, 0.06, 0.04] }];
+      render(<BuilderPanel robot={makeCadRobotWithFeatures(features)} onChange={onChange} />);
+
+      await user.click(screen.getByText("+ Insert step"));
+      await user.click(chooseInsertKind("Fillet/Chamfer"));
+      await user.click(screen.getByRole("button", { name: "stub cancel" }));
+
+      expect(screen.queryByTestId("cad-fillet-chamfer-editor-stub")).not.toBeInTheDocument();
+      expect(onChange).not.toHaveBeenCalled();
+      expect(insertFeatureStepMock).not.toHaveBeenCalled();
+    });
+  });
+
+  // CAD Kernel Phase 7.4 (reorder/insert/delete): move/delete act directly
+  // from the Construction history list, no separate editor panel involved
+  // -- routed to moveFeatureStep/deleteFeatureStep (mocked here; their own
+  // real behavior is tested in recomputeFeatureStep.test.ts).
+  describe("Feature step delete/reorder", () => {
+    const threeStepFeatures: Feature[] = [
+      { operation: "box", size: [0.1, 0.06, 0.04] },
+      { operation: "shell", picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] }], thickness: 0.005 },
+      { operation: "draft", picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] }], angle_deg: 5 },
+    ];
+
+    it("clicking move down on a step calls moveFeatureStep and commits the result via onChange", async () => {
+      moveFeatureStepMock.mockReset();
+      const nextRobot = makeCadRobotWithFeatures([threeStepFeatures[0], threeStepFeatures[2], threeStepFeatures[1]]);
+      moveFeatureStepMock.mockResolvedValue({ ok: true, robot: nextRobot });
+      const onChange = vi.fn();
+      const user = userEvent.setup();
+      render(<BuilderPanel robot={makeCadRobotWithFeatures(threeStepFeatures)} onChange={onChange} />);
+
+      await user.click(screen.getByLabelText("move step 1 down"));
+
+      expect(moveFeatureStepMock).toHaveBeenCalledWith(expect.objectContaining({ id: "r" }), "part", 1, "down");
+      await waitFor(() => expect(onChange).toHaveBeenCalledWith(nextRobot));
+    });
+
+    it("a failed move shows a rebuild-error message near the Construction history list, without calling onChange", async () => {
+      moveFeatureStepMock.mockReset();
+      moveFeatureStepMock.mockResolvedValue({ ok: false, message: "cad executor: step 2 (draft) failed to rebuild: no face found near [9, 9, 9]" });
+      const onChange = vi.fn();
+      const user = userEvent.setup();
+      render(<BuilderPanel robot={makeCadRobotWithFeatures(threeStepFeatures)} onChange={onChange} />);
+
+      await user.click(screen.getByLabelText("move step 1 down"));
+
+      await waitFor(() => expect(screen.getByText(/no face found near/)).toBeInTheDocument());
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it("deleting a step needs a second confirming click, then calls deleteFeatureStep and commits via onChange", async () => {
+      deleteFeatureStepMock.mockReset();
+      const nextRobot = makeCadRobotWithFeatures([threeStepFeatures[0], threeStepFeatures[2]]);
+      deleteFeatureStepMock.mockResolvedValue({ ok: true, robot: nextRobot });
+      const onChange = vi.fn();
+      const user = userEvent.setup();
+      render(<BuilderPanel robot={makeCadRobotWithFeatures(threeStepFeatures)} onChange={onChange} />);
+
+      await user.click(screen.getByLabelText("delete step 1"));
+      expect(deleteFeatureStepMock).not.toHaveBeenCalled();
+      await user.click(screen.getByLabelText("delete step 1"));
+
+      expect(deleteFeatureStepMock).toHaveBeenCalledWith(expect.objectContaining({ id: "r" }), "part", 1);
+      await waitFor(() => expect(onChange).toHaveBeenCalledWith(nextRobot));
+    });
+
+    it("switching to a different cad_mesh body clears a stale action error from the previous one", async () => {
+      moveFeatureStepMock.mockReset();
+      moveFeatureStepMock.mockResolvedValue({ ok: false, message: "cad executor: step 2 (draft) failed to rebuild: no face found near [9, 9, 9]" });
+      const user = userEvent.setup();
+      const robot = makeCadRobotWithFeatures(threeStepFeatures);
+      robot.bodies.push({
+        id: "other",
+        name: "Other",
+        transform: identity,
+        mass: 1,
+        inertia: { ixx: 0.01, iyy: 0.01, izz: 0.01 },
+        visual: { type: "cad_mesh", vertices: [0, 0, 0], faces: [0, 0, 0] },
+        collision: { type: "cad_mesh", vertices: [0, 0, 0], faces: [0, 0, 0] },
+        features: [{ operation: "box", size: [0.05, 0.05, 0.05] }],
+      });
+      render(<BuilderPanel robot={robot} onChange={() => {}} />);
+
+      await user.click(screen.getByLabelText("move step 1 down"));
+      await waitFor(() => expect(screen.getByText(/no face found near/)).toBeInTheDocument());
+
+      await user.click(screen.getByRole("button", { name: "Other" }));
+      expect(screen.getByText("Construction history")).toBeInTheDocument();
+      expect(screen.queryByText(/no face found near/)).not.toBeInTheDocument();
     });
   });
 });

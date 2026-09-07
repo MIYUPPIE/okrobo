@@ -148,4 +148,45 @@ describe("BodyInspector", () => {
     fireEvent.click(screen.getByRole("button", { name: /Box \(/ }));
     expect(onSelectFeatureStep).toHaveBeenCalledWith(0);
   });
+
+  // CAD Kernel Phase 7.4 (reorder/insert/delete): threaded straight
+  // through to FeatureTreeList's own onMoveStep/onDeleteStep/onInsertStep,
+  // plus the pending/error pair -- same forwarding posture as
+  // onSelectFeatureStep above.
+  it("threads onMoveFeatureStep/onDeleteFeatureStep/onInsertFeatureStep and the action pending/error pair through to the Construction history panel", () => {
+    const onMoveFeatureStep = vi.fn();
+    const onDeleteFeatureStep = vi.fn();
+    const onInsertFeatureStep = vi.fn();
+    const robot = makeRobot();
+    robot.bodies[0] = {
+      ...robot.bodies[0],
+      visual: { type: "cad_mesh", vertices: [0, 0, 0, 0.1, 0, 0, 0, 0.1, 0], faces: [0, 1, 2] },
+      features: [
+        { operation: "box", size: [0.1, 0.06, 0.04] },
+        { operation: "shell", picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] }], thickness: 0.005 },
+        { operation: "draft", picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] }], angle_deg: 5 },
+      ],
+    };
+    render(
+      <BodyInspector
+        robot={robot}
+        bodyId="chassis"
+        onApply={() => {}}
+        onRequestDelete={() => {}}
+        onMoveFeatureStep={onMoveFeatureStep}
+        onDeleteFeatureStep={onDeleteFeatureStep}
+        onInsertFeatureStep={onInsertFeatureStep}
+        featureActionError="cad executor: step 1 (shell) failed to rebuild: no face found near [1, 1, 1]"
+      />,
+    );
+    expect(screen.getByText(/no face found near/)).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("move step 1 down"));
+    expect(onMoveFeatureStep).toHaveBeenCalledWith(1, "down");
+    fireEvent.click(screen.getAllByText("+ Insert step")[0]);
+    fireEvent.click(screen.getByText("Draft"));
+    expect(onInsertFeatureStep).toHaveBeenCalledWith(0, "draft");
+    fireEvent.click(screen.getByLabelText("delete step 1"));
+    fireEvent.click(screen.getByLabelText("delete step 1"));
+    expect(onDeleteFeatureStep).toHaveBeenCalledWith(1);
+  });
 });

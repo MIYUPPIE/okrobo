@@ -52,6 +52,22 @@ export interface CadFilletChamferEditorProps {
     allFeatures: Feature[];
     onApply: (nextFeature: Feature) => void;
   };
+  /** CAD Kernel Phase 7.4 (reorder/insert/delete): when set, this editor
+   * inserts a BRAND-NEW fillet_chamfer step right after `afterIndex` of
+   * `allFeatures` (still on `targetBodyId`'s own body), rather than
+   * replacing an existing one -- there's no `feature` to seed from (edges
+   * default to none picked, same as fresh create-mode), the edges to pick
+   * from are replayed from `allFeatures.slice(0, afterIndex + 1)` (the
+   * state right AFTER the insertion point, i.e. what the new step will
+   * actually operate on), the live preview replays the WHOLE chain with
+   * the new step spliced in, and Apply calls `onApply` with the freshly
+   * built Feature instead of replaceBodyGeometry. Mutually exclusive with
+   * `editing`. See docs/decisions/cad-kernel-reorder-insert-delete.md. */
+  inserting?: {
+    afterIndex: number;
+    allFeatures: Feature[];
+    onApply: (newFeature: Feature) => void;
+  };
 }
 
 export function CadFilletChamferEditor({
@@ -64,10 +80,25 @@ export function CadFilletChamferEditor({
   onEdgePicksChange,
   onEdgeOverlayChange,
   editing,
+  inserting,
 }: CadFilletChamferEditorProps) {
   const targetBody = robot.bodies.find((b) => b.id === targetBodyId);
-  const shape = useMemo(() => (editing ? null : shapeFromGeometry(targetBody?.visual ?? targetBody?.collision)), [targetBody, editing]);
+  const shape = useMemo(() => (editing || inserting ? null : shapeFromGeometry(targetBody?.visual ?? targetBody?.collision)), [targetBody, !!editing, !!inserting]);
 
+  // Depends on editing/inserting's own STABLE inner fields (feature/
+  // stepIndex/allFeatures/afterIndex -- all ultimately derived from the
+  // stable `robot` prop, so referentially unchanged across an otherwise
+  // idle re-render), never the `editing`/`inserting` wrapper OBJECT itself:
+  // BuilderPanel constructs that wrapper fresh, inline, on every one of its
+  // own renders (an ordinary, harmless-looking prop literal), so depending
+  // on it directly would re-fire this effect -- and therefore restart the
+  // debounce/recompute -- on every parent render, including the one this
+  // same effect's own onPreviewChange call below triggers once it resolves.
+  // Verified for real via studio-e2e-check.mjs: that loop never lets
+  // status settle on "ready" for more than a rendered instant once a
+  // preview takes more than a trivial fraction of a second to compute
+  // (exactly insert mode's own multi-step replay) -- Apply would almost
+  // never observably enable. See docs/decisions/cad-kernel-reorder-insert-delete.md.
   const { status, error, mesh } = useCadPreview(() => {
     const picks = parseFilletPicks(edgePicks);
     if (!picks.ok) return picks;
@@ -76,10 +107,15 @@ export function CadFilletChamferEditor({
       const nextFeatures = editing.allFeatures.map((f, i) => (i === editing.stepIndex ? nextFeature : f));
       return { ok: true, call: () => replayFeatures(nextFeatures).then((r) => r.mesh) };
     }
+    if (inserting) {
+      const nextFeature = filletChamferFeatureFromPicks(picks.value, inserting.afterIndex);
+      const nextFeatures = [...inserting.allFeatures.slice(0, inserting.afterIndex + 1), nextFeature, ...inserting.allFeatures.slice(inserting.afterIndex + 1)];
+      return { ok: true, call: () => replayFeatures(nextFeatures).then((r) => r.mesh) };
+    }
     if (!shape) return { ok: false, message: "" };
     return { ok: true, call: () => fillet(shape, picks.value) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shape, edgePicks, editing]);
+  }, [shape, edgePicks, editing?.feature, editing?.stepIndex, editing?.allFeatures, inserting?.afterIndex, inserting?.allFeatures]);
 
   useEffect(() => {
     if (!targetBody) return;
@@ -97,10 +133,11 @@ export function CadFilletChamferEditor({
   // picks involved, and never needs to be cleared.
   const edgesPreview = useCadPreview<ShapeEdgeMesh>(() => {
     if (editing) return { ok: true, call: () => previewEdgesAtStep(editing.allFeatures, editing.stepIndex) };
+    if (inserting) return { ok: true, call: () => previewEdgesAtStep(inserting.allFeatures, inserting.afterIndex + 1) };
     if (!shape) return { ok: false, message: "" };
     return { ok: true, call: () => previewEdges(shape) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shape, editing]);
+  }, [shape, editing?.allFeatures, editing?.stepIndex, inserting?.allFeatures, inserting?.afterIndex]);
 
   useEffect(() => {
     if (!targetBody) return;
@@ -119,12 +156,16 @@ export function CadFilletChamferEditor({
       editing.onApply(filletChamferFeatureFromPicks(picks.value, editing.feature.picks[0]?.source_step ?? 0));
       return;
     }
+    if (inserting) {
+      inserting.onApply(filletChamferFeatureFromPicks(picks.value, inserting.afterIndex));
+      return;
+    }
     onApply(replaceBodyGeometry(robot, targetBodyId, mesh, [filletChamferFeatureFromPicks(picks.value, 0)]));
   };
 
   if (!targetBody) return null;
 
-  if (!editing && !shape) {
+  if (!editing && !inserting && !shape) {
     return (
       <div className="body-inspector cad-extrude-creator">
         <h4>Fillet / Chamfer</h4>
@@ -140,7 +181,7 @@ export function CadFilletChamferEditor({
 
   return (
     <div className="body-inspector cad-extrude-creator">
-      <h4>Fillet / Chamfer</h4>
+      <h4>{inserting ? "Insert Fillet / Chamfer" : "Fillet / Chamfer"}</h4>
       <p className="inspector-note">Editing {targetBody.name}</p>
 
       {edgesPreview.status === "ready" && <FilletEdgeList edgeMesh={edgesPreview.mesh} picks={edgePicks} onChange={onEdgePicksChange} />}

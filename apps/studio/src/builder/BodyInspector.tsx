@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Body, Geometry, Issue, RobotDef } from "../contracts/robotDef";
 import { validateRobotDef } from "../contracts/robotDef";
-import { FeatureTreeList } from "./FeatureTreeList";
+import { FeatureTreeList, type FeatureInsertKind } from "./FeatureTreeList";
 
 // The Build-mode properties panel for the selected body. Same pattern as
 // WorldPanel.tsx: a draft in friendly string form (so a half-typed number
@@ -159,9 +159,31 @@ export interface BodyInspectorProps {
    * forwards the click. Omitted entirely means the Construction history
    * panel stays read-only (matches FeatureTreeList's own default). */
   onSelectFeatureStep?: (index: number) => void;
+  /** CAD Kernel Phase 7.4 (reorder/insert/delete): threaded straight to
+   * FeatureTreeList's own onMoveStep/onDeleteStep/onInsertStep, same
+   * forwarding posture as onSelectFeatureStep -- BuilderPanel owns the
+   * actual recompute-and-commit logic. Omitting all three keeps the
+   * Construction history panel exactly as read-only/select-only as before
+   * this phase. */
+  onMoveFeatureStep?: (index: number, direction: "up" | "down") => void;
+  onDeleteFeatureStep?: (index: number) => void;
+  onInsertFeatureStep?: (afterIndex: number, kind: FeatureInsertKind) => void;
+  featureActionPending?: boolean;
+  featureActionError?: string | null;
 }
 
-export function BodyInspector({ robot, bodyId, onApply, onRequestDelete, onSelectFeatureStep }: BodyInspectorProps) {
+export function BodyInspector({
+  robot,
+  bodyId,
+  onApply,
+  onRequestDelete,
+  onSelectFeatureStep,
+  onMoveFeatureStep,
+  onDeleteFeatureStep,
+  onInsertFeatureStep,
+  featureActionPending,
+  featureActionError,
+}: BodyInspectorProps) {
   const body = robot.bodies.find((b) => b.id === bodyId);
   const [draft, setDraft] = useState<Draft>(() => toDraft(body ?? robot.bodies[0]));
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -266,7 +288,17 @@ export function BodyInspector({ robot, bodyId, onApply, onRequestDelete, onSelec
           </div>
         )}
 
-        {draft.geometryType === "cad_mesh" && <FeatureTreeList features={body.features} onSelectStep={onSelectFeatureStep} />}
+        {draft.geometryType === "cad_mesh" && (
+          <FeatureTreeList
+            features={body.features}
+            onSelectStep={onSelectFeatureStep}
+            onMoveStep={onMoveFeatureStep}
+            onDeleteStep={onDeleteFeatureStep}
+            onInsertStep={onInsertFeatureStep}
+            actionPending={featureActionPending}
+            actionError={featureActionError}
+          />
+        )}
 
         {draft.geometryType === "mesh" && (
           <div className="inspector-mesh-note">
