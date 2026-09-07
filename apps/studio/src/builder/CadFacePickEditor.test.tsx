@@ -11,8 +11,12 @@ import { CadFacePickEditor } from "./CadFacePickEditor";
 import { CAD_PREVIEW_DEBOUNCE_MS } from "./useCadPreview";
 
 const previewFacesMock = vi.fn();
+const previewFacesAtStepMock = vi.fn();
+const replayFeaturesMock = vi.fn();
 vi.mock("../cad/cadClient", () => ({
   previewFaces: (...args: unknown[]) => previewFacesMock(...args),
+  previewFacesAtStep: (...args: unknown[]) => previewFacesAtStepMock(...args),
+  replayFeatures: (...args: unknown[]) => replayFeaturesMock(...args),
 }));
 
 const faces = {
@@ -197,5 +201,64 @@ describe("CadFacePickEditor", () => {
     renderShellEditor({ robot: makeRobot({ type: "cylinder", radius: 0.03, length: 0.08 }) });
     await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
     expect(previewFacesMock).toHaveBeenCalledWith({ operation: "cylinder", radius: 0.03, length: 0.08 });
+  });
+
+  // CAD Kernel Phase 7.3 (edit-any-step).
+  describe("editing", () => {
+    const rootFeature: Feature = { operation: "box", size: [0.1, 0.06, 0.04] };
+    const editFeature: Feature = { operation: "shell", picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] }], thickness: 0.005 };
+
+    it("seeds valueDraft from the edited feature's own thickness", () => {
+      renderShellEditor({ editing: { feature: editFeature, stepIndex: 1, allFeatures: [rootFeature, editFeature], onApply: () => {} } });
+      expect(screen.getByLabelText("shell thickness")).toHaveValue(0.005);
+    });
+
+    it("shows a Faces section from previewFacesAtStep(allFeatures, stepIndex), not the target's own (already-baked) current geometry", async () => {
+      vi.useFakeTimers();
+      previewFacesAtStepMock.mockResolvedValue(faces);
+      replayFeaturesMock.mockResolvedValue({ mesh: resultMesh, steps: [] });
+      renderShellEditor({
+        facePicks: [[0.05, 0, 0]],
+        editing: { feature: editFeature, stepIndex: 1, allFeatures: [rootFeature, editFeature], onApply: () => {} },
+      });
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      expect(previewFacesAtStepMock).toHaveBeenCalledWith([rootFeature, editFeature], 1);
+      expect(previewFacesMock).not.toHaveBeenCalled();
+      expect(screen.getByText("Face 1")).toBeInTheDocument();
+    });
+
+    it("previews the whole chain via replayFeatures (this step's picks/value replaced), not computeMesh against a reconstructed shape", async () => {
+      vi.useFakeTimers();
+      previewFacesAtStepMock.mockResolvedValue(faces);
+      replayFeaturesMock.mockResolvedValue({ mesh: resultMesh, steps: [] });
+      const { computeMesh } = renderShellEditor({
+        facePicks: [[0.05, 0, 0]],
+        editing: { feature: editFeature, stepIndex: 1, allFeatures: [rootFeature, editFeature], onApply: () => {} },
+      });
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      expect(replayFeaturesMock).toHaveBeenCalledWith([
+        rootFeature,
+        { operation: "shell", picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] }], thickness: 0.005 },
+      ]);
+      expect(computeMesh).not.toHaveBeenCalled();
+    });
+
+    it("Apply calls editing.onApply with the freshly built Feature, not replaceBodyGeometry", async () => {
+      vi.useFakeTimers();
+      previewFacesAtStepMock.mockResolvedValue(faces);
+      replayFeaturesMock.mockResolvedValue({ mesh: resultMesh, steps: [] });
+      const editApply = vi.fn();
+      const onApply = vi.fn();
+      renderShellEditor({
+        facePicks: [[0.05, 0, 0]],
+        onApply,
+        editing: { feature: editFeature, stepIndex: 1, allFeatures: [rootFeature, editFeature], onApply: editApply },
+      });
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+      expect(editApply).toHaveBeenCalledWith(editFeature);
+      expect(onApply).not.toHaveBeenCalled();
+    });
   });
 });

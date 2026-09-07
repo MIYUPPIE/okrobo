@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Feature, RobotDef } from "../contracts/robotDef";
 import type { CadPreview } from "../cad/cadClient";
-import { cut } from "../cad/cadClient";
+import { cut, replayFeatures } from "../cad/cadClient";
 import { CadProfileDimensionFields, parseProfileDraft, positiveNumber, type ProfileDraft, type ProfileShape } from "./CadProfileFields";
 import { geometryToMesh } from "./geometryToMesh";
 import { replaceBodyGeometry } from "./robotEdits";
@@ -81,17 +81,50 @@ export interface CadRevolvedCutCreatorProps {
   onApply: (nextRobot: RobotDef) => void;
   onCancel: () => void;
   onPreviewChange: (preview: CadPreview | null) => void;
+  /** CAD Kernel Phase 7.3 (edit-any-step): see CadExtrudedCutCreator's own
+   * doc -- identical edit-mode shape. */
+  editing?: {
+    feature: Extract<Feature, { operation: "cut" }>;
+    stepIndex: number;
+    allFeatures: Feature[];
+    onApply: (nextFeature: Feature) => void;
+  };
 }
 
-export function CadRevolvedCutCreator({ robot, targetBodyId, onApply, onCancel, onPreviewChange }: CadRevolvedCutCreatorProps) {
+function draftFromFeature(feature: Extract<Feature, { operation: "cut" }>): Draft {
+  const tool = feature.tool;
+  const profile = tool.operation === "revolve" ? tool.profile : { type: "circle" as const, radius: 0.01 };
+  return {
+    profile:
+      profile.type === "rectangle"
+        ? { shape: "rectangle", width: String(profile.width), height: String(profile.height), radius: "0.01" }
+        : { shape: "circle", width: "0.02", height: "0.03", radius: String(profile.radius) },
+    offset: tool.operation === "revolve" ? String(tool.offset) : "0.03",
+    angleDeg: tool.operation === "revolve" ? String(tool.angle_deg) : "360",
+    x: String(feature.position[0]),
+    y: String(feature.position[1]),
+    z: String(feature.position[2]),
+  };
+}
+
+export function CadRevolvedCutCreator({ robot, targetBodyId, onApply, onCancel, onPreviewChange, editing }: CadRevolvedCutCreatorProps) {
   const targetBody = robot.bodies.find((b) => b.id === targetBodyId);
   const targetMesh = useMemo(() => geometryToMesh(targetBody?.visual ?? targetBody?.collision), [targetBody]);
-  const [draft, setDraft] = useState<Draft>(initialDraft);
+  const [draft, setDraft] = useState<Draft>(() => (editing ? draftFromFeature(editing.feature) : initialDraft));
   const setProfile = (profile: ProfileDraft) => setDraft((d) => ({ ...d, profile }));
 
   const { status, error, mesh } = useCadPreview(() => {
     const parsed = parseDraft(draft);
     if (!parsed.ok) return parsed;
+    if (editing) {
+      const nextFeature: Feature = {
+        operation: "cut",
+        tool: { operation: "revolve", profile: parsed.value.profile, offset: parsed.value.offset, angle_deg: parsed.value.angleDeg },
+        position: parsed.value.position,
+      };
+      const nextFeatures = editing.allFeatures.map((f, i) => (i === editing.stepIndex ? nextFeature : f));
+      return { ok: true, call: () => replayFeatures(nextFeatures).then((r) => r.mesh) };
+    }
     const call = () =>
       cut({
         targetMesh,
@@ -100,7 +133,7 @@ export function CadRevolvedCutCreator({ robot, targetBodyId, onApply, onCancel, 
       });
     return { ok: true, call };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.profile, draft.offset, draft.angleDeg, draft.x, draft.y, draft.z, targetMesh]);
+  }, [draft.profile, draft.offset, draft.angleDeg, draft.x, draft.y, draft.z, targetMesh, editing]);
 
   useEffect(() => {
     if (!targetBody) return;
@@ -120,6 +153,10 @@ export function CadRevolvedCutCreator({ robot, targetBodyId, onApply, onCancel, 
       tool: { operation: "revolve", profile: parsed.value.profile, offset: parsed.value.offset, angle_deg: parsed.value.angleDeg },
       position: parsed.value.position,
     };
+    if (editing) {
+      editing.onApply(feature);
+      return;
+    }
     onApply(replaceBodyGeometry(robot, targetBodyId, mesh, [feature]));
   };
 
@@ -127,7 +164,7 @@ export function CadRevolvedCutCreator({ robot, targetBodyId, onApply, onCancel, 
 
   return (
     <div className="body-inspector cad-extrude-creator">
-      <h4>New CAD part (Revolved Cut)</h4>
+      <h4>{editing ? "Edit Cut (Revolved)" : "New CAD part (Revolved Cut)"}</h4>
       <p className="inspector-note">Cutting into {targetBody.name}</p>
 
       <section className="inspector-section">

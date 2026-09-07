@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Body, Feature, RobotDef } from "../contracts/robotDef";
 import type { CadEdgeOverlay, CadPreview, ShapeEdgeMesh } from "../cad/cadClient";
-import { fillet, loft, previewEdges } from "../cad/cadClient";
-import { CadProfileDimensionFields, parseProfileDraft, positiveNumber, type ProfileDraft, type ProfileShape } from "./CadProfileFields";
+import { fillet, loft, previewEdges, replayFeatures } from "../cad/cadClient";
+import { CadProfileDimensionFields, parseProfileDraft, positiveNumber, profileDraftFrom, type ProfileDraft, type ProfileShape } from "./CadProfileFields";
 import { FilletEdgeList } from "./FilletEdgeList";
 import { filletChamferFeatureFromPicks, parseFilletPicks, type FilletPickDraft } from "./filletPicks";
 import { makeCadBody, nextBodyId } from "./robotEdits";
@@ -53,6 +53,15 @@ export interface CadBoundaryCreatorProps {
   edgePicks: FilletPickDraft[];
   onEdgePicksChange: (next: FilletPickDraft[]) => void;
   onEdgeOverlayChange: (overlay: CadEdgeOverlay | null) => void;
+  /** CAD Kernel Phase 7.3 (edit-any-step): see CadExtrudeCreator's own
+   * doc -- identical edit-mode shape. */
+  editing?: {
+    feature: Extract<Feature, { operation: "loft" }>;
+    stepIndex: number;
+    allFeatures: Feature[];
+    targetBodyId: string;
+    onApply: (nextFeature: Feature) => void;
+  };
 }
 
 /** Combines the Shape select with CadProfileDimensionFields into one
@@ -78,14 +87,23 @@ function ProfileSection({ label, draft, onChange }: { label: string; draft: Prof
   );
 }
 
-export function CadBoundaryCreator({ robot, near, onApply, onCancel, onPreviewChange, edgePicks, onEdgePicksChange, onEdgeOverlayChange }: CadBoundaryCreatorProps) {
+export function CadBoundaryCreator({ robot, near, onApply, onCancel, onPreviewChange, edgePicks, onEdgePicksChange, onEdgeOverlayChange, editing }: CadBoundaryCreatorProps) {
   const bodyId = useMemo(() => nextBodyId(robot), [robot]);
-  const [draft, setDraft] = useState<Draft>(initialDraft);
+  const [draft, setDraft] = useState<Draft>(() =>
+    editing
+      ? { start: profileDraftFrom(editing.feature.start_profile), end: profileDraftFrom(editing.feature.end_profile), loftHeight: String(editing.feature.height) }
+      : initialDraft,
+  );
 
   const { status, error, mesh } = useCadPreview(() => {
     const parsed = parseDraft(draft);
     if (!parsed.ok) return parsed;
     const { start, end, loftHeight } = parsed.value;
+    if (editing) {
+      const rootFeature: Feature = { operation: "loft", start_profile: start, end_profile: end, height: loftHeight };
+      const nextFeatures = editing.allFeatures.map((f, i) => (i === editing.stepIndex ? rootFeature : f));
+      return { ok: true, call: () => replayFeatures(nextFeatures).then((r) => r.mesh) };
+    }
     if (edgePicks.length === 0) {
       return { ok: true, call: () => loft({ startProfile: start, endProfile: end, height: loftHeight }) };
     }
@@ -94,24 +112,30 @@ export function CadBoundaryCreator({ robot, near, onApply, onCancel, onPreviewCh
     const shape = { operation: "loft" as const, startProfile: start, endProfile: end, height: loftHeight };
     return { ok: true, call: () => fillet(shape, picks.value) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.start, draft.end, draft.loftHeight, edgePicks]);
+  }, [draft.start, draft.end, draft.loftHeight, edgePicks, editing]);
 
   useEffect(() => {
     if (status === "ready" && mesh) {
-      const body = makeCadBody(bodyId, near, mesh, []);
-      onPreviewChange({ mesh, position: body.transform.position });
+      if (editing) {
+        const targetBody = robot.bodies.find((b) => b.id === editing.targetBodyId);
+        if (targetBody) onPreviewChange({ mesh, position: targetBody.transform.position, rotation: targetBody.transform.rotation_rpy });
+      } else {
+        const body = makeCadBody(bodyId, near, mesh, []);
+        onPreviewChange({ mesh, position: body.transform.position });
+      }
     } else if (status === "error") {
       onPreviewChange(null);
     }
-  }, [status, mesh, bodyId, near, onPreviewChange]);
+  }, [status, mesh, bodyId, near, onPreviewChange, editing, robot]);
 
   const edgesPreview = useCadPreview<ShapeEdgeMesh>(() => {
+    if (editing) return { ok: false, message: "" };
     const parsed = parseDraft(draft);
     if (!parsed.ok) return parsed;
     const shape = { operation: "loft" as const, startProfile: parsed.value.start, endProfile: parsed.value.end, height: parsed.value.loftHeight };
     return { ok: true, call: () => previewEdges(shape) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.start, draft.end, draft.loftHeight]);
+  }, [draft.start, draft.end, draft.loftHeight, editing]);
 
   useEffect(() => {
     if (edgesPreview.status === "ready" && edgesPreview.mesh) {
@@ -138,6 +162,10 @@ export function CadBoundaryCreator({ robot, near, onApply, onCancel, onPreviewCh
       end_profile: parsed.value.end,
       height: parsed.value.loftHeight,
     };
+    if (editing) {
+      editing.onApply(rootFeature);
+      return;
+    }
     const picks = parseFilletPicks(edgePicks);
     const features: Feature[] = picks.ok && picks.value.length > 0 ? [rootFeature, filletChamferFeatureFromPicks(picks.value, 0)] : [rootFeature];
     const body = makeCadBody(bodyId, near, mesh, features);
@@ -146,7 +174,7 @@ export function CadBoundaryCreator({ robot, near, onApply, onCancel, onPreviewCh
 
   return (
     <div className="body-inspector cad-extrude-creator">
-      <h4>New CAD part (Boundary)</h4>
+      <h4>{editing ? "Edit Boundary" : "New CAD part (Boundary)"}</h4>
 
       <ProfileSection label="Start" draft={draft.start} onChange={(start) => setDraft((d) => ({ ...d, start }))} />
       <ProfileSection label="End" draft={draft.end} onChange={(end) => setDraft((d) => ({ ...d, end }))} />
@@ -166,7 +194,7 @@ export function CadBoundaryCreator({ robot, near, onApply, onCancel, onPreviewCh
         </label>
       </section>
 
-      {edgesPreview.status === "ready" && <FilletEdgeList edgeMesh={edgesPreview.mesh} picks={edgePicks} onChange={onEdgePicksChange} />}
+      {!editing && edgesPreview.status === "ready" && <FilletEdgeList edgeMesh={edgesPreview.mesh} picks={edgePicks} onChange={onEdgePicksChange} />}
 
       {status === "loading" && <p className="cad-status">computing…</p>}
       {status === "error" && <p className="cad-status error">{error}</p>}

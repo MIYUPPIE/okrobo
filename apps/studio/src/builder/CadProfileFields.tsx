@@ -49,6 +49,20 @@ export function parseProfileDraft(draft: ProfileDraft, labelPrefix?: string): Pr
   return { ok: true, value: { type: "circle", radius: radius.value } };
 }
 
+/** The reverse of parseProfileDraft -- CAD Kernel Phase 7.3 (edit-any-step):
+ * seeds a fresh ProfileDraft from a stored Profile (a recorded Feature's own
+ * params), so an editor re-opened on an existing step shows its real
+ * current dimensions rather than always starting from initialDraft. The
+ * shape not currently in use gets a plain, harmless default (mirroring
+ * every creator's own initialDraft) -- switching the Shape dropdown after
+ * seeding needs SOME string there, never read until the user actually
+ * switches to it. */
+export function profileDraftFrom(profile: Profile): ProfileDraft {
+  return profile.type === "rectangle"
+    ? { shape: "rectangle", width: String(profile.width), height: String(profile.height), radius: "0.025" }
+    : { shape: "circle", width: "0.05", height: "0.05", radius: String(profile.radius) };
+}
+
 export interface CadProfileDimensionFieldsProps {
   /** aria-label prefix for the width/height/radius inputs, e.g. "cad" ->
    * "cad width"/"cad height"/"cad radius", or "cad start" -> "cad start

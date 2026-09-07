@@ -1190,6 +1190,75 @@ try {
     ),
   );
 
+  // -- robot builder: edit-any-step + live recompute (CAD Kernel Phase 7.3) --
+  // Re-selects shellBoxId (features: [Box, Shell] from the section above)
+  // and edits its own recorded box ROOT -- proving the whole chain (the
+  // shell step) replays on top of the edited size, through the real CAD
+  // worker, not just the isolated root. The shell step's own picked face
+  // was one of the box's own side faces (found empirically, right here:
+  // its recorded point sits on the -X face, at [-0.025, ~0, ~0], the box's
+  // own default 0.05m size halved) -- editing Size Y or Z (axes that
+  // face's own position doesn't depend on at all) leaves that pick fully
+  // intact, while editing Size X moves that exact face and reliably
+  // breaks it, even for a modest change: the match tolerance is a tiny
+  // fraction of the shape's own bounding-box diagonal (see kernel.ts's own
+  // toleranceFor), far smaller than any real resize along the SAME axis a
+  // pick lies on. See docs/decisions/cad-kernel-edit-any-step.md.
+  await page.evalClickText(".hierarchy-row", `/^${shellBoxId}$/`);
+  await page.evalClickText(".feature-tree-step", "/^Box \\(/");
+  check(
+    "Build mode: clicking the Box row opens its own editor, pre-filled with the current size",
+    await waitForCondition(
+      "document.querySelector('.builder-inspector h4')?.textContent === 'Edit Box' && " +
+        "document.querySelector('[aria-label=\"root size x\"]')?.value === '0.05'",
+      5000,
+    ),
+  );
+  await page.setInputValue('[aria-label="root size y"]', "0.09");
+  check(
+    "Build mode: editing an axis orthogonal to the shell's own picked face computes a real preview of the WHOLE chain (shell still applied) through the warm CAD worker",
+    await waitForCondition("!document.querySelector('.cad-extrude-creator .inspector-actions button.primary')?.disabled", 15000),
+  );
+  await page.evalClickText(".inspector-actions button", "/^Apply$/");
+  check(
+    "Build mode: Apply recomputes the whole chain and returns to the Construction history view",
+    await waitForCondition("document.querySelector('.feature-tree-list')?.textContent?.includes('0.09')", 10000),
+  );
+  check(
+    "Build mode: the shell step survives the edit, recorded right after the resized root",
+    await waitForCondition(
+      "(() => { const rows = [...document.querySelectorAll('.feature-tree-list li')].map((r) => r.textContent); " +
+        "return rows[0]?.includes('0.09') && rows[1] === 'Shell (1 face, thickness 0.005m)'; })()",
+      2000,
+    ),
+  );
+
+  // A real rebuild-error case: editing Size X moves the shell step's own
+  // picked face (the -X side, whose position is exactly `-sizeX/2`) far
+  // beyond the match tolerance -- even this modest a change (0.05 -> 0.08)
+  // is already enough. Surfaces through the same generic error-message
+  // path every other opaque CAD failure already does -- no crash, no
+  // silent wrong result.
+  await page.evalClickText(".feature-tree-step", "/^Box \\(/");
+  check(
+    "Build mode: re-opening the Box row shows its own (already-edited) current size",
+    await waitForCondition("document.querySelector('[aria-label=\"root size y\"]')?.value === '0.09'", 5000),
+  );
+  await page.setInputValue('[aria-label="root size x"]', "0.08");
+  check(
+    "Build mode: editing the SAME axis a downstream pick lies on surfaces a real rebuild-error message, not a crash",
+    await waitForCondition(
+      "document.querySelector('.cad-status.error')?.textContent?.includes('face') && " +
+        "document.querySelector('.cad-extrude-creator .inspector-actions button.primary')?.disabled",
+      15000,
+    ),
+  );
+  await page.evalClickText(".inspector-actions button", "/^Cancel$/");
+  check(
+    "Build mode: Cancel from the broken edit returns to the Construction history view with the document unchanged (still 0.09, not 0.08)",
+    await waitForCondition("document.querySelector('.feature-tree-list')?.textContent?.includes('0.09') ?? false", 5000),
+  );
+
   await page.clickText(".mode-toggle button", "/^Simulate$/");
   const backToSimulate = await waitForCondition(
     "!!document.querySelector('.sidebar') && !!document.querySelector('.viewport-3d canvas')",

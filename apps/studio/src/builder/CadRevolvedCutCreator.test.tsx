@@ -6,8 +6,10 @@ import { CadRevolvedCutCreator } from "./CadRevolvedCutCreator";
 import { CAD_PREVIEW_DEBOUNCE_MS } from "./useCadPreview";
 
 const cutMock = vi.fn();
+const replayFeaturesMock = vi.fn();
 vi.mock("../cad/cadClient", () => ({
   cut: (...args: unknown[]) => cutMock(...args),
+  replayFeatures: (...args: unknown[]) => replayFeaturesMock(...args),
 }));
 
 beforeEach(() => cutMock.mockReset());
@@ -97,5 +99,72 @@ describe("CadRevolvedCutCreator", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onApply).not.toHaveBeenCalled();
+  });
+
+  // CAD Kernel Phase 7.3 (edit-any-step).
+  describe("editing", () => {
+    const editFeature = {
+      operation: "cut" as const,
+      tool: { operation: "revolve" as const, profile: { type: "circle" as const, radius: 0.02 }, offset: 0.04, angle_deg: 180 },
+      position: [0, 0, 0] as [number, number, number],
+    };
+    const rootFeature = { operation: "box" as const, size: [0.1, 0.1, 0.1] as [number, number, number] };
+
+    it("seeds the form from the edited feature's own tool/position", () => {
+      render(
+        <CadRevolvedCutCreator
+          robot={makeRobot()}
+          targetBodyId="chassis"
+          onApply={() => {}}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          editing={{ feature: editFeature, stepIndex: 1, allFeatures: [rootFeature, editFeature], onApply: () => {} }}
+        />,
+      );
+      expect(screen.getByText("Edit Cut (Revolved)")).toBeInTheDocument();
+      expect(screen.getByLabelText("cad radius")).toHaveValue(0.02);
+      expect(screen.getByLabelText("cad offset")).toHaveValue(0.04);
+      expect(screen.getByLabelText("cad angle")).toHaveValue(180);
+    });
+
+    it("previews the whole chain via replayFeatures, not cut() against the target's own current mesh", async () => {
+      vi.useFakeTimers();
+      replayFeaturesMock.mockResolvedValue({ mesh: cutMesh, steps: [] });
+      render(
+        <CadRevolvedCutCreator
+          robot={makeRobot()}
+          targetBodyId="chassis"
+          onApply={() => {}}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          editing={{ feature: editFeature, stepIndex: 1, allFeatures: [rootFeature, editFeature], onApply: () => {} }}
+        />,
+      );
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      expect(replayFeaturesMock).toHaveBeenCalledWith([rootFeature, editFeature]);
+      expect(cutMock).not.toHaveBeenCalled();
+    });
+
+    it("Apply calls editing.onApply with the freshly parsed Feature, not replaceBodyGeometry", async () => {
+      vi.useFakeTimers();
+      replayFeaturesMock.mockResolvedValue({ mesh: cutMesh, steps: [] });
+      const editApply = vi.fn();
+      const onApply = vi.fn();
+      render(
+        <CadRevolvedCutCreator
+          robot={makeRobot()}
+          targetBodyId="chassis"
+          onApply={onApply}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          editing={{ feature: editFeature, stepIndex: 1, allFeatures: [rootFeature, editFeature], onApply: editApply }}
+        />,
+      );
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+      expect(editApply).toHaveBeenCalledWith(editFeature);
+      expect(onApply).not.toHaveBeenCalled();
+    });
   });
 });

@@ -10,9 +10,13 @@ import { CAD_PREVIEW_DEBOUNCE_MS } from "./useCadPreview";
 
 const previewEdgesMock = vi.fn();
 const filletMock = vi.fn();
+const previewEdgesAtStepMock = vi.fn();
+const replayFeaturesMock = vi.fn();
 vi.mock("../cad/cadClient", () => ({
   previewEdges: (...args: unknown[]) => previewEdgesMock(...args),
   fillet: (...args: unknown[]) => filletMock(...args),
+  previewEdgesAtStep: (...args: unknown[]) => previewEdgesAtStepMock(...args),
+  replayFeatures: (...args: unknown[]) => replayFeaturesMock(...args),
 }));
 
 const edges = { lines: [0, 0, 0, 10, 0, 0], edgeGroups: [{ start: 0, count: 2, edgeId: 1 }] };
@@ -216,5 +220,88 @@ describe("CadFilletChamferEditor", () => {
       />,
     );
     expect(container).toBeEmptyDOMElement();
+  });
+
+  // CAD Kernel Phase 7.3 (edit-any-step).
+  describe("editing", () => {
+    const rootFeature = { operation: "box" as const, size: [0.1, 0.06, 0.04] as [number, number, number] };
+    const editFeature = {
+      operation: "fillet_chamfer" as const,
+      picks: [{ source_step: 0, local_index: 0, point: [5, 0, 0] as [number, number, number], operation: "fillet" as const, value: 0.005 }],
+    };
+
+    it("shows an Edges section from previewEdgesAtStep(allFeatures, stepIndex), not the target's own (already-baked) current geometry", async () => {
+      vi.useFakeTimers();
+      previewEdgesAtStepMock.mockResolvedValue(edges);
+      replayFeaturesMock.mockResolvedValue({ mesh: resultMesh, steps: [] });
+      render(
+        <CadFilletChamferEditor
+          robot={makeRobot({ type: "cad_mesh", vertices: [], faces: [] })}
+          targetBodyId="chassis"
+          onApply={() => {}}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          edgePicks={[{ point: [5, 0, 0], operation: "fillet", value: "0.005" }]}
+          onEdgePicksChange={() => {}}
+          onEdgeOverlayChange={() => {}}
+          editing={{ feature: editFeature, stepIndex: 1, allFeatures: [rootFeature, editFeature], onApply: () => {} }}
+        />,
+      );
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      expect(previewEdgesAtStepMock).toHaveBeenCalledWith([rootFeature, editFeature], 1);
+      expect(previewEdgesMock).not.toHaveBeenCalled();
+      expect(screen.getByText("Edge 1")).toBeInTheDocument();
+    });
+
+    it("previews the whole chain via replayFeatures (this step's picks replaced), not fillet() against a reconstructed shape", async () => {
+      vi.useFakeTimers();
+      previewEdgesAtStepMock.mockResolvedValue(edges);
+      replayFeaturesMock.mockResolvedValue({ mesh: resultMesh, steps: [] });
+      render(
+        <CadFilletChamferEditor
+          robot={makeRobot({ type: "cad_mesh", vertices: [], faces: [] })}
+          targetBodyId="chassis"
+          onApply={() => {}}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          edgePicks={[{ point: [5, 0, 0], operation: "fillet", value: "0.01" }]}
+          onEdgePicksChange={() => {}}
+          onEdgeOverlayChange={() => {}}
+          editing={{ feature: editFeature, stepIndex: 1, allFeatures: [rootFeature, editFeature], onApply: () => {} }}
+        />,
+      );
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      expect(replayFeaturesMock).toHaveBeenCalledWith([
+        rootFeature,
+        { operation: "fillet_chamfer", picks: [{ source_step: 0, local_index: 0, point: [5, 0, 0], operation: "fillet", value: 0.01 }] },
+      ]);
+      expect(filletMock).not.toHaveBeenCalled();
+    });
+
+    it("Apply calls editing.onApply with the freshly parsed Feature, not replaceBodyGeometry", async () => {
+      vi.useFakeTimers();
+      previewEdgesAtStepMock.mockResolvedValue(edges);
+      replayFeaturesMock.mockResolvedValue({ mesh: resultMesh, steps: [] });
+      const editApply = vi.fn();
+      const onApply = vi.fn();
+      render(
+        <CadFilletChamferEditor
+          robot={makeRobot({ type: "cad_mesh", vertices: [], faces: [] })}
+          targetBodyId="chassis"
+          onApply={onApply}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          edgePicks={[{ point: [5, 0, 0], operation: "fillet", value: "0.005" }]}
+          onEdgePicksChange={() => {}}
+          onEdgeOverlayChange={() => {}}
+          editing={{ feature: editFeature, stepIndex: 1, allFeatures: [rootFeature, editFeature], onApply: editApply }}
+        />,
+      );
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+      expect(editApply).toHaveBeenCalledWith(editFeature);
+      expect(onApply).not.toHaveBeenCalled();
+    });
   });
 });

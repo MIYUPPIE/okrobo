@@ -9,8 +9,11 @@
 import { wrap, type Remote } from "comlink";
 import type { CadMesh, CutTool, FacePick, FacePreview, FilletBaseShape, FilletPick, Profile, ShapeEdgeMesh, ShapeMesh } from "./kernel.ts";
 import type { CadWorkerApi } from "./worker.ts";
+import type { ReplayResult } from "./executor.ts";
+import type { Feature } from "../contracts/robotDef.ts";
 
 export type { CadMesh, CutTool, FacePick, FacePreview, FilletBaseShape, FilletPick, Profile, ShapeEdgeMesh, ShapeMesh };
+export type { ReplayResult };
 
 export interface CadPreview {
   mesh: CadMesh;
@@ -118,4 +121,29 @@ export async function shell(shape: FilletBaseShape, picks: FacePick[], thickness
 export async function draft(shape: FilletBaseShape, picks: FacePick[], angleDeg: number): Promise<CadMesh> {
   const api = await getApi();
   return api.draft(shape, picks, angleDeg);
+}
+
+// CAD Kernel Phase 7.3 (edit-any-step + live recompute): replays a body's
+// whole Feature[] history through executor.ts's own raw-OpenCascade
+// pipeline, off the main thread same as every other CAD call here. See
+// docs/decisions/cad-kernel-edit-any-step.md.
+export async function replayFeatures(features: Feature[]): Promise<ReplayResult> {
+  const api = await getApi();
+  return api.replayFeatures(features);
+}
+
+/** The pickable-edges overlay for re-opening an EXISTING fillet_chamfer
+ * step's own editor -- replays `features.slice(0, stepIndex)` (the state
+ * right before that step ran), never the target body's own current
+ * (post-everything) geometry. See executor.ts's own previewEdgesAtStep doc. */
+export async function previewEdgesAtStep(features: Feature[], stepIndex: number): Promise<ShapeEdgeMesh> {
+  const api = await getApi();
+  return api.previewEdgesAtStep(features, stepIndex);
+}
+
+/** Same idea as previewEdgesAtStep, for re-opening an existing shell/draft
+ * step's own editor. */
+export async function previewFacesAtStep(features: Feature[], stepIndex: number): Promise<FacePreview> {
+  const api = await getApi();
+  return api.previewFacesAtStep(features, stepIndex);
 }

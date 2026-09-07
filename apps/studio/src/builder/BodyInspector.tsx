@@ -153,9 +153,15 @@ export interface BodyInspectorProps {
   /** Called only with a document whose candidate body has no error-severity issue. */
   onApply: (nextRobot: RobotDef) => void;
   onRequestDelete: (bodyId: string) => void;
+  /** CAD Kernel Phase 7.3 (edit-any-step): threaded straight to
+   * FeatureTreeList's own onSelectStep -- BuilderPanel is the one that
+   * actually knows how to open a step's own editor, this component just
+   * forwards the click. Omitted entirely means the Construction history
+   * panel stays read-only (matches FeatureTreeList's own default). */
+  onSelectFeatureStep?: (index: number) => void;
 }
 
-export function BodyInspector({ robot, bodyId, onApply, onRequestDelete }: BodyInspectorProps) {
+export function BodyInspector({ robot, bodyId, onApply, onRequestDelete, onSelectFeatureStep }: BodyInspectorProps) {
   const body = robot.bodies.find((b) => b.id === bodyId);
   const [draft, setDraft] = useState<Draft>(() => toDraft(body ?? robot.bodies[0]));
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -260,7 +266,7 @@ export function BodyInspector({ robot, bodyId, onApply, onRequestDelete }: BodyI
           </div>
         )}
 
-        {draft.geometryType === "cad_mesh" && <FeatureTreeList features={body.features} />}
+        {draft.geometryType === "cad_mesh" && <FeatureTreeList features={body.features} onSelectStep={onSelectFeatureStep} />}
 
         {draft.geometryType === "mesh" && (
           <div className="inspector-mesh-note">

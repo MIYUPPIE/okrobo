@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RobotDef } from "../contracts/robotDef";
@@ -132,5 +132,20 @@ describe("BodyInspector", () => {
     robot.bodies[0] = { ...robot.bodies[0], visual: { type: "cad_mesh", vertices: [0, 0, 0, 0.1, 0, 0, 0, 0.1, 0], faces: [0, 1, 2] } };
     render(<BodyInspector robot={robot} bodyId="chassis" onApply={() => {}} onRequestDelete={() => {}} />);
     expect(screen.queryByText("Construction history")).not.toBeInTheDocument();
+  });
+
+  // CAD Kernel Phase 7.3 (edit-any-step): threaded straight through to
+  // FeatureTreeList's own onSelectStep.
+  it("threads onSelectFeatureStep through to the Construction history panel's own rows", () => {
+    const onSelectFeatureStep = vi.fn();
+    const robot = makeRobot();
+    robot.bodies[0] = {
+      ...robot.bodies[0],
+      visual: { type: "cad_mesh", vertices: [0, 0, 0, 0.1, 0, 0, 0, 0.1, 0], faces: [0, 1, 2] },
+      features: [{ operation: "box", size: [0.1, 0.06, 0.04] }],
+    };
+    render(<BodyInspector robot={robot} bodyId="chassis" onApply={() => {}} onRequestDelete={() => {}} onSelectFeatureStep={onSelectFeatureStep} />);
+    fireEvent.click(screen.getByRole("button", { name: /Box \(/ }));
+    expect(onSelectFeatureStep).toHaveBeenCalledWith(0);
   });
 });

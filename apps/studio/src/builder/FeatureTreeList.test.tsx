@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Feature } from "../contracts/robotDef";
 import { FeatureTreeList } from "./FeatureTreeList";
 
@@ -76,5 +76,34 @@ describe("FeatureTreeList", () => {
 
     render(<FeatureTreeList features={[boundaryCut]} />);
     expect(screen.getByRole("listitem")).toHaveTextContent("Cut (Boundary)");
+  });
+
+  // CAD Kernel Phase 7.3 (edit-any-step).
+  describe("onSelectStep", () => {
+    const features: Feature[] = [
+      { operation: "box", size: [0.1, 0.06, 0.04] },
+      { operation: "shell", picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] }], thickness: 0.005 },
+    ];
+
+    it("renders each row as a real button when onSelectStep is given", () => {
+      render(<FeatureTreeList features={features} onSelectStep={() => {}} />);
+      const buttons = screen.getAllByRole("button");
+      expect(buttons).toHaveLength(2);
+      expect(buttons[0]).toHaveTextContent("Box (0.1 × 0.06 × 0.04 m)");
+      expect(buttons[1]).toHaveTextContent("Shell (1 face, thickness 0.005m)");
+    });
+
+    it("clicking a row calls onSelectStep with that row's own index", () => {
+      const onSelectStep = vi.fn();
+      render(<FeatureTreeList features={features} onSelectStep={onSelectStep} />);
+      fireEvent.click(screen.getAllByRole("button")[1]);
+      expect(onSelectStep).toHaveBeenCalledWith(1);
+    });
+
+    it("renders plain (non-button) rows when onSelectStep is omitted", () => {
+      render(<FeatureTreeList features={features} />);
+      expect(screen.queryByRole("button")).not.toBeInTheDocument();
+      expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    });
   });
 });

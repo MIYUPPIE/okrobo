@@ -17,11 +17,13 @@ const extrudeRectangleMock = vi.fn();
 const extrudeCircleMock = vi.fn();
 const previewEdgesMock = vi.fn();
 const filletMock = vi.fn();
+const replayFeaturesMock = vi.fn();
 vi.mock("../cad/cadClient", () => ({
   extrudeRectangle: (...args: unknown[]) => extrudeRectangleMock(...args),
   extrudeCircle: (...args: unknown[]) => extrudeCircleMock(...args),
   previewEdges: (...args: unknown[]) => previewEdgesMock(...args),
   fillet: (...args: unknown[]) => filletMock(...args),
+  replayFeatures: (...args: unknown[]) => replayFeaturesMock(...args),
 }));
 
 const noEdges = { lines: [] as number[], edgeGroups: [] as { start: number; count: number; edgeId: number }[] };
@@ -262,5 +264,102 @@ describe("CadExtrudeCreator", () => {
     fireEvent.change(screen.getByLabelText("cad width"), { target: { value: "0.07" } });
     expect(onEdgePicksChange).toHaveBeenCalledWith([]);
     expect(onEdgeOverlayChange).toHaveBeenCalledWith(null);
+  });
+
+  // CAD Kernel Phase 7.3 (edit-any-step).
+  describe("editing", () => {
+    const editFeature = { operation: "extrude" as const, profile: { type: "rectangle" as const, width: 0.1, height: 0.06 }, depth: 0.04 };
+    const shellFeature = { operation: "shell" as const, picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] as [number, number, number] }], thickness: 0.005 };
+
+    it("seeds the form from the edited feature's own params, not initialDraft", () => {
+      render(
+        <CadExtrudeCreator
+          robot={makeRobot()}
+          near={null}
+          onApply={() => {}}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          edgePicks={[]}
+          onEdgePicksChange={() => {}}
+          onEdgeOverlayChange={() => {}}
+          editing={{ feature: editFeature, stepIndex: 0, allFeatures: [editFeature], targetBodyId: "chassis", onApply: () => {} }}
+        />,
+      );
+      expect(screen.getByText("Edit Extrude")).toBeInTheDocument();
+      expect(screen.getByLabelText("cad width")).toHaveValue(0.1);
+      expect(screen.getByLabelText("cad height")).toHaveValue(0.06);
+      expect(screen.getByLabelText("cad depth")).toHaveValue(0.04);
+      expect(screen.queryByText("Edges")).not.toBeInTheDocument();
+    });
+
+    it("previews the WHOLE chain via replayFeatures (this step replaced), not just this step in isolation", async () => {
+      vi.useFakeTimers();
+      replayFeaturesMock.mockResolvedValue({ mesh, steps: [] });
+      render(
+        <CadExtrudeCreator
+          robot={makeRobot()}
+          near={null}
+          onApply={() => {}}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          edgePicks={[]}
+          onEdgePicksChange={() => {}}
+          onEdgeOverlayChange={() => {}}
+          editing={{ feature: editFeature, stepIndex: 0, allFeatures: [editFeature, shellFeature], targetBodyId: "chassis", onApply: () => {} }}
+        />,
+      );
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      expect(replayFeaturesMock).toHaveBeenCalledWith([editFeature, shellFeature]);
+      expect(extrudeRectangleMock).not.toHaveBeenCalled();
+    });
+
+    it("Apply calls editing.onApply with the freshly parsed Feature, not the normal makeCadBody/onApply path", async () => {
+      vi.useFakeTimers();
+      replayFeaturesMock.mockResolvedValue({ mesh, steps: [] });
+      const editApply = vi.fn();
+      const onApply = vi.fn();
+      render(
+        <CadExtrudeCreator
+          robot={makeRobot()}
+          near={null}
+          onApply={onApply}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          edgePicks={[]}
+          onEdgePicksChange={() => {}}
+          onEdgeOverlayChange={() => {}}
+          editing={{ feature: editFeature, stepIndex: 0, allFeatures: [editFeature], targetBodyId: "chassis", onApply: editApply }}
+        />,
+      );
+      fireEvent.change(screen.getByLabelText("cad depth"), { target: { value: "0.08" } });
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+      expect(editApply).toHaveBeenCalledWith({ operation: "extrude", profile: { type: "rectangle", width: 0.1, height: 0.06 }, depth: 0.08 });
+      expect(onApply).not.toHaveBeenCalled();
+    });
+
+    it("previews at the target body's own position and rotation, not a near-relative placement", async () => {
+      vi.useFakeTimers();
+      replayFeaturesMock.mockResolvedValue({ mesh, steps: [] });
+      const onPreviewChange = vi.fn();
+      const robot = makeRobot();
+      robot.bodies[0].transform = { position: [0.3, 0.1, 0], rotation_rpy: [0, 0.5, 0] };
+      render(
+        <CadExtrudeCreator
+          robot={robot}
+          near={null}
+          onApply={() => {}}
+          onCancel={() => {}}
+          onPreviewChange={onPreviewChange}
+          edgePicks={[]}
+          onEdgePicksChange={() => {}}
+          onEdgeOverlayChange={() => {}}
+          editing={{ feature: editFeature, stepIndex: 0, allFeatures: [editFeature], targetBodyId: "chassis", onApply: () => {} }}
+        />,
+      );
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      expect(onPreviewChange).toHaveBeenLastCalledWith({ mesh, position: [0.3, 0.1, 0], rotation: [0, 0.5, 0] });
+    });
   });
 });

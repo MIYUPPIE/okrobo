@@ -39,6 +39,8 @@ import {
   type FilletPick,
   type Profile,
 } from "./kernel.ts";
+import { previewEdgesAtStepSync, previewFacesAtStepSync, replayFeaturesSync, type ReplayResult } from "./executor.ts";
+import type { Feature } from "../contracts/robotDef.ts";
 
 const api = {
   async extrudeRectangle(width: number, height: number, depth: number) {
@@ -86,6 +88,21 @@ const api = {
   async draft(shape: FilletBaseShape, picks: FacePick[], angleDeg: number) {
     await loadOC({ locateFile: () => wasmUrl });
     return draftMesh(shape, picks, angleDeg);
+  },
+  // CAD Kernel Phase 7.3 (edit-any-step + live recompute): only needs
+  // OpenCascade -- executor.ts's own Cut is a real B-rep boolean
+  // (replicad's own Shape3D.cut()), never Manifold's mesh boolean.
+  async replayFeatures(features: Feature[]): Promise<ReplayResult> {
+    await loadOC({ locateFile: () => wasmUrl });
+    return replayFeaturesSync(features);
+  },
+  async previewEdgesAtStep(features: Feature[], stepIndex: number) {
+    await loadOC({ locateFile: () => wasmUrl });
+    return previewEdgesAtStepSync(features, stepIndex);
+  },
+  async previewFacesAtStep(features: Feature[], stepIndex: number) {
+    await loadOC({ locateFile: () => wasmUrl });
+    return previewFacesAtStepSync(features, stepIndex);
   },
 };
 

@@ -185,4 +185,47 @@ describe("cadClient", () => {
     expect(stubApi.draft).toHaveBeenCalledWith(shape, picks, 5);
     expect(mesh).toEqual({ vertices: [4, 5, 6], faces: [1, 1, 1] });
   });
+
+  // CAD Kernel Phase 7.3 (edit-any-step + live recompute).
+  it("delegates replayFeatures to the wrapped API with the features list and resolves its result", async () => {
+    const replayResult = { mesh: { vertices: [1, 2, 3], faces: [0, 0, 0] }, steps: [{ index: 0, feature: { operation: "box", size: [0.1, 0.06, 0.04] }, resolvedPicks: [] }] };
+    const stubApi = { replayFeatures: vi.fn().mockResolvedValue(replayResult) };
+    wrapMock.mockReturnValue(stubApi);
+    const { replayFeatures } = await import("./cadClient");
+
+    const features = [{ operation: "box" as const, size: [0.1, 0.06, 0.04] as [number, number, number] }];
+    const result = await replayFeatures(features);
+    expect(stubApi.replayFeatures).toHaveBeenCalledWith(features);
+    expect(result).toEqual(replayResult);
+  });
+
+  it("delegates previewEdgesAtStep to the wrapped API with the features list and step index, resolving its result", async () => {
+    const edgeMesh = { lines: [0, 0, 0, 1, 0, 0], edgeGroups: [{ start: 0, count: 2, edgeId: 1 }] };
+    const stubApi = { previewEdgesAtStep: vi.fn().mockResolvedValue(edgeMesh) };
+    wrapMock.mockReturnValue(stubApi);
+    const { previewEdgesAtStep } = await import("./cadClient");
+
+    const features = [
+      { operation: "box" as const, size: [0.1, 0.06, 0.04] as [number, number, number] },
+      { operation: "shell" as const, picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] as [number, number, number] }], thickness: 0.005 },
+    ];
+    const result = await previewEdgesAtStep(features, 1);
+    expect(stubApi.previewEdgesAtStep).toHaveBeenCalledWith(features, 1);
+    expect(result).toEqual(edgeMesh);
+  });
+
+  it("delegates previewFacesAtStep to the wrapped API with the features list and step index, resolving its result", async () => {
+    const facePreview = { mesh: { vertices: [0, 0, 0], triangles: [0, 0, 0], normals: [0, 0, 1], faceGroups: [{ start: 0, count: 3, faceId: 1 }] }, centers: [[0, 0, 0]] };
+    const stubApi = { previewFacesAtStep: vi.fn().mockResolvedValue(facePreview) };
+    wrapMock.mockReturnValue(stubApi);
+    const { previewFacesAtStep } = await import("./cadClient");
+
+    const features = [
+      { operation: "box" as const, size: [0.1, 0.06, 0.04] as [number, number, number] },
+      { operation: "draft" as const, picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] as [number, number, number] }], angle_deg: 5 },
+    ];
+    const result = await previewFacesAtStep(features, 1);
+    expect(stubApi.previewFacesAtStep).toHaveBeenCalledWith(features, 1);
+    expect(result).toEqual(facePreview);
+  });
 });

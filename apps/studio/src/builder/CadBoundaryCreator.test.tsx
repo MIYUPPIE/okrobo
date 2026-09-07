@@ -8,10 +8,12 @@ import { CAD_PREVIEW_DEBOUNCE_MS } from "./useCadPreview";
 const loftMock = vi.fn();
 const previewEdgesMock = vi.fn();
 const filletMock = vi.fn();
+const replayFeaturesMock = vi.fn();
 vi.mock("../cad/cadClient", () => ({
   loft: (...args: unknown[]) => loftMock(...args),
   previewEdges: (...args: unknown[]) => previewEdgesMock(...args),
   fillet: (...args: unknown[]) => filletMock(...args),
+  replayFeatures: (...args: unknown[]) => replayFeaturesMock(...args),
 }));
 
 const noEdges = { lines: [] as number[], edgeGroups: [] as { start: number; count: number; edgeId: number }[] };
@@ -190,5 +192,82 @@ describe("CadBoundaryCreator", () => {
     fireEvent.change(screen.getByLabelText("cad loft height"), { target: { value: "0.1" } });
     expect(onEdgePicksChange).toHaveBeenCalledWith([]);
     expect(onEdgeOverlayChange).toHaveBeenCalledWith(null);
+  });
+
+  // CAD Kernel Phase 7.3 (edit-any-step).
+  describe("editing", () => {
+    const editFeature = {
+      operation: "loft" as const,
+      start_profile: { type: "circle" as const, radius: 0.03 },
+      end_profile: { type: "rectangle" as const, width: 0.05, height: 0.05 },
+      height: 0.08,
+    };
+
+    it("seeds the form from the edited feature's own params", () => {
+      render(
+        <CadBoundaryCreator
+          robot={makeRobot()}
+          near={null}
+          onApply={() => {}}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          edgePicks={[]}
+          onEdgePicksChange={() => {}}
+          onEdgeOverlayChange={() => {}}
+          editing={{ feature: editFeature, stepIndex: 0, allFeatures: [editFeature], targetBodyId: "chassis", onApply: () => {} }}
+        />,
+      );
+      expect(screen.getByText("Edit Boundary")).toBeInTheDocument();
+      expect(screen.getByLabelText("cad start radius")).toHaveValue(0.03);
+      expect(screen.getByLabelText("cad end width")).toHaveValue(0.05);
+      expect(screen.getByLabelText("cad end height")).toHaveValue(0.05);
+      expect(screen.getByLabelText("cad loft height")).toHaveValue(0.08);
+    });
+
+    it("previews the whole chain via replayFeatures, not loft() in isolation", async () => {
+      vi.useFakeTimers();
+      replayFeaturesMock.mockResolvedValue({ mesh, steps: [] });
+      render(
+        <CadBoundaryCreator
+          robot={makeRobot()}
+          near={null}
+          onApply={() => {}}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          edgePicks={[]}
+          onEdgePicksChange={() => {}}
+          onEdgeOverlayChange={() => {}}
+          editing={{ feature: editFeature, stepIndex: 0, allFeatures: [editFeature], targetBodyId: "chassis", onApply: () => {} }}
+        />,
+      );
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      expect(replayFeaturesMock).toHaveBeenCalledWith([editFeature]);
+      expect(loftMock).not.toHaveBeenCalled();
+    });
+
+    it("Apply calls editing.onApply with the freshly parsed Feature, not the normal makeCadBody/onApply path", async () => {
+      vi.useFakeTimers();
+      replayFeaturesMock.mockResolvedValue({ mesh, steps: [] });
+      const editApply = vi.fn();
+      const onApply = vi.fn();
+      render(
+        <CadBoundaryCreator
+          robot={makeRobot()}
+          near={null}
+          onApply={onApply}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          edgePicks={[]}
+          onEdgePicksChange={() => {}}
+          onEdgeOverlayChange={() => {}}
+          editing={{ feature: editFeature, stepIndex: 0, allFeatures: [editFeature], targetBodyId: "chassis", onApply: editApply }}
+        />,
+      );
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+      expect(editApply).toHaveBeenCalledWith(editFeature);
+      expect(onApply).not.toHaveBeenCalled();
+    });
   });
 });

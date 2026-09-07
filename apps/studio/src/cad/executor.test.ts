@@ -12,9 +12,9 @@
 
 import { getOC, makeBox, makeCylinder, Solid, type Face } from "replicad";
 import { describe, expect, it } from "vitest";
-import { fillet, loadOC, shell, draft as kernelDraft, buildFilletBaseSolid, extrudeRectangle } from "./kernel";
+import { fillet, loadOC, shell, draft as kernelDraft, previewEdges, previewFaces, buildFilletBaseSolid, extrudeRectangle } from "./kernel";
 import type { Feature, FilletChamferPick } from "../contracts/robotDef";
-import { replayFeatures, replayFeaturesSync, resolveAfterOperation } from "./executor";
+import { previewEdgesAtStep, previewFacesAtStep, replayFeatures, replayFeaturesSync, resolveAfterOperation } from "./executor";
 
 const TIMEOUT = 30_000;
 
@@ -208,6 +208,27 @@ describe("replayFeatures: cut is a real B-rep boolean, chained live", () => {
   });
 });
 
+describe("replayFeatures: step-context error messages (CAD Kernel Phase 7.3's own rebuild-error UX)", () => {
+  it(
+    "attributes a failed pick to its own step index and operation kind, not just a bare OpenCascade message",
+    async () => {
+      const features: Feature[] = [
+        { operation: "box", size: [0.1, 0.06, 0.04] },
+        // A point nowhere near any real face of this box -- findFaceNear
+        // throws, and that failure should be attributed to step 1 (shell).
+        { operation: "shell", picks: [{ source_step: 0, local_index: 0, point: [99, 99, 99] }], thickness: 0.005 },
+      ];
+      await expect(replayFeatures(features)).rejects.toThrow(/step 1 \(shell\) failed to rebuild/);
+    },
+    TIMEOUT,
+  );
+
+  it("attributes a failed root rebuild to step 0", async () => {
+    const cutOnly: Feature = { operation: "cut", tool: { operation: "extrude", profile: { type: "circle", radius: 0.01 }, depth: 0.1 }, position: [0, 0, 0] };
+    await expect(replayFeatures([cutOnly])).rejects.toThrow(/step 0 \(cut\)/);
+  });
+});
+
 describe("replayFeatures: a full multi-step chain (box -> shell -> draft)", () => {
   it(
     "replays a 3-step history end to end, every pick resolving ok, in order",
@@ -329,6 +350,60 @@ describe("resolveAfterOperation: direct verification against hand-built raw Open
       target.delete();
       tool.delete();
       result.delete();
+    },
+    TIMEOUT,
+  );
+});
+
+describe("previewEdgesAtStep / previewFacesAtStep: CAD Kernel Phase 7.3's own prefix replay", () => {
+  it(
+    "previewEdgesAtStep(features, 1) matches kernel.ts's own previewEdges(box) -- the box is the whole prefix before step 1",
+    async () => {
+      const features: Feature[] = [
+        { operation: "box", size: [0.1, 0.06, 0.04] },
+        { operation: "shell", picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] }], thickness: 0.005 },
+      ];
+      const edges = await previewEdgesAtStep(features, 1);
+      const reference = await previewEdges({ operation: "box", size: [0.1, 0.06, 0.04] });
+      // edgeId is an internal identifier, verified (Phase 5/6) NOT stable
+      // across independent solid rebuilds -- compare everything else
+      // (the geometry a picker actually renders/matches against).
+      expect(edges.lines).toEqual(reference.lines);
+      expect(edges.edgeGroups.map((g) => ({ start: g.start, count: g.count }))).toEqual(reference.edgeGroups.map((g) => ({ start: g.start, count: g.count })));
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "previewFacesAtStep(features, 1) matches kernel.ts's own previewFaces(box) -- the box is the whole prefix before step 1",
+    async () => {
+      const features: Feature[] = [
+        { operation: "box", size: [0.1, 0.06, 0.04] },
+        { operation: "shell", picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] }], thickness: 0.005 },
+      ];
+      const faces = await previewFacesAtStep(features, 1);
+      const reference = await previewFaces({ operation: "box", size: [0.1, 0.06, 0.04] });
+      // faceId is an internal identifier, verified (Phase 5/6) NOT stable
+      // across independent solid rebuilds -- compare everything else.
+      expect(faces.mesh.vertices).toEqual(reference.mesh.vertices);
+      expect(faces.mesh.triangles).toEqual(reference.mesh.triangles);
+      expect(faces.mesh.faceGroups.map((g) => ({ start: g.start, count: g.count }))).toEqual(reference.mesh.faceGroups.map((g) => ({ start: g.start, count: g.count })));
+      expect(faces.centers).toEqual(reference.centers);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "previewFacesAtStep(features, 2) reflects the SHELLED prefix (step 1 already applied), not the bare box -- a real, different face set",
+    async () => {
+      const features: Feature[] = [
+        { operation: "box", size: [0.1, 0.06, 0.04] },
+        { operation: "shell", picks: [{ source_step: 0, local_index: 0, point: [0.05, 0, 0] }], thickness: 0.005 },
+        { operation: "draft", picks: [{ source_step: 1, local_index: 0, point: [0, 0.03, 0] }], angle_deg: 5 },
+      ];
+      const facesAtRoot = await previewFacesAtStep(features, 1);
+      const facesAfterShell = await previewFacesAtStep(features, 2);
+      expect(facesAfterShell.centers.length).not.toBe(facesAtRoot.centers.length);
     },
     TIMEOUT,
   );

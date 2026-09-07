@@ -19,6 +19,7 @@ import { CadExtrudeCreator } from "./CadExtrudeCreator";
 import { CadExtrudedCutCreator } from "./CadExtrudedCutCreator";
 import { CadFacePickEditor } from "./CadFacePickEditor";
 import { CadFilletChamferEditor } from "./CadFilletChamferEditor";
+import { CadPrimitiveRootEditor } from "./CadPrimitiveRootEditor";
 import { positiveNumber } from "./CadProfileFields";
 import { CadRevolveCreator } from "./CadRevolveCreator";
 import { CadRevolvedCutCreator } from "./CadRevolvedCutCreator";
@@ -26,6 +27,7 @@ import { exportRobotDef } from "./exportRobot";
 import type { FilletPickDraft } from "./filletPicks";
 import { HierarchyList } from "./HierarchyList";
 import { JointCreator } from "./JointCreator";
+import { recomputeFeatureStep } from "./recomputeFeatureStep";
 import { makeDefaultBody, nextBodyId, removeBody } from "./robotEdits";
 import { SensorPanel } from "./SensorPanel";
 import { TestViewport } from "./TestViewport";
@@ -114,6 +116,16 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   // each apply one shared parameter to their whole pick set.
   const [facePicks, setFacePicks] = useState<FacePick[]>([]);
   const [faceOverlay, setFaceOverlay] = useState<CadFaceOverlay | null>(null);
+  // Robot Builder CAD Kernel Phase 7.3 (edit-any-step): which existing
+  // recorded feature step is being re-opened for editing, if any. null
+  // while not editing a step; distinct from pickTargetId/builderTool
+  // (checked first in the inspector's own dispatch, the same priority
+  // jointDraft?.childId already gets) since a step editor's own shape
+  // depends on the FEATURE kind stored at that index, not on which
+  // toolbar tool is nominally active.
+  const [editingStep, setEditingStep] = useState<{ bodyId: string; index: number } | null>(null);
+  const [recomputing, setRecomputing] = useState(false);
+  const [recomputeError, setRecomputeError] = useState<string | null>(null);
   // Bumped only on a gizmo commit (not on the inspector's own Apply), so
   // BodyInspector resyncs its draft when a drag moved the body it's
   // showing -- mirrors App.tsx's existing worldEpoch convention.
@@ -141,7 +153,10 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   const selectedBody = selectedBodyId ? (robot.bodies.find((b) => b.id === selectedBodyId) ?? null) : null;
   const isCutTool = CUT_TOOLS.has(builderTool);
   const isTargetPickTool = TARGET_PICK_TOOLS.has(builderTool);
-  const isCadTool = isTargetPickTool || builderTool === "extrude" || builderTool === "revolve" || builderTool === "boundary";
+  const isCadTool = isTargetPickTool || builderTool === "extrude" || builderTool === "revolve" || builderTool === "boundary" || editingStep !== null;
+  // Robot Builder CAD Kernel Phase 7.3 (edit-any-step).
+  const editingBody = editingStep ? robot.bodies.find((b) => b.id === editingStep.bodyId) : undefined;
+  const editingFeature = editingStep ? editingBody?.features?.[editingStep.index] : undefined;
 
   useEffect(() => {
     if (builderMode !== "test") return;
@@ -379,6 +394,61 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
     return { ok: true, value };
   }
 
+  const clearCadPickState = () => {
+    setCadPreview(null);
+    setFilletPicks([]);
+    setEdgeOverlay(null);
+    setFacePicks([]);
+    setFaceOverlay(null);
+  };
+
+  /** CAD Kernel Phase 7.3 (edit-any-step): opens an existing feature step
+   * for editing -- seeds the lifted fillet/face pick state (filletPicks/
+   * facePicks) from that step's OWN recorded picks, the same way
+   * handleTargetPick resets it for a fresh pick, since BuilderPanel (not
+   * the individual editor) owns that lifted state. */
+  const handleSelectFeatureStep = (bodyId: string, index: number) => {
+    const feature = robot.bodies.find((b) => b.id === bodyId)?.features?.[index];
+    setEditingStep({ bodyId, index });
+    setRecomputeError(null);
+    setRecomputing(false);
+    setCadPreview(null);
+    setEdgeOverlay(null);
+    setFaceOverlay(null);
+    setFilletPicks(feature?.operation === "fillet_chamfer" ? feature.picks.map((p) => ({ point: p.point, operation: p.operation, value: String(p.value) })) : []);
+    setFacePicks(feature?.operation === "shell" || feature?.operation === "draft" ? feature.picks.map((p) => p.point) : []);
+  };
+
+  const cancelEditingStep = () => {
+    setEditingStep(null);
+    setRecomputing(false);
+    setRecomputeError(null);
+    clearCadPickState();
+  };
+
+  /** The single onApply every step editor calls in edit mode -- recomputes
+   * the WHOLE chain (this step's own params/picks replaced) through the
+   * executor (off the main thread, via cadClient.ts), then either commits
+   * the result and closes the editor, or surfaces a real, readable
+   * "rebuild error" (CAD Kernel Phase 7.2's own withStepContext already
+   * says which step broke) instead of silently failing or crashing. See
+   * docs/decisions/cad-kernel-edit-any-step.md. */
+  const handleRecomputeStep = (nextFeature: Feature) => {
+    if (!editingStep) return;
+    setRecomputing(true);
+    setRecomputeError(null);
+    recomputeFeatureStep(robot, editingStep.bodyId, editingStep.index, nextFeature).then((result) => {
+      setRecomputing(false);
+      if (!result.ok) {
+        setRecomputeError(result.message);
+        return;
+      }
+      onChange(result.robot);
+      setEditingStep(null);
+      clearCadPickState();
+    });
+  };
+
   // Robot Builder Phase 6: mirrors App.tsx's own run()/stop() shape for the
   // Car/Arm/Drone pipeline -- abort-if-already-running, arm(), set status,
   // runProgram().then/.catch/.finally, zero every actuator on the way out
@@ -470,7 +540,7 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
             jointPick={builderTool === "add-joint" ? { parentId: jointDraft?.parentId ?? null, onPick: handleJointPick } : undefined}
             bodyPick={isTargetPickTool && pickTargetId === null ? { selectedId: null, onPick: handleTargetPick } : undefined}
             cadPreview={isCadTool ? cadPreview : null}
-            suppressedBodyId={isTargetPickTool ? pickTargetId : null}
+            suppressedBodyId={isTargetPickTool ? pickTargetId : editingStep ? editingStep.bodyId : null}
             edgeOverlay={isCadTool && edgeOverlay ? { ...edgeOverlay, pickedPoints: filletPicks.map((p) => p.point) } : null}
             faceOverlay={isCadTool && faceOverlay ? { ...faceOverlay, pickedPoints: facePicks } : null}
           />
@@ -680,6 +750,141 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
               onApply={applyJoint}
               onCancel={() => setJointDraft(null)}
             />
+          ) : editingStep && editingBody && editingFeature ? (
+            recomputing ? (
+              <div className="body-inspector cad-extrude-creator">
+                <h4>Recomputing…</h4>
+                <p className="cad-status">Rebuilding the whole chain -- this can take a moment.</p>
+              </div>
+            ) : (
+              <>
+                {recomputeError && <p className="cad-status error">Could not apply this edit: {recomputeError}</p>}
+                {editingFeature.operation === "box" || editingFeature.operation === "cylinder" ? (
+                  <CadPrimitiveRootEditor
+                    feature={editingFeature}
+                    allFeatures={editingBody.features ?? []}
+                    targetBodyId={editingStep.bodyId}
+                    robot={robot}
+                    onApply={handleRecomputeStep}
+                    onCancel={cancelEditingStep}
+                    onPreviewChange={setCadPreview}
+                  />
+                ) : editingFeature.operation === "extrude" ? (
+                  <CadExtrudeCreator
+                    robot={robot}
+                    near={null}
+                    onApply={() => {}}
+                    onCancel={cancelEditingStep}
+                    onPreviewChange={setCadPreview}
+                    edgePicks={[]}
+                    onEdgePicksChange={() => {}}
+                    onEdgeOverlayChange={() => {}}
+                    editing={{ feature: editingFeature, stepIndex: editingStep.index, allFeatures: editingBody.features ?? [], targetBodyId: editingStep.bodyId, onApply: handleRecomputeStep }}
+                  />
+                ) : editingFeature.operation === "revolve" ? (
+                  <CadRevolveCreator
+                    robot={robot}
+                    near={null}
+                    onApply={() => {}}
+                    onCancel={cancelEditingStep}
+                    onPreviewChange={setCadPreview}
+                    edgePicks={[]}
+                    onEdgePicksChange={() => {}}
+                    onEdgeOverlayChange={() => {}}
+                    editing={{ feature: editingFeature, stepIndex: editingStep.index, allFeatures: editingBody.features ?? [], targetBodyId: editingStep.bodyId, onApply: handleRecomputeStep }}
+                  />
+                ) : editingFeature.operation === "loft" ? (
+                  <CadBoundaryCreator
+                    robot={robot}
+                    near={null}
+                    onApply={() => {}}
+                    onCancel={cancelEditingStep}
+                    onPreviewChange={setCadPreview}
+                    edgePicks={[]}
+                    onEdgePicksChange={() => {}}
+                    onEdgeOverlayChange={() => {}}
+                    editing={{ feature: editingFeature, stepIndex: editingStep.index, allFeatures: editingBody.features ?? [], targetBodyId: editingStep.bodyId, onApply: handleRecomputeStep }}
+                  />
+                ) : editingFeature.operation === "cut" && editingFeature.tool.operation === "extrude" ? (
+                  <CadExtrudedCutCreator
+                    robot={robot}
+                    targetBodyId={editingStep.bodyId}
+                    onApply={() => {}}
+                    onCancel={cancelEditingStep}
+                    onPreviewChange={setCadPreview}
+                    editing={{ feature: editingFeature, stepIndex: editingStep.index, allFeatures: editingBody.features ?? [], onApply: handleRecomputeStep }}
+                  />
+                ) : editingFeature.operation === "cut" && editingFeature.tool.operation === "revolve" ? (
+                  <CadRevolvedCutCreator
+                    robot={robot}
+                    targetBodyId={editingStep.bodyId}
+                    onApply={() => {}}
+                    onCancel={cancelEditingStep}
+                    onPreviewChange={setCadPreview}
+                    editing={{ feature: editingFeature, stepIndex: editingStep.index, allFeatures: editingBody.features ?? [], onApply: handleRecomputeStep }}
+                  />
+                ) : editingFeature.operation === "cut" ? (
+                  <CadBoundaryCutCreator
+                    robot={robot}
+                    targetBodyId={editingStep.bodyId}
+                    onApply={() => {}}
+                    onCancel={cancelEditingStep}
+                    onPreviewChange={setCadPreview}
+                    editing={{ feature: editingFeature, stepIndex: editingStep.index, allFeatures: editingBody.features ?? [], onApply: handleRecomputeStep }}
+                  />
+                ) : editingFeature.operation === "fillet_chamfer" ? (
+                  <CadFilletChamferEditor
+                    robot={robot}
+                    targetBodyId={editingStep.bodyId}
+                    onApply={() => {}}
+                    onCancel={cancelEditingStep}
+                    onPreviewChange={setCadPreview}
+                    edgePicks={filletPicks}
+                    onEdgePicksChange={setFilletPicks}
+                    onEdgeOverlayChange={setEdgeOverlay}
+                    editing={{ feature: editingFeature, stepIndex: editingStep.index, allFeatures: editingBody.features ?? [], onApply: handleRecomputeStep }}
+                  />
+                ) : editingFeature.operation === "shell" ? (
+                  <CadFacePickEditor
+                    title="Edit Shell"
+                    valueLabel="Thickness (m)"
+                    ariaLabel="shell thickness"
+                    defaultValue="0.005"
+                    validateValue={shellValidate}
+                    computeMesh={shell}
+                    buildFeature={(picks: CadPick[], value: number): Feature => ({ operation: "shell", picks, thickness: value })}
+                    robot={robot}
+                    targetBodyId={editingStep.bodyId}
+                    onApply={() => {}}
+                    onCancel={cancelEditingStep}
+                    onPreviewChange={setCadPreview}
+                    facePicks={facePicks}
+                    onFacePicksChange={setFacePicks}
+                    onFaceOverlayChange={setFaceOverlay}
+                    editing={{ feature: editingFeature, stepIndex: editingStep.index, allFeatures: editingBody.features ?? [], onApply: handleRecomputeStep }}
+                  />
+                ) : (
+                  <CadFacePickEditor
+                    title="Edit Draft"
+                    valueLabel="Angle (°)"
+                    ariaLabel="draft angle"
+                    defaultValue="5"
+                    validateValue={draftValidate}
+                    computeMesh={draft}
+                    buildFeature={(picks: CadPick[], value: number): Feature => ({ operation: "draft", picks, angle_deg: value })}
+                    robot={robot}
+                    targetBodyId={editingStep.bodyId}
+                    onApply={() => {}}
+                    onCancel={cancelEditingStep}
+                    onPreviewChange={setCadPreview}
+                    facePicks={facePicks}
+                    onFacePicksChange={setFacePicks}
+                    onFaceOverlayChange={setFaceOverlay}
+                    editing={{ feature: editingFeature, stepIndex: editingStep.index, allFeatures: editingBody.features ?? [], onApply: handleRecomputeStep }}
+                  />
+                )}
+              </>
+            )
           ) : builderTool === "extrude" ? (
             <CadExtrudeCreator
               robot={robot}
@@ -773,6 +978,7 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
               bodyId={selectedBody.id}
               onApply={onChange}
               onRequestDelete={deleteBody}
+              onSelectFeatureStep={(index) => handleSelectFeatureStep(selectedBody.id, index)}
             />
           ) : (
             <p className="builder-empty-inspector">

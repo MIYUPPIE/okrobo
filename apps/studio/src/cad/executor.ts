@@ -41,7 +41,9 @@ import {
   toleranceFor,
   type BossOperation as KernelBossOperation,
   type CadMesh,
+  type FacePreview,
   type FilletBaseShape,
+  type ShapeEdgeMesh,
 } from "./kernel";
 
 const DEG2RAD = Math.PI / 180;
@@ -381,38 +383,62 @@ function applyDraft(current: Shape3D, feature: Extract<Feature, { operation: "dr
   return { next, resolvedPicks };
 }
 
-/** Assumes loadOC() has already resolved. See replayFeatures's own doc. */
-export function replayFeaturesSync(features: Feature[]): ReplayResult {
+/** Re-throws any error from `run()` prefixed with the step's own index and
+ * operation kind -- CAD Kernel Phase 7.3's real "rebuild error" UX (editing
+ * an upstream step, then recomputing the whole chain) needs to say WHICH
+ * step broke, not just that something did; every genuine "this pick no
+ * longer applies" failure already surfaces as a plain thrown Error (from
+ * findEdgeNear/findFaceNear, or an opaque OpenCascade WebAssembly.Exception
+ * for a geometrically infeasible operation), never a silent wrong result --
+ * this only adds attribution, it doesn't change what fails or why. */
+function withStepContext<T>(index: number, feature: Feature, run: () => T): T {
+  try {
+    return run();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`cad executor: step ${index} (${feature.operation}) failed to rebuild: ${message}`);
+  }
+}
+
+/** The shared core: replays `features` into one live Shape3D, step by step,
+ * raw-builder history attributed to each step via withStepContext. Caller
+ * owns disposing the returned solid AND every step's own resolvedPicks are
+ * discarded here -- replayFeaturesSync (below) is the only caller that
+ * needs those; the prefix-preview functions (previewEdgesAtStepSync/
+ * previewFacesAtStepSync) only ever need the final live shape itself, to
+ * mesh its own current edges/faces for an existing step's own editor to
+ * pick from. */
+function replayToShape(features: Feature[]): { shape: Shape3D; steps: FeatureStepResult[] } {
   if (features.length === 0) throw new Error("cad executor: replayFeatures needs at least one feature");
 
-  let current = buildFilletBaseSolid(rootShapeFromFeature(features[0]));
+  let current = withStepContext(0, features[0], () => buildFilletBaseSolid(rootShapeFromFeature(features[0])));
   const steps: FeatureStepResult[] = [{ index: 0, feature: features[0], resolvedPicks: [] }];
 
   for (let i = 1; i < features.length; i++) {
     const feature = features[i];
-    let next: Shape3D;
-    let resolvedPicks: PickResolution[] = [];
-    if (feature.operation === "cut") {
-      next = applyCut(current, feature);
-    } else if (feature.operation === "fillet_chamfer") {
-      ({ next, resolvedPicks } = applyFilletChamfer(current, feature));
-    } else if (feature.operation === "shell") {
-      ({ next, resolvedPicks } = applyShell(current, feature));
-    } else if (feature.operation === "draft") {
-      ({ next, resolvedPicks } = applyDraft(current, feature));
-    } else {
-      throw new Error(`cad executor: feature at index ${i} must be a modifier kind (cut/fillet_chamfer/shell/draft), got '${feature.operation}'`);
-    }
+    const result = withStepContext(i, feature, (): { next: Shape3D; resolvedPicks: PickResolution[] } => {
+      if (feature.operation === "cut") return { next: applyCut(current, feature), resolvedPicks: [] };
+      if (feature.operation === "fillet_chamfer") return applyFilletChamfer(current, feature);
+      if (feature.operation === "shell") return applyShell(current, feature);
+      if (feature.operation === "draft") return applyDraft(current, feature);
+      throw new Error(`must be a modifier kind (cut/fillet_chamfer/shell/draft), got '${feature.operation}'`);
+    });
     current.delete();
-    current = next;
-    steps.push({ index: i, feature, resolvedPicks });
+    current = result.next;
+    steps.push({ index: i, feature, resolvedPicks: result.resolvedPicks });
   }
 
+  return { shape: current, steps };
+}
+
+/** Assumes loadOC() has already resolved. See replayFeatures's own doc. */
+export function replayFeaturesSync(features: Feature[]): ReplayResult {
+  const { shape, steps } = replayToShape(features);
   try {
-    const mesh = current.mesh(DEFAULT_MESH_OPTIONS);
+    const mesh = shape.mesh(DEFAULT_MESH_OPTIONS);
     return { mesh: { vertices: mesh.vertices, faces: mesh.triangles }, steps };
   } finally {
-    current.delete();
+    shape.delete();
   }
 }
 
@@ -427,6 +453,48 @@ export function replayFeaturesSync(features: Feature[]): ReplayResult {
 export async function replayFeatures(features: Feature[]): Promise<ReplayResult> {
   await loadOC();
   return replayFeaturesSync(features);
+}
+
+/** CAD Kernel Phase 7.3 (edit-any-step): the pickable-edges overlay for
+ * re-opening an EXISTING fillet_chamfer step's own editor. That step's own
+ * picks were originally found on the shape as it existed right BEFORE it
+ * ran -- i.e. `features.slice(0, stepIndex)` replayed -- never the target
+ * body's own CURRENT (post-everything) geometry, which by the time any
+ * fillet_chamfer/shell/draft/cut step is recorded is already a baked
+ * cad_mesh with no live B-rep of its own left to pick from at all. Mirrors
+ * kernel.ts's own previewEdgesMesh, replaying a real prefix instead of a
+ * single fresh shape. */
+export function previewEdgesAtStepSync(features: Feature[], stepIndex: number): ShapeEdgeMesh {
+  const { shape } = replayToShape(features.slice(0, stepIndex));
+  try {
+    return shape.meshEdges();
+  } finally {
+    shape.delete();
+  }
+}
+
+export async function previewEdgesAtStep(features: Feature[], stepIndex: number): Promise<ShapeEdgeMesh> {
+  await loadOC();
+  return previewEdgesAtStepSync(features, stepIndex);
+}
+
+/** CAD Kernel Phase 7.3: the same prefix-replay idea as
+ * previewEdgesAtStep, for re-opening an existing shell/draft step's own
+ * editor -- mirrors kernel.ts's own previewFacesMesh. */
+export function previewFacesAtStepSync(features: Feature[], stepIndex: number): FacePreview {
+  const { shape } = replayToShape(features.slice(0, stepIndex));
+  try {
+    const mesh = shape.mesh(DEFAULT_MESH_OPTIONS);
+    const centers = shape.faces.map((f) => f.center.toTuple() as [number, number, number]);
+    return { mesh, centers };
+  } finally {
+    shape.delete();
+  }
+}
+
+export async function previewFacesAtStep(features: Feature[], stepIndex: number): Promise<FacePreview> {
+  await loadOC();
+  return previewFacesAtStepSync(features, stepIndex);
 }
 
 // Re-exported so callers (and tests) that only need the contract-level

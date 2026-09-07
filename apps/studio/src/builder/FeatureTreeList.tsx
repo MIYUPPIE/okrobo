@@ -1,13 +1,16 @@
 import type { Feature, Profile } from "../contracts/robotDef";
 
-// Build mode's read-only feature-tree panel (Robot Builder CAD Kernel Phase
-// 7.1) -- renders a cad_mesh body's own ordered Feature[] construction
-// history (see docs/decisions/cad-kernel-feature-tree-data-model.md), one
-// row per step in the order it was applied. No interaction this sub-phase:
-// nothing here is clickable, editable, or reorderable -- that's CAD Kernel
-// Phase 7.3/7.4's job. Renders nothing for an absent/empty list, so a body
-// with no recorded history (every non-CAD body, or a cad_mesh predating
-// this phase) looks exactly like it did before this panel existed.
+// Build mode's feature-tree panel (Robot Builder CAD Kernel Phase 7.1) --
+// renders a cad_mesh body's own ordered Feature[] construction history (see
+// docs/decisions/cad-kernel-feature-tree-data-model.md), one row per step
+// in the order it was applied. Renders nothing for an absent/empty list, so
+// a body with no recorded history (every non-CAD body, or a cad_mesh
+// predating this phase) looks exactly like it did before this panel
+// existed. CAD Kernel Phase 7.3 (edit-any-step): each row is a real button
+// when `onSelectStep` is given -- clicking one opens that step's own editor
+// pre-filled, recomputing the whole downstream chain on Apply (see
+// docs/decisions/cad-kernel-edit-any-step.md). Reordering/insert/delete
+// still isn't here -- that's Phase 7.4's job.
 
 const round = (n: number) => Math.round(n * 1000) / 1000;
 
@@ -53,18 +56,30 @@ function featureLabel(feature: Feature): string {
 
 export interface FeatureTreeListProps {
   features: Feature[] | undefined;
+  /** CAD Kernel Phase 7.3: when given, every row becomes clickable, calling
+   * this with its own index. Omitted entirely means read-only (no
+   * onSelectStep at all -- e.g. a context that can't recompute). */
+  onSelectStep?: (index: number) => void;
 }
 
-export function FeatureTreeList({ features }: FeatureTreeListProps) {
+export function FeatureTreeList({ features, onSelectStep }: FeatureTreeListProps) {
   if (!features || features.length === 0) return null;
 
   return (
     <section className="inspector-section feature-tree-list">
       <h5>Construction history</h5>
       <ol>
-        {features.map((feature, index) => (
-          <li key={index}>{featureLabel(feature)}</li>
-        ))}
+        {features.map((feature, index) =>
+          onSelectStep ? (
+            <li key={index}>
+              <button type="button" className="feature-tree-step" onClick={() => onSelectStep(index)}>
+                {featureLabel(feature)}
+              </button>
+            </li>
+          ) : (
+            <li key={index}>{featureLabel(feature)}</li>
+          ),
+        )}
       </ol>
     </section>
   );

@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from "react";
-import type { RobotDef } from "../contracts/robotDef";
+import type { Feature, RobotDef } from "../contracts/robotDef";
 import type { CadEdgeOverlay, CadPreview, ShapeEdgeMesh } from "../cad/cadClient";
-import { fillet, previewEdges } from "../cad/cadClient";
+import { fillet, previewEdges, previewEdgesAtStep, replayFeatures } from "../cad/cadClient";
 import { shapeFromGeometry } from "./cadTargetShape";
 import { FilletEdgeList } from "./FilletEdgeList";
 import { filletChamferFeatureFromPicks, parseFilletPicks, type FilletPickDraft } from "./filletPicks";
@@ -33,6 +33,25 @@ export interface CadFilletChamferEditorProps {
   edgePicks: FilletPickDraft[];
   onEdgePicksChange: (next: FilletPickDraft[]) => void;
   onEdgeOverlayChange: (overlay: CadEdgeOverlay | null) => void;
+  /** CAD Kernel Phase 7.3 (edit-any-step): when set, this editor is
+   * editing an EXISTING recorded fillet_chamfer step at `stepIndex` of
+   * `allFeatures` (still on `targetBodyId`'s own body) -- `edgePicks`
+   * itself is still seeded by BuilderPanel (the lifted-state owner) from
+   * `feature.picks`, same as create mode; what changes here is the edges
+   * to pick from (replayed from `allFeatures.slice(0, stepIndex)` -- the
+   * state right BEFORE this step ran, since by the time any
+   * fillet_chamfer/shell/draft/cut step exists the target's own CURRENT
+   * geometry is already a baked cad_mesh with no live B-rep left to pick
+   * from at all) and the live preview (the WHOLE chain replayed, this
+   * step's own picks replaced, so any step after it still applies on top)
+   * -- and Apply calls `onApply` with the freshly parsed Feature instead
+   * of replaceBodyGeometry. See docs/decisions/cad-kernel-edit-any-step.md. */
+  editing?: {
+    feature: Extract<Feature, { operation: "fillet_chamfer" }>;
+    stepIndex: number;
+    allFeatures: Feature[];
+    onApply: (nextFeature: Feature) => void;
+  };
 }
 
 export function CadFilletChamferEditor({
@@ -44,17 +63,23 @@ export function CadFilletChamferEditor({
   edgePicks,
   onEdgePicksChange,
   onEdgeOverlayChange,
+  editing,
 }: CadFilletChamferEditorProps) {
   const targetBody = robot.bodies.find((b) => b.id === targetBodyId);
-  const shape = useMemo(() => shapeFromGeometry(targetBody?.visual ?? targetBody?.collision), [targetBody]);
+  const shape = useMemo(() => (editing ? null : shapeFromGeometry(targetBody?.visual ?? targetBody?.collision)), [targetBody, editing]);
 
   const { status, error, mesh } = useCadPreview(() => {
-    if (!shape) return { ok: false, message: "" };
     const picks = parseFilletPicks(edgePicks);
     if (!picks.ok) return picks;
+    if (editing) {
+      const nextFeature = filletChamferFeatureFromPicks(picks.value, editing.feature.picks[0]?.source_step ?? 0);
+      const nextFeatures = editing.allFeatures.map((f, i) => (i === editing.stepIndex ? nextFeature : f));
+      return { ok: true, call: () => replayFeatures(nextFeatures).then((r) => r.mesh) };
+    }
+    if (!shape) return { ok: false, message: "" };
     return { ok: true, call: () => fillet(shape, picks.value) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shape, edgePicks]);
+  }, [shape, edgePicks, editing]);
 
   useEffect(() => {
     if (!targetBody) return;
@@ -66,14 +91,16 @@ export function CadFilletChamferEditor({
   }, [status, mesh, targetBody, onPreviewChange]);
 
   // No dims are authored here (the shape comes straight from the target's
-  // own existing Geometry), so there's no separate debounced "base shape"
-  // preview to fetch edges from either -- previewEdges is called directly
-  // off `shape` with no picks involved, and never needs to be cleared.
+  // own existing Geometry, or -- editing an existing step -- from replaying
+  // the prefix before it), so there's no separate debounced "base shape"
+  // preview to fetch edges from either -- it's called directly with no
+  // picks involved, and never needs to be cleared.
   const edgesPreview = useCadPreview<ShapeEdgeMesh>(() => {
+    if (editing) return { ok: true, call: () => previewEdgesAtStep(editing.allFeatures, editing.stepIndex) };
     if (!shape) return { ok: false, message: "" };
     return { ok: true, call: () => previewEdges(shape) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shape]);
+  }, [shape, editing]);
 
   useEffect(() => {
     if (!targetBody) return;
@@ -88,12 +115,16 @@ export function CadFilletChamferEditor({
     if (status !== "ready" || !mesh) return;
     const picks = parseFilletPicks(edgePicks);
     if (!picks.ok) return;
+    if (editing) {
+      editing.onApply(filletChamferFeatureFromPicks(picks.value, editing.feature.picks[0]?.source_step ?? 0));
+      return;
+    }
     onApply(replaceBodyGeometry(robot, targetBodyId, mesh, [filletChamferFeatureFromPicks(picks.value, 0)]));
   };
 
   if (!targetBody) return null;
 
-  if (!shape) {
+  if (!editing && !shape) {
     return (
       <div className="body-inspector cad-extrude-creator">
         <h4>Fillet / Chamfer</h4>

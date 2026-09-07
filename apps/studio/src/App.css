@@ -1168,6 +1168,27 @@ body {
   color: var(--text);
 }
 
+/* CAD Kernel Phase 7.3: a Construction history row, clickable to edit that
+   step -- same "block button styled as a plain row" idiom as .hierarchy-row. */
+.feature-tree-step {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+
+.feature-tree-step:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
 .builder-add-body {
   margin-top: 10px;
   background: var(--panel-2);

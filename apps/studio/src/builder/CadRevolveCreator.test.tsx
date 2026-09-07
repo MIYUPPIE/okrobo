@@ -11,10 +11,12 @@ import { CAD_PREVIEW_DEBOUNCE_MS } from "./useCadPreview";
 const revolveMock = vi.fn();
 const previewEdgesMock = vi.fn();
 const filletMock = vi.fn();
+const replayFeaturesMock = vi.fn();
 vi.mock("../cad/cadClient", () => ({
   revolve: (...args: unknown[]) => revolveMock(...args),
   previewEdges: (...args: unknown[]) => previewEdgesMock(...args),
   fillet: (...args: unknown[]) => filletMock(...args),
+  replayFeatures: (...args: unknown[]) => replayFeaturesMock(...args),
 }));
 
 const noEdges = { lines: [] as number[], edgeGroups: [] as { start: number; count: number; edgeId: number }[] };
@@ -189,5 +191,76 @@ describe("CadRevolveCreator", () => {
     fireEvent.change(screen.getByLabelText("cad angle"), { target: { value: "180" } });
     expect(onEdgePicksChange).toHaveBeenCalledWith([]);
     expect(onEdgeOverlayChange).toHaveBeenCalledWith(null);
+  });
+
+  // CAD Kernel Phase 7.3 (edit-any-step).
+  describe("editing", () => {
+    const editFeature = { operation: "revolve" as const, profile: { type: "circle" as const, radius: 0.02 }, offset: 0.05, angle_deg: 360 };
+
+    it("seeds the form from the edited feature's own params", () => {
+      render(
+        <CadRevolveCreator
+          robot={makeRobot()}
+          near={null}
+          onApply={() => {}}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          edgePicks={[]}
+          onEdgePicksChange={() => {}}
+          onEdgeOverlayChange={() => {}}
+          editing={{ feature: editFeature, stepIndex: 0, allFeatures: [editFeature], targetBodyId: "chassis", onApply: () => {} }}
+        />,
+      );
+      expect(screen.getByText("Edit Revolve")).toBeInTheDocument();
+      expect(screen.getByLabelText("cad radius")).toHaveValue(0.02);
+      expect(screen.getByLabelText("cad offset")).toHaveValue(0.05);
+      expect(screen.getByLabelText("cad angle")).toHaveValue(360);
+    });
+
+    it("previews the whole chain via replayFeatures, not revolve() in isolation", async () => {
+      vi.useFakeTimers();
+      replayFeaturesMock.mockResolvedValue({ mesh, steps: [] });
+      render(
+        <CadRevolveCreator
+          robot={makeRobot()}
+          near={null}
+          onApply={() => {}}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          edgePicks={[]}
+          onEdgePicksChange={() => {}}
+          onEdgeOverlayChange={() => {}}
+          editing={{ feature: editFeature, stepIndex: 0, allFeatures: [editFeature], targetBodyId: "chassis", onApply: () => {} }}
+        />,
+      );
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      expect(replayFeaturesMock).toHaveBeenCalledWith([editFeature]);
+      expect(revolveMock).not.toHaveBeenCalled();
+    });
+
+    it("Apply calls editing.onApply with the freshly parsed Feature, not the normal makeCadBody/onApply path", async () => {
+      vi.useFakeTimers();
+      replayFeaturesMock.mockResolvedValue({ mesh, steps: [] });
+      const editApply = vi.fn();
+      const onApply = vi.fn();
+      render(
+        <CadRevolveCreator
+          robot={makeRobot()}
+          near={null}
+          onApply={onApply}
+          onCancel={() => {}}
+          onPreviewChange={() => {}}
+          edgePicks={[]}
+          onEdgePicksChange={() => {}}
+          onEdgeOverlayChange={() => {}}
+          editing={{ feature: editFeature, stepIndex: 0, allFeatures: [editFeature], targetBodyId: "chassis", onApply: editApply }}
+        />,
+      );
+      await advanceTimers(CAD_PREVIEW_DEBOUNCE_MS);
+      fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+      expect(editApply).toHaveBeenCalledWith(editFeature);
+      expect(onApply).not.toHaveBeenCalled();
+    });
   });
 });

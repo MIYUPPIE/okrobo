@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Body, Feature, RobotDef } from "../contracts/robotDef";
 import type { CadEdgeOverlay, CadPreview, ShapeEdgeMesh } from "../cad/cadClient";
-import { extrudeCircle, extrudeRectangle, fillet, previewEdges } from "../cad/cadClient";
-import { CadProfileDimensionFields, parseProfileDraft, positiveNumber, type ProfileDraft, type ProfileShape } from "./CadProfileFields";
+import { extrudeCircle, extrudeRectangle, fillet, previewEdges, replayFeatures } from "../cad/cadClient";
+import { CadProfileDimensionFields, parseProfileDraft, positiveNumber, profileDraftFrom, type ProfileDraft, type ProfileShape } from "./CadProfileFields";
 import { FilletEdgeList } from "./FilletEdgeList";
 import { filletChamferFeatureFromPicks, parseFilletPicks, type FilletPickDraft } from "./filletPicks";
 import { makeCadBody, nextBodyId } from "./robotEdits";
@@ -68,16 +68,41 @@ export interface CadExtrudeCreatorProps {
   edgePicks: FilletPickDraft[];
   onEdgePicksChange: (next: FilletPickDraft[]) => void;
   onEdgeOverlayChange: (overlay: CadEdgeOverlay | null) => void;
+  /** CAD Kernel Phase 7.3 (edit-any-step): when set, this creator is
+   * editing an EXISTING recorded extrude root feature at `stepIndex` of
+   * `allFeatures` (`targetBodyId`'s own body), not creating a new one --
+   * draft state seeds from `feature`'s own params, the embedded Fillet/
+   * Chamfer section is hidden (editing this step alone never adds a
+   * second one -- that's still only ever authored fresh, via this same
+   * creator's own create-mode Apply), the live preview replays the WHOLE
+   * chain via the executor (`allFeatures` with this step replaced) rather
+   * than just this step in isolation -- any step after it (a fillet,
+   * shell, draft, cut...) still applies on top, so what's previewed here
+   * is what Apply will actually produce, not a misleading isolated shape
+   * -- and Apply calls `onApply` with the freshly parsed Feature instead
+   * of creating a new body. See docs/decisions/cad-kernel-edit-any-step.md. */
+  editing?: {
+    feature: Extract<Feature, { operation: "extrude" }>;
+    stepIndex: number;
+    allFeatures: Feature[];
+    targetBodyId: string;
+    onApply: (nextFeature: Feature) => void;
+  };
 }
 
-export function CadExtrudeCreator({ robot, near, onApply, onCancel, onPreviewChange, edgePicks, onEdgePicksChange, onEdgeOverlayChange }: CadExtrudeCreatorProps) {
+export function CadExtrudeCreator({ robot, near, onApply, onCancel, onPreviewChange, edgePicks, onEdgePicksChange, onEdgeOverlayChange, editing }: CadExtrudeCreatorProps) {
   const bodyId = useMemo(() => nextBodyId(robot), [robot]);
-  const [draft, setDraft] = useState<Draft>(initialDraft);
+  const [draft, setDraft] = useState<Draft>(() => (editing ? { profile: profileDraftFrom(editing.feature.profile), depth: String(editing.feature.depth) } : initialDraft));
   const setProfile = (profile: ProfileDraft) => setDraft((d) => ({ ...d, profile }));
 
   const { status, error, mesh } = useCadPreview(() => {
     const parsed = parseDraft(draft);
     if (!parsed.ok) return parsed;
+    const rootFeature: Feature = { operation: "extrude", profile: parsed.value.profile, depth: parsed.value.depth };
+    if (editing) {
+      const nextFeatures = editing.allFeatures.map((f, i) => (i === editing.stepIndex ? rootFeature : f));
+      return { ok: true, call: () => replayFeatures(nextFeatures).then((r) => r.mesh) };
+    }
     if (edgePicks.length === 0) {
       const call = () =>
         parsed.value.profile.type === "rectangle"
@@ -90,31 +115,40 @@ export function CadExtrudeCreator({ robot, near, onApply, onCancel, onPreviewCha
     const shape = { operation: "extrude" as const, profile: parsed.value.profile, depth: parsed.value.depth };
     return { ok: true, call: () => fillet(shape, picks.value) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.profile, draft.depth, edgePicks]);
+  }, [draft.profile, draft.depth, edgePicks, editing]);
 
   // Only reacts on a real settle (ready/error) -- skips "loading" so the
   // previous preview stays visible during a recompute instead of flickering
-  // to nothing on every keystroke.
+  // to nothing on every keystroke. Editing an existing step previews at the
+  // target's own current position/rotation instead of a fresh `near`-relative
+  // placement.
   useEffect(() => {
     if (status === "ready" && mesh) {
-      const body = makeCadBody(bodyId, near, mesh, []);
-      onPreviewChange({ mesh, position: body.transform.position });
+      if (editing) {
+        const targetBody = robot.bodies.find((b) => b.id === editing.targetBodyId);
+        if (targetBody) onPreviewChange({ mesh, position: targetBody.transform.position, rotation: targetBody.transform.rotation_rpy });
+      } else {
+        const body = makeCadBody(bodyId, near, mesh, []);
+        onPreviewChange({ mesh, position: body.transform.position });
+      }
     } else if (status === "error") {
       onPreviewChange(null);
     }
-  }, [status, mesh, bodyId, near, onPreviewChange]);
+  }, [status, mesh, bodyId, near, onPreviewChange, editing, robot]);
 
   // CAD Kernel Phase 5: a second, independent preview -- this shape's own
   // pickable edges, recomputed only from the profile/dims (never from
   // edgePicks, so picking an edge never itself triggers a rebuild of the
-  // overlay it's picked from).
+  // overlay it's picked from). Never computed while editing an existing
+  // step -- that mode never shows the embedded Fillet/Chamfer section.
   const edgesPreview = useCadPreview<ShapeEdgeMesh>(() => {
+    if (editing) return { ok: false, message: "" };
     const parsed = parseDraft(draft);
     if (!parsed.ok) return parsed;
     const shape = { operation: "extrude" as const, profile: parsed.value.profile, depth: parsed.value.depth };
     return { ok: true, call: () => previewEdges(shape) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.profile, draft.depth]);
+  }, [draft.profile, draft.depth, editing]);
 
   useEffect(() => {
     if (edgesPreview.status === "ready" && edgesPreview.mesh) {
@@ -140,6 +174,10 @@ export function CadExtrudeCreator({ robot, near, onApply, onCancel, onPreviewCha
     const parsed = parseDraft(draft);
     if (!parsed.ok) return;
     const rootFeature: Feature = { operation: "extrude", profile: parsed.value.profile, depth: parsed.value.depth };
+    if (editing) {
+      editing.onApply(rootFeature);
+      return;
+    }
     const picks = parseFilletPicks(edgePicks);
     const features: Feature[] = picks.ok && picks.value.length > 0 ? [rootFeature, filletChamferFeatureFromPicks(picks.value, 0)] : [rootFeature];
     const body = makeCadBody(bodyId, near, mesh, features);
@@ -148,7 +186,7 @@ export function CadExtrudeCreator({ robot, near, onApply, onCancel, onPreviewCha
 
   return (
     <div className="body-inspector cad-extrude-creator">
-      <h4>New CAD part</h4>
+      <h4>{editing ? "Edit Extrude" : "New CAD part"}</h4>
 
       <section className="inspector-section">
         <h5>Profile</h5>
@@ -179,7 +217,7 @@ export function CadExtrudeCreator({ robot, near, onApply, onCancel, onPreviewCha
         </div>
       </section>
 
-      {edgesPreview.status === "ready" && <FilletEdgeList edgeMesh={edgesPreview.mesh} picks={edgePicks} onChange={onEdgePicksChange} />}
+      {!editing && edgesPreview.status === "ready" && <FilletEdgeList edgeMesh={edgesPreview.mesh} picks={edgePicks} onChange={onEdgePicksChange} />}
 
       {status === "loading" && <p className="cad-status">computing…</p>}
       {status === "error" && <p className="cad-status error">{error}</p>}

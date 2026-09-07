@@ -1658,3 +1658,77 @@ pick resolving "ok", and direct verification of resolveAfterOperation's
 hand-built raw OpenCascade scenarios. `npm run test` (615 passed across 62
 files), `npm run typecheck`, `npm run build` all green. No contract,
 Python, or C++ changes this phase.
+
+## CAD Kernel — Phase 7.3: Edit-any-step + live recompute (2026-09-07)
+
+Wires the 7.1 read-only Construction history panel to be interactive:
+click any step's own row and its own editor reopens, pre-filled, with a
+whole-chain live preview and a real Apply that recomputes everything
+through 7.2's `replayFeatures` executor. All 9 feature kinds a body can
+record are editable this way -- Boss roots (extrude/revolve/loft), bare
+primitive roots (box/cylinder, via a new `CadPrimitiveRootEditor.tsx` --
+no create-mode equivalent existed for these), Cut, Fillet/Chamfer, Shell,
+Draft.
+
+One shared `editing?: {feature, stepIndex, allFeatures, onApply, ...}`
+prop convention across all 9 components, rather than 9 separate edit-mode
+components: present, the draft seeds from the stored feature, create-only
+UI hides, and Apply calls `editing.onApply(builtFeature)` instead of the
+normal create path; absent, every component behaves exactly as it did
+before this phase (every pre-existing create-mode test still passes
+unmodified). `recomputeFeatureStep.ts` (new) is the one function every
+edit-mode Apply calls through -- swaps the edited feature into the body's
+own array, calls `replayFeatures`, and returns `{ok:false, message}`
+instead of throwing on a real rebuild failure.
+
+Caught before shipping (via an independent Explore subagent spawned
+specifically to check the claim): the first pass previewed every edit
+using the OLD single-shot per-operation function, showing only the
+isolated edited step -- never any downstream step (a shell/draft/cut
+recorded after it) that would still apply on top once Apply commits.
+Fixed across all 9 components: every edit-mode preview now calls
+`replayFeatures` on the WHOLE features array with only the edited step
+swapped -- the exact same call Apply itself makes, so preview and commit
+can never silently diverge.
+
+Re-opening an existing fillet_chamfer/shell/draft step needs pickable
+geometry that no longer exists on the body itself (already baked to
+`cad_mesh` the moment any such step was recorded) -- `executor.ts` gained
+`previewEdgesAtStep`/`previewFacesAtStep`, replaying just the PREFIX of a
+body's own recorded history (`features.slice(0, stepIndex)`) into a live
+shape purely to mesh its current edges/faces for that step's own editor
+to re-pick from. Both built on a newly-extracted `replayToShape`, now the
+one shared core underneath `replayFeaturesSync` and both preview
+functions.
+
+Real-browser E2E surfaced a genuine, worth-documenting limitation (not a
+bug): a picked face/edge's match tolerance is `diagonal * 0.005` --
+small enough that resizing a root along the SAME axis a downstream pick's
+own position depends on almost always breaks that pick, even for a
+"modest" change (a 0.05m box shelled on its own -X face, pick at
+`x=-0.025`, is reliably broken by resizing Size X to 0.08, while Size Y/Z
+edits leave the same pick fully intact). Accepted and documented the same
+way Phase 5/6 documented their own pick-ambiguity limits, rather than
+"fixed" -- see `docs/decisions/cad-kernel-edit-any-step.md`.
+
+Tests: `recomputeFeatureStep.test.ts` (new, 6 cases -- also where a real
+Vitest quirk was root-caused: a `beforeEach` calling `mockReset()`/
+`mockClear()` on a mock ANY later test configures with a rejected
+promise trips a spurious "unhandled rejection" failure even though the
+code under test genuinely catches it; fixed by dropping the shared
+`beforeEach` and clearing inline only where needed), `executor.test.ts`
+(+3, previewEdgesAtStep/previewFacesAtStep), `cadClient.test.ts` (+3),
+`FeatureTreeList.test.tsx` (+3, onSelectStep), `BodyInspector.test.tsx`
+(+1), `CadPrimitiveRootEditor.test.tsx` (new, 10 cases), 3 new "editing"
+cases in each of the other 8 creator/editor `.test.tsx` files,
+`BuilderPanel.test.tsx` (+6, the full edit-any-step state machine). New
+`studio-e2e-check.mjs` section against a live CAD worker: reopen the Box
+root editor pre-filled, whole-chain preview, Apply recomputes with the
+Shell step surviving an orthogonal-axis resize, re-opening to make a
+same-axis edit that breaks the Shell step's own pick shows the real
+rebuild-error message with Apply disabled, Cancel leaves the document
+unchanged. `npm run test` (675 passed across 64 files), `npm run typecheck`,
+`npm run build`, and the full `test-all.sh` gate (C++ ctest, Python
+pytest, TS vitest/typecheck/build, and the E2E checks run for real
+against a live dev server and headless Chrome) all green. No contract,
+Python, or C++ changes this phase.

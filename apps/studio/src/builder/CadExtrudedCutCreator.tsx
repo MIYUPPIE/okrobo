@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Feature, RobotDef } from "../contracts/robotDef";
 import type { CadPreview } from "../cad/cadClient";
-import { cut } from "../cad/cadClient";
+import { cut, replayFeatures } from "../cad/cadClient";
 import { CadProfileDimensionFields, parseProfileDraft, positiveNumber, type ProfileDraft, type ProfileShape } from "./CadProfileFields";
 import { geometryToMesh } from "./geometryToMesh";
 import { replaceBodyGeometry } from "./robotEdits";
@@ -67,17 +67,51 @@ export interface CadExtrudedCutCreatorProps {
   onApply: (nextRobot: RobotDef) => void;
   onCancel: () => void;
   onPreviewChange: (preview: CadPreview | null) => void;
+  /** CAD Kernel Phase 7.3 (edit-any-step): when set, this creator is
+   * editing an EXISTING recorded cut feature at `stepIndex` of
+   * `allFeatures` (still on `targetBodyId`'s own body -- no separate
+   * target needed) -- draft state seeds from `feature`'s own tool/
+   * position, the live preview replays the WHOLE chain via the executor
+   * (any step after this cut still applies on top), and Apply calls
+   * `onApply` with the freshly parsed Feature instead of
+   * replaceBodyGeometry. See docs/decisions/cad-kernel-edit-any-step.md. */
+  editing?: {
+    feature: Extract<Feature, { operation: "cut" }>;
+    stepIndex: number;
+    allFeatures: Feature[];
+    onApply: (nextFeature: Feature) => void;
+  };
 }
 
-export function CadExtrudedCutCreator({ robot, targetBodyId, onApply, onCancel, onPreviewChange }: CadExtrudedCutCreatorProps) {
+function draftFromFeature(feature: Extract<Feature, { operation: "cut" }>): Draft {
+  const tool = feature.tool;
+  const profile = tool.operation === "extrude" ? tool.profile : { type: "circle" as const, radius: 0.015 };
+  return {
+    profile:
+      profile.type === "rectangle"
+        ? { shape: "rectangle", width: String(profile.width), height: String(profile.height), radius: "0.015" }
+        : { shape: "circle", width: "0.02", height: "0.02", radius: String(profile.radius) },
+    depth: tool.operation === "extrude" ? String(tool.depth) : "0.2",
+    x: String(feature.position[0]),
+    y: String(feature.position[1]),
+    z: String(feature.position[2]),
+  };
+}
+
+export function CadExtrudedCutCreator({ robot, targetBodyId, onApply, onCancel, onPreviewChange, editing }: CadExtrudedCutCreatorProps) {
   const targetBody = robot.bodies.find((b) => b.id === targetBodyId);
   const targetMesh = useMemo(() => geometryToMesh(targetBody?.visual ?? targetBody?.collision), [targetBody]);
-  const [draft, setDraft] = useState<Draft>(initialDraft);
+  const [draft, setDraft] = useState<Draft>(() => (editing ? draftFromFeature(editing.feature) : initialDraft));
   const setProfile = (profile: ProfileDraft) => setDraft((d) => ({ ...d, profile }));
 
   const { status, error, mesh } = useCadPreview(() => {
     const parsed = parseDraft(draft);
     if (!parsed.ok) return parsed;
+    if (editing) {
+      const nextFeature: Feature = { operation: "cut", tool: { operation: "extrude", profile: parsed.value.profile, depth: parsed.value.depth }, position: parsed.value.position };
+      const nextFeatures = editing.allFeatures.map((f, i) => (i === editing.stepIndex ? nextFeature : f));
+      return { ok: true, call: () => replayFeatures(nextFeatures).then((r) => r.mesh) };
+    }
     const call = () =>
       cut({
         targetMesh,
@@ -86,7 +120,7 @@ export function CadExtrudedCutCreator({ robot, targetBodyId, onApply, onCancel, 
       });
     return { ok: true, call };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.profile, draft.depth, draft.x, draft.y, draft.z, targetMesh]);
+  }, [draft.profile, draft.depth, draft.x, draft.y, draft.z, targetMesh, editing]);
 
   useEffect(() => {
     if (!targetBody) return;
@@ -106,6 +140,10 @@ export function CadExtrudedCutCreator({ robot, targetBodyId, onApply, onCancel, 
       tool: { operation: "extrude", profile: parsed.value.profile, depth: parsed.value.depth },
       position: parsed.value.position,
     };
+    if (editing) {
+      editing.onApply(feature);
+      return;
+    }
     onApply(replaceBodyGeometry(robot, targetBodyId, mesh, [feature]));
   };
 
@@ -113,7 +151,7 @@ export function CadExtrudedCutCreator({ robot, targetBodyId, onApply, onCancel, 
 
   return (
     <div className="body-inspector cad-extrude-creator">
-      <h4>New CAD part (Extruded Cut)</h4>
+      <h4>{editing ? "Edit Cut (Extruded)" : "New CAD part (Extruded Cut)"}</h4>
       <p className="inspector-note">Cutting into {targetBody.name}</p>
 
       <section className="inspector-section">

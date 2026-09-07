@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CadPick, Feature, RobotDef } from "../contracts/robotDef";
 import type { CadFaceOverlay, CadPreview, FacePick, FacePreview, FilletBaseShape } from "../cad/cadClient";
-import { previewFaces } from "../cad/cadClient";
+import { previewFaces, previewFacesAtStep, replayFeatures } from "../cad/cadClient";
 import { shapeFromGeometry } from "./cadTargetShape";
 import { FacePickList } from "./FacePickList";
 import { replaceBodyGeometry } from "./robotEdits";
@@ -46,6 +46,28 @@ export interface CadFacePickEditorProps {
   facePicks: FacePick[];
   onFacePicksChange: (next: FacePick[]) => void;
   onFaceOverlayChange: (overlay: CadFaceOverlay | null) => void;
+  /** CAD Kernel Phase 7.3 (edit-any-step): when set, this editor is
+   * editing an EXISTING recorded shell/draft step at `stepIndex` of
+   * `allFeatures` (still on `targetBodyId`'s own body) -- `valueDraft`
+   * seeds from `feature`'s own thickness/angle_deg, the faces to pick
+   * from are replayed from `allFeatures.slice(0, stepIndex)` (the state
+   * right BEFORE this step ran -- the target's own CURRENT geometry is
+   * already a baked cad_mesh with no live B-rep left to pick from by the
+   * time any fillet_chamfer/shell/draft/cut step exists), the live
+   * preview replays the WHOLE chain (this step's own picks/value
+   * replaced), and Apply calls `onApply` with the freshly built Feature
+   * instead of replaceBodyGeometry. See
+   * docs/decisions/cad-kernel-edit-any-step.md. */
+  editing?: {
+    feature: Extract<Feature, { operation: "shell" } | { operation: "draft" }>;
+    stepIndex: number;
+    allFeatures: Feature[];
+    onApply: (nextFeature: Feature) => void;
+  };
+}
+
+function valueOf(feature: Extract<Feature, { operation: "shell" } | { operation: "draft" }>): number {
+  return feature.operation === "shell" ? feature.thickness : feature.angle_deg;
 }
 
 export function CadFacePickEditor({
@@ -64,18 +86,24 @@ export function CadFacePickEditor({
   facePicks,
   onFacePicksChange,
   onFaceOverlayChange,
+  editing,
 }: CadFacePickEditorProps) {
   const targetBody = robot.bodies.find((b) => b.id === targetBodyId);
-  const shape = useMemo(() => shapeFromGeometry(targetBody?.visual ?? targetBody?.collision), [targetBody]);
-  const [valueDraft, setValueDraft] = useState(defaultValue);
+  const shape = useMemo(() => (editing ? null : shapeFromGeometry(targetBody?.visual ?? targetBody?.collision)), [targetBody, editing]);
+  const [valueDraft, setValueDraft] = useState(() => (editing ? String(valueOf(editing.feature)) : defaultValue));
 
   const { status, error, mesh } = useCadPreview(() => {
-    if (!shape) return { ok: false, message: "" };
     const value = validateValue(valueDraft);
     if (!value.ok) return value;
+    if (editing) {
+      const nextFeature = buildFeature(cadPicksFromFacePicks(facePicks, editing.feature.picks[0]?.source_step ?? 0), value.value);
+      const nextFeatures = editing.allFeatures.map((f, i) => (i === editing.stepIndex ? nextFeature : f));
+      return { ok: true, call: () => replayFeatures(nextFeatures).then((r) => r.mesh) };
+    }
+    if (!shape) return { ok: false, message: "" };
     return { ok: true, call: () => computeMesh(shape, facePicks, value.value) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shape, facePicks, valueDraft]);
+  }, [shape, facePicks, valueDraft, editing]);
 
   useEffect(() => {
     if (!targetBody) return;
@@ -91,10 +119,11 @@ export function CadFacePickEditor({
   // preview to fetch faces from either -- previewFaces is called directly
   // off `shape` with no picks involved, and never needs to be cleared.
   const facesPreview = useCadPreview<FacePreview>(() => {
+    if (editing) return { ok: true, call: () => previewFacesAtStep(editing.allFeatures, editing.stepIndex) };
     if (!shape) return { ok: false, message: "" };
     return { ok: true, call: () => previewFaces(shape) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shape]);
+  }, [shape, editing]);
 
   useEffect(() => {
     if (!targetBody) return;
@@ -114,13 +143,17 @@ export function CadFacePickEditor({
     if (status !== "ready" || !mesh) return;
     const value = validateValue(valueDraft);
     if (!value.ok) return;
+    if (editing) {
+      editing.onApply(buildFeature(cadPicksFromFacePicks(facePicks, editing.feature.picks[0]?.source_step ?? 0), value.value));
+      return;
+    }
     const feature = buildFeature(cadPicksFromFacePicks(facePicks, 0), value.value);
     onApply(replaceBodyGeometry(robot, targetBodyId, mesh, [feature]));
   };
 
   if (!targetBody) return null;
 
-  if (!shape) {
+  if (!editing && !shape) {
     return (
       <div className="body-inspector cad-extrude-creator">
         <h4>{title}</h4>
