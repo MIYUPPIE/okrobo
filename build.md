@@ -1976,3 +1976,49 @@ reasoning, including the complete list of what's deliberately out of
 scope (ordered checkpoints, Robot-Builder-authored robots in
 competitions, AI opponents, tournaments, team mode, an AI coach, and the
 full "OKHUB FutureLab" rebrand itself).
+
+## Competition Arena — C2: Compete mode UI (2026-09-09)
+
+The 3rd top-level `mode` in `App.tsx` (`"simulate" | "build" | "compete"`),
+reusing the exact same car-physics path Simulate mode already drives --
+same `engine`/`arm`/`drone`/`world`/`runner` state, same `<Viewport3D>`
+instance, same Blocks/Python/World/Lessons/C++ tabs. A competition changes
+only which arena is loaded and adds an outside-the-program scoring layer;
+the student's program is untouched.
+
+Rather than giving Compete mode a fully separate JSX block (Build mode's
+own precedent, needed there because it mounts an entirely different
+MuJoCo/`BuilderViewport` stack with no code tabs at all), the existing
+`{mode === "simulate" && (...)}` block widened to
+`{(mode === "simulate" || mode === "compete") && (...)}`, with only the
+sidebar's own inner content branching per mode. This keeps the ~150-line
+viewport/code-panel markup shared instead of duplicated -- see
+docs/decisions/competition-arena-definition-scoring.md's C2 section for
+the full reasoning, including why this reads as staying inside the
+approved plan's real intent rather than departing from it.
+
+Three new components in `apps/studio/src/compete/`: `CompetitionDialog.tsx`
+(a competition picker, structural mirror of `builder/TemplateDialog.tsx`),
+`CompeteHud.tsx` (a live scoreboard overlay), `CompeteReport.tsx` (an
+end-of-run report with "Run again"/"Choose another competition"). New
+`App.tsx` state (`competition`, `competeRun`, `competeDialogOpen`) and an
+`onEngineStep` hook wired into `Viewport3D` only in Compete mode, calling
+`evaluateTick` every simulated step; finalizing a run reuses the existing
+`run()`/`stop()`/`reset()` lifecycle points (`finishRun`) rather than
+inventing new ones.
+
+Tests: `CompetitionDialog.test.tsx` (7 cases), `CompeteHud.test.tsx` (3),
+`CompeteReport.test.tsx` (3) -- 787 total passing, up from 774. `npm run
+test`, `npm run typecheck`, `npm run build` (852 modules) all green.
+`./scripts/check-studio-e2e.sh` run for real in headless Chrome: 5 new
+"Compete mode" checks pass (mode switches in, picker opens and settles to
+a real empty state since no competitions are shipped yet, Cancel returns
+to a clean "nothing chosen" sidebar with Run/Stop/Reset disabled,
+switching back to Simulate restores the sim UI) alongside the full
+existing suite. The live-run path (pick a competition, watch the
+scoreboard, Stop shows a report) is proven directly by `score.test.ts` /
+`CompeteHud.test.tsx` / `CompeteReport.test.tsx` against real
+`CompetitionRunState` values; a real pick-and-play e2e path lands with C3
+once `packs/core/competitions/*.json` exist. See
+docs/decisions/competition-arena-definition-scoring.md for the full
+reasoning.

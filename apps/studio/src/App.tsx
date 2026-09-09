@@ -21,6 +21,11 @@ import { isTeleopKey, normalizeKey, teleopWheels } from "./lib/teleop";
 import { validateWorld, type WorldDef } from "./lib/validateWorld";
 import { runProgram } from "./program/execute";
 import { ProgramRunner, ProgramStoppedError } from "./program/ProgramRunner";
+import { CompetitionDialog } from "./compete/CompetitionDialog";
+import { CompeteHud } from "./compete/CompeteHud";
+import { CompeteReport } from "./compete/CompeteReport";
+import type { CompetitionDef } from "./compete/competitionDef";
+import { evaluateTick, finishRun, initRunState, type CompetitionRunState } from "./compete/score";
 import {
   createProject,
   deleteProject,
@@ -134,8 +139,21 @@ export default function App() {
   // Build mode is a separate top-level mode from `robot: RobotKind` -- a
   // robot-def in progress isn't a physics-simulated robot kind, and has no
   // WASM engine behind it. Switching modes never touches `robot`/`engine`.
-  const [mode, setMode] = useState<"simulate" | "build">("simulate");
+  // Compete mode reuses the exact same car-physics path Simulate mode uses
+  // (same engine/runner, same Viewport3D) -- only the arena underneath and
+  // an outside-the-program scoring layer differ. See
+  // docs/decisions/competition-arena-definition-scoring.md.
+  const [mode, setMode] = useState<"simulate" | "build" | "compete">("simulate");
   const [robotDef, setRobotDef] = useState<RobotDef | null>(null);
+  const [competition, setCompetition] = useState<CompetitionDef | null>(null);
+  const [competeRun, setCompeteRun] = useState<CompetitionRunState | null>(null);
+  const [competeDialogOpen, setCompeteDialogOpen] = useState(false);
+  // Read inside the PythonBridge's onDone closure (created once per
+  // engine/runner change, so `mode` itself would go stale there) -- kept
+  // current every render rather than via an effect, same "cheap enough to
+  // just do inline" reasoning as jsCodeRef/pythonSourceRef above.
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
 
   useEffect(() => {
     let cancelled = false;
@@ -218,6 +236,9 @@ export default function App() {
         if (exitCode !== 0) {
           appendOutput({ stream: "stderr", text: `--- exited with code ${exitCode} ---\n` });
         }
+        if (modeRef.current === "compete") {
+          setCompeteRun((previous) => (previous ? finishRun(previous, "program_ended") : previous));
+        }
       },
     });
     bridgeRef.current = bridge;
@@ -275,6 +296,23 @@ export default function App() {
     autopilotRef.current = false;
     setRunStatus("wall");
   }, []);
+  // Compete mode's own per-tick scoring hook, threaded into Viewport3D's
+  // ProgramRunner.tick() only while a competition is loaded. Reads
+  // `competition` via the ref-free closure recreated each render (mirrors
+  // `onCode`/`onPythonSource`'s own plain-callback posture) -- cheap, and
+  // Viewport3D's effect already depends on this identity via its deps array.
+  const onEngineStep = useCallback(
+    (state: { pose: { x: number; y: number; theta: number } }, dt: number) => {
+      if (!competition) return;
+      setCompeteRun((previous) => {
+        if (!previous) return previous;
+        const next = evaluateTick(competition, previous, state.pose, dt);
+        if (next.timeUp && !previous.timeUp) haltEverything();
+        return next;
+      });
+    },
+    [competition],
+  );
   const onCode = useCallback((js: string, python: string, cpp: string) => {
     jsCodeRef.current = js;
     setPythonCode(python);
@@ -336,11 +374,13 @@ export default function App() {
         engine.apply({ type: "stop" });
         arm?.apply({ type: "stop" });
         drone?.apply({ type: "drone_stop" });
+        if (mode === "compete") setCompeteRun((previous) => (previous ? finishRun(previous, "program_ended") : previous));
       });
   };
 
   const stop = () => {
     haltEverything();
+    if (mode === "compete") setCompeteRun((previous) => (previous ? finishRun(previous, "stopped") : previous));
   };
 
   const reset = () => {
@@ -349,6 +389,22 @@ export default function App() {
     engine.apply({ type: "reset" });
     arm?.apply({ type: "reset" });
     drone?.apply({ type: "drone_reset" });
+    if (mode === "compete" && competition) setCompeteRun(initRunState(competition));
+  };
+
+  const pickCompetition = (picked: CompetitionDef) => {
+    switchRobot("car");
+    applyWorld(picked.arena);
+    setCompetition(picked);
+    setCompeteRun(initRunState(picked));
+    setCompeteDialogOpen(false);
+  };
+
+  const chooseAnotherCompetition = () => {
+    haltEverything();
+    setCompetition(null);
+    setCompeteRun(null);
+    setCompeteDialogOpen(true);
   };
 
   // Desktop window title follows the open project.
@@ -582,15 +638,27 @@ export default function App() {
   const statusText =
     mode === "build"
       ? formatBuilderStatus(robotDef, robotDef ? validateRobotDef(robotDef) : [])
-      : formatStudioStatus({
-          robotLabel: robot === "arm" ? "Arm" : robot === "drone" ? "Drone" : world.name,
-          engineStatus,
-          hud,
-          runStatus,
-          pythonConnected,
-          hardware,
-          notice,
-        });
+      : mode === "compete"
+        ? competition
+          ? formatStudioStatus({
+              robotLabel: competition.name,
+              engineStatus,
+              hud,
+              runStatus,
+              pythonConnected,
+              hardware,
+              notice,
+            })
+          : "choose a competition"
+        : formatStudioStatus({
+            robotLabel: robot === "arm" ? "Arm" : robot === "drone" ? "Drone" : world.name,
+            engineStatus,
+            hud,
+            runStatus,
+            pythonConnected,
+            hardware,
+            notice,
+          });
 
   return (
     <div className={mode === "build" ? "studio mode-build" : "studio"}>
@@ -757,15 +825,46 @@ export default function App() {
           <button className={mode === "build" ? "active" : ""} onClick={() => setMode("build")}>
             Build
           </button>
+          <button
+            className={mode === "compete" ? "active" : ""}
+            onClick={() => {
+              setMode("compete");
+              if (!competition) setCompeteDialogOpen(true);
+            }}
+          >
+            Compete
+          </button>
         </div>
         {inDesktop && (
           <span className="project-chip">{currentProject ? currentProject.name : "untitled"}</span>
         )}
       </header>
 
-      {mode === "simulate" && (
+      {(mode === "simulate" || mode === "compete") && (
       <>
       <aside className="sidebar">
+        {mode === "compete" ? (
+          <>
+            <h2>Competition</h2>
+            {competition ? (
+              <>
+                <p className="compete-sidebar-note">{competition.name}</p>
+                {competition.description && <p className="compete-sidebar-note">{competition.description}</p>}
+                <button className="link-button" onClick={() => setCompeteDialogOpen(true)}>
+                  Choose a different competition
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="compete-sidebar-note">No competition chosen yet.</p>
+                <button className="link-button" onClick={() => setCompeteDialogOpen(true)}>
+                  Choose a competition…
+                </button>
+              </>
+            )}
+          </>
+        ) : (
+          <>
         <h2>Robots</h2>
         <ul>
           {ROBOTS.map((r) => (
@@ -858,6 +957,8 @@ export default function App() {
             </>
           )}
         </div>
+          </>
+        )}
       </aside>
 
       <main className="viewport">
@@ -873,6 +974,7 @@ export default function App() {
             autopilotRef={autopilotRef}
             onState={onState}
             onAutoStop={onAutoStop}
+            onEngineStep={mode === "compete" ? onEngineStep : undefined}
           />
         ) : (
           <>
@@ -883,6 +985,17 @@ export default function App() {
                 : "Engine not built: run ./scripts/build-engine-wasm.sh, then reload"}
             </div>
           </>
+        )}
+        {mode === "compete" && competition && competeRun && !competeRun.finished && (
+          <CompeteHud competition={competition} run={competeRun} />
+        )}
+        {mode === "compete" && competition && competeRun && competeRun.finished && (
+          <CompeteReport
+            competition={competition}
+            run={competeRun}
+            onRunAgain={reset}
+            onChooseAnother={chooseAnotherCompetition}
+          />
         )}
       </main>
 
@@ -967,13 +1080,23 @@ export default function App() {
         ))}
 
       <footer className="run-bar">
-        <button className="run" onClick={run} disabled={mode !== "simulate" || engineStatus !== "ready"}>
+        <button
+          className="run"
+          onClick={run}
+          disabled={(mode !== "simulate" && mode !== "compete") || engineStatus !== "ready" || (mode === "compete" && !competition)}
+        >
           ▶ Run
         </button>
-        <button onClick={stop} disabled={mode !== "simulate" || engineStatus !== "ready"}>
+        <button
+          onClick={stop}
+          disabled={(mode !== "simulate" && mode !== "compete") || engineStatus !== "ready" || (mode === "compete" && !competition)}
+        >
           ⏹ Stop
         </button>
-        <button onClick={reset} disabled={mode !== "simulate" || engineStatus !== "ready"}>
+        <button
+          onClick={reset}
+          disabled={(mode !== "simulate" && mode !== "compete") || engineStatus !== "ready" || (mode === "compete" && !competition)}
+        >
           🔄 Reset
         </button>
         <span className="status">{statusText}</span>
@@ -1003,6 +1126,12 @@ export default function App() {
             setDialog("none");
           }}
           onCancel={() => setDialog("none")}
+        />
+      )}
+      {competeDialogOpen && (
+        <CompetitionDialog
+          onPick={pickCompetition}
+          onCancel={() => setCompeteDialogOpen(false)}
         />
       )}
     </div>

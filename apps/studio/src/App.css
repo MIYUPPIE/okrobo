@@ -246,6 +246,109 @@ body {
   color: var(--text-dim);
 }
 
+/* Compete mode (Competition Arena C2): a small always-visible scoreboard
+   while a run is live, top-left of the same .viewport a plain Viewport3D
+   already occupies -- same "position: absolute overlay inside a relative
+   .viewport" idiom .joint-pick-hint already established. */
+.compete-hud {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: 220px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+
+.compete-hud h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.compete-hud-row {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+
+.compete-hud-score {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.compete-hud-objectives {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+
+.compete-objective {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-dim);
+  padding: 2px 0;
+}
+
+.compete-objective.active {
+  color: var(--text);
+}
+
+/* The end-of-run report -- a more prominent centred card over the same
+   .viewport, not a full dialog-backdrop: the student can still see the
+   robot's own final resting pose behind it. */
+.compete-report {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 18px;
+  width: 360px;
+  z-index: 10;
+}
+
+.compete-report h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+.compete-report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.compete-report-table th,
+.compete-report-table td {
+  text-align: left;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.compete-report-table th {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.compete-report-total {
+  margin: 10px 0;
+  font-size: 13px;
+}
+
+.compete-sidebar-note {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
 .shortcut-list {
   list-style: none;
   margin: 0;
