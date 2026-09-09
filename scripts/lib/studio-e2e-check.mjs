@@ -1537,6 +1537,19 @@ try {
     5000,
   );
   check("Simulate mode: the picker's packs section settles to a clean empty state", packsSettled);
+  // Robot Builder D2's third section -- this harness has no other saved
+  // project to read back (isTauri() is false, listProjects() rejects,
+  // same limitation the packs section above already has), so only the
+  // real empty state is provable here; the real happy path (a robot saved
+  // in a DIFFERENT project becomes pickable) is proven by
+  // projectRobots.test.ts/BuiltRobotDialog.test.tsx and needs a manual
+  // pass in the real Tauri desktop shell to see end to end. See
+  // docs/decisions/robot-builder-lifecycle.md.
+  const projectsSettled = await waitForCondition(
+    "[...document.querySelectorAll('.dialog-empty')].some(p => p.textContent?.includes('No other saved project carries a robot'))",
+    5000,
+  );
+  check("Simulate mode: the picker's saved-projects section settles to a clean empty state", projectsSettled);
 
   await page.evalClickText(".dialog-actions button", "/^Cancel$/");
   const cancelledCleanly = await waitForCondition(

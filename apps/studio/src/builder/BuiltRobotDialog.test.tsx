@@ -6,11 +6,14 @@ import { validateRobotDef, type RobotDef } from "../contracts/robotDef";
 import { makeDefaultRobotDef } from "./robotEdits";
 import { BuiltRobotDialog } from "./BuiltRobotDialog";
 import { listPackRobots } from "./packRobots";
+import { listProjectRobots } from "./projectRobots";
 
 vi.mock("./packRobots", () => ({ listPackRobots: vi.fn() }));
+vi.mock("./projectRobots", () => ({ listProjectRobots: vi.fn() }));
 
 beforeEach(() => {
   vi.mocked(listPackRobots).mockResolvedValue([]);
+  vi.mocked(listProjectRobots).mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -110,5 +113,32 @@ describe("BuiltRobotDialog", () => {
 
     await user.click(screen.getByText("Pack Rover"));
     expect(onPick).toHaveBeenCalledWith(packRobot);
+  });
+
+  it("shows an empty state when no other saved project carries a robot", async () => {
+    render(<BuiltRobotDialog currentRobotDef={null} currentIssues={[]} onPick={() => {}} onCancel={() => {}} />);
+    await waitFor(() => expect(screen.getByText(/No other saved project carries a robot/i)).toBeInTheDocument());
+  });
+
+  it("lists a robot from another saved project and picks it via make()", async () => {
+    const projectRobot = makeDefaultRobotDef();
+    vi.mocked(listProjectRobots).mockResolvedValue([
+      { project: { id: "other", name: "My Other Project", created_at: 0, updated_at: 0 }, label: "Saved Rover", make: () => projectRobot },
+    ]);
+
+    const onPick = vi.fn();
+    const user = userEvent.setup();
+    render(<BuiltRobotDialog currentRobotDef={null} currentIssues={[]} onPick={onPick} onCancel={() => {}} />);
+
+    await waitFor(() => expect(screen.getByText("Saved Rover")).toBeInTheDocument());
+    expect(screen.getByText(/from "My Other Project"/i)).toBeInTheDocument();
+
+    await user.click(screen.getByText("Saved Rover"));
+    expect(onPick).toHaveBeenCalledWith(projectRobot);
+  });
+
+  it("passes currentProjectId through to listProjectRobots, so the open project isn't listed twice", () => {
+    render(<BuiltRobotDialog currentRobotDef={null} currentIssues={[]} currentProjectId="proj-1" onPick={() => {}} onCancel={() => {}} />);
+    expect(listProjectRobots).toHaveBeenCalledWith("proj-1");
   });
 });

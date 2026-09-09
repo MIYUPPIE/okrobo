@@ -1227,6 +1227,26 @@ body {
   flex-shrink: 0;
 }
 
+/* Robot Builder D2: clears the document back to "no robot yet." Same
+   shape as .builder-export (a whole-document action, not a per-body
+   one), plus the two-click .confirm state .delete-btn/.feature-tree-delete
+   already established elsewhere in Build mode. */
+.builder-new-robot-clear {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.builder-new-robot-clear.confirm {
+  color: #ff7a7a;
+  border-color: #ff7a7a;
+}
+
 .hierarchy-list {
   flex: 1;
   min-height: 0;

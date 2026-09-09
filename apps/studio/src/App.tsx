@@ -737,6 +737,18 @@ export default function App() {
     showNotice("new project");
   };
 
+  /** Clears just the robot (Robot Builder D2) -- narrower than actionNew:
+   * the project name/association, Blocks/Python code, and world are all
+   * untouched. Falls back to the same "+ New Robot" empty state/
+   * TemplateDialog flow actionNew's own robotDef=null case already uses.
+   * Deliberately does not touch `simulateBuilt` -- B2 already established
+   * it as its own independent snapshot, taken at pick time, unaffected by
+   * Build mode's own in-progress document changing underneath it. */
+  const actionNewRobot = () => {
+    setRobotDef(null);
+    showNotice("robot cleared");
+  };
+
   const actionSave = async () => {
     closeMenu();
     if (!currentProject) {
@@ -1346,7 +1358,7 @@ export default function App() {
 
       {mode === "build" &&
         (robotDef ? (
-          <BuilderPanel robot={robotDef} onChange={setRobotDef} />
+          <BuilderPanel robot={robotDef} onChange={setRobotDef} onNewRobot={actionNewRobot} />
         ) : (
           <div className="builder-stage builder-empty">
             <p>No robot in this project yet.</p>
@@ -1409,6 +1421,7 @@ export default function App() {
         <BuiltRobotDialog
           currentRobotDef={robotDef}
           currentIssues={builtRobotIssues}
+          currentProjectId={currentProject?.id}
           onPick={pickBuiltRobot}
           onCancel={() => setBuiltRobotDialogOpen(false)}
         />

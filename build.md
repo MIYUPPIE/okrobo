@@ -2279,3 +2279,52 @@ CAD-Kernel/Joint-Authoring sequence above happened to leave behind) --
 passed twice in a row alongside the full existing suite. See
 docs/decisions/robot-builder-actuator-sensor-authoring.md for the complete
 reasoning.
+
+## Robot Builder — D2: robot lifecycle (2026-09-09)
+
+Closes the last two gaps the user flagged: no way to finish one robot and
+start a new one without discarding the whole project (`actionNew()` --
+File > New Project -- was the only way to clear `robotDef`, wiping
+Blocks/Python/world too), and no way to reuse a robot saved in a
+*different* project inside Simulate mode's own built-robot picker.
+
+Investigated first, before writing anything: this repo's existing project
+system already answers "multiple saved robots" -- `ProjectPayload` is a
+flat one-robot-per-project bundle, and `OpenDialog`/`NameDialog` already
+give a full list/open/delete UI for named saved things. Once a "clear
+just the robot" action exists, "build one, Save As, clear, build the
+next" is already a working library with zero new backend concept needed.
+
+`actionNewRobot()` clears only `robotDef` -- project name, Blocks/Python,
+world, and Robot Builder B2's own `simulateBuilt` snapshot all stay
+untouched (B2 already established `simulateBuilt` as independent of
+Build mode's in-progress document; this stays consistent with that, not
+reaching across it). Gated behind a two-click confirm (mirroring the
+existing body/feature-step delete idiom) -- a deliberate exception to
+this app's otherwise-no-warnings-anywhere pattern (confirmed directly:
+neither `actionNew()` nor `openProjectById()` warns before discarding
+work today), justified because the new trigger button is *always visible*
+once a robot exists, unlike today's "+ New Robot" (reachable only once,
+from the empty state).
+
+New `apps/studio/src/builder/projectRobots.ts` mirrors `packRobots.ts`'s
+own resilience conventions (one corrupt project skipped and logged, never
+blanks the list; a fresh `make()` per pick) but is structurally simpler --
+`loadProject()` already returns the full payload in one round trip, no
+separate manifest-then-file read needed. `BuiltRobotDialog.tsx` gained a
+third "From your saved projects" section, excluding the currently-open
+project (already covered by the existing "current robot" row).
+
+Tests: `projectRobots.test.ts` (7 cases), `BuiltRobotDialog.test.tsx`
+extended (+3), `BuilderPanel.test.tsx` extended (+2). `npm run test` (850
+passing, up from 838), `npm run typecheck`, `npm run build`.
+`./scripts/check-studio-e2e.sh` gained one more check (the saved-projects
+section settles to a real empty state in this browser-mode harness, which
+has no way to create a second real Tauri-backed project to prove the full
+cross-project pick -- that's proven by `projectRobots.test.ts` instead,
+stated plainly, matching Phase 8's own precedent for Tauri-only paths).
+Manually verified in real headless Chrome: two-click New Robot correctly
+confirms before clearing, and Blocks/Python content survives the clear
+untouched. This closes the Robot Builder initiative's full D1+D2 scope --
+sensors/actuators can be authored, explained, saved, and reused. See
+docs/decisions/robot-builder-lifecycle.md for the complete reasoning.

@@ -57,6 +57,11 @@ import { WORLD_OPTIONS } from "./worldExamples";
 export interface BuilderPanelProps {
   robot: RobotDef;
   onChange: (next: RobotDef) => void;
+  /** Robot Builder D2: clears the document back to "no robot yet" so a
+   * new one can be built, without touching the project's own name/Blocks/
+   * Python/world. Optional so existing test fixtures that don't care
+   * about this action need no changes. */
+  onNewRobot?: () => void;
 }
 
 type BuilderMode = "edit" | "test";
@@ -106,7 +111,16 @@ const CUT_TOOLS: ReadonlySet<BuilderTool> = new Set(["extruded-cut", "revolved-c
  * creator to render). */
 const TARGET_PICK_TOOLS: ReadonlySet<BuilderTool> = new Set([...CUT_TOOLS, "fillet-chamfer", "shell", "draft", "add-sensor"]);
 
-export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
+export function BuilderPanel({ robot, onChange, onNewRobot }: BuilderPanelProps) {
+  const [confirmingNewRobot, setConfirmingNewRobot] = useState(false);
+  const requestNewRobot = () => {
+    if (!confirmingNewRobot) {
+      setConfirmingNewRobot(true);
+      return;
+    }
+    setConfirmingNewRobot(false);
+    onNewRobot?.();
+  };
   const [selectedBodyId, setSelectedBodyId] = useState<string | null>(robot.bodies[0]?.id ?? null);
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
   const [builderTool, setBuilderTool] = useState<BuilderTool>("transform");
@@ -728,6 +742,16 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
           >
             Export
           </button>
+          {onNewRobot && (
+            <button
+              type="button"
+              className={confirmingNewRobot ? "builder-new-robot-clear confirm" : "builder-new-robot-clear"}
+              title="Save this design first (Export, or File > Save As) if you want to keep it -- this only clears the document, your project's Blocks/Python/world stay untouched"
+              onClick={requestNewRobot}
+            >
+              {confirmingNewRobot ? "clear robot?" : "New Robot"}
+            </button>
+          )}
         </div>
         <div className="builder-mode-toggle">
           <button type="button" className={builderMode === "edit" ? "active" : ""} onClick={() => setBuilderMode("edit")}>

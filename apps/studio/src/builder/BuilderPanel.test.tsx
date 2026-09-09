@@ -330,6 +330,26 @@ describe("BuilderPanel", () => {
     expect(exportRobotDef).toHaveBeenCalledWith(robot);
   });
 
+  // Robot Builder D2.
+  it("does not render a New Robot button when onNewRobot is omitted", () => {
+    render(<BuilderPanel robot={makeRobot()} onChange={() => {}} />);
+    expect(screen.queryByRole("button", { name: /New Robot/ })).not.toBeInTheDocument();
+  });
+
+  it("New Robot needs a two-click confirm, and calls onNewRobot only on the second click", async () => {
+    const onNewRobot = vi.fn();
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={() => {}} onNewRobot={onNewRobot} />);
+
+    const button = screen.getByRole("button", { name: "New Robot" });
+    await user.click(button);
+    expect(onNewRobot).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "clear robot?" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "clear robot?" }));
+    expect(onNewRobot).toHaveBeenCalledTimes(1);
+  });
+
   it("Add body appends a new body, selects it, and passes the update to onChange", async () => {
     const onChange = vi.fn();
     const user = userEvent.setup();
