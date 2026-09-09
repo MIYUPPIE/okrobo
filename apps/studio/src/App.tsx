@@ -8,17 +8,24 @@ import { CameraView } from "./CameraView";
 import type { RobotKind } from "./blocks/okroboBlocks";
 import { BlocksPanel, type BlocksPanelHandle } from "./BlocksPanel";
 import { BuilderPanel } from "./builder/BuilderPanel";
+import { BuiltRobotDialog } from "./builder/BuiltRobotDialog";
 import { TemplateDialog } from "./builder/TemplateDialog";
+import { TestViewport } from "./builder/TestViewport";
+import { WORLD_OPTIONS } from "./builder/worldExamples";
 import { parseRobotDef, validateRobotDef, type RobotDef } from "./contracts/robotDef";
+import type { WorldDef as BuiltWorldDef } from "./contracts/worldDef";
 import { EngineArm } from "./engine/EngineArm";
+import { EngineBuiltRobot } from "./engine/EngineBuiltRobot";
 import { EngineDrone } from "./engine/EngineDrone";
 import { EngineWorld } from "./engine/EngineWorld";
-import { loadEngine } from "./engine/loader";
+import { ENGINE_MISSING_MESSAGE, loadEngine } from "./engine/loader";
 import { LessonsPanel } from "./LessonsPanel";
 import { editActionsForTab } from "./lib/editMenu";
 import { formatBuilderStatus, formatStudioStatus } from "./lib/statusText";
 import { isTeleopKey, normalizeKey, teleopWheels } from "./lib/teleop";
 import { validateWorld, type WorldDef } from "./lib/validateWorld";
+import { setBuiltRobotFields } from "./blocks/okroboBlocks";
+import { BuiltProgramRunner, type BuiltRobotApi } from "./program/BuiltProgramRunner";
 import { runProgram } from "./program/execute";
 import { ProgramRunner, ProgramStoppedError } from "./program/ProgramRunner";
 import { CompetitionDialog } from "./compete/CompetitionDialog";
@@ -37,6 +44,7 @@ import {
   saveProject,
 } from "./projects/api";
 import {
+  executeBuiltRemoteRequest,
   type FlashStatus,
   type HardwareStatus,
   PythonBridge,
@@ -132,7 +140,6 @@ export default function App() {
     python?: string;
     pythonEdited: boolean;
   } | null>(null);
-  const pendingForRobot = pendingContent?.robot === robot ? pendingContent : null;
   const clearPendingContent = useCallback(() => setPendingContent(null), []);
   const noticeTimer = useRef(0);
 
@@ -157,6 +164,38 @@ export default function App() {
   const [competition, setCompetition] = useState<CompetitionDef | null>(null);
   const [competeRun, setCompeteRun] = useState<CompetitionRunState | null>(null);
   const [competeDialogOpen, setCompeteDialogOpen] = useState(false);
+
+  // Robot Builder B2: a built robot in Simulate mode. Deliberately
+  // orthogonal to `robot: RobotKind` (car/arm/drone stay untouched, an
+  // always-resident trio regardless of this) rather than a 4th RobotKind
+  // value -- see docs/decisions/robot-builder-simulate-mode.md for why.
+  const [simulateBuilt, setSimulateBuilt] = useState<{ robot: RobotDef; world: BuiltWorldDef | null } | null>(null);
+  const [builtRobotDialogOpen, setBuiltRobotDialogOpen] = useState(false);
+  const [builtWorldOptionId, setBuiltWorldOptionId] = useState("");
+  const [builtEngineStatus, setBuiltEngineStatus] = useState<"loading" | "ready" | "missing" | "error">("loading");
+  const [builtEngineError, setBuiltEngineError] = useState("");
+  const [builtEngine, setBuiltEngine] = useState<EngineBuiltRobot | null>(null);
+  const [builtRunner, setBuiltRunner] = useState<BuiltProgramRunner | null>(null);
+  const [builtRunStatus, setBuiltRunStatus] = useState<"idle" | "running" | "error">("idle");
+  const [builtRunError, setBuiltRunError] = useState("");
+  const [builtPythonConnected, setBuiltPythonConnected] = useState(false);
+  const [builtPythonOutput, setBuiltPythonOutput] = useState<OutputLine[]>([]);
+  const builtBridgeRef = useRef<PythonBridge<BuiltRobotApi> | null>(null);
+  const builtProgramActiveRef = useRef(false);
+  const builtPythonActiveRef = useRef(false);
+  // Gates BuiltRobotDialog's "current robot" row -- the same zero-error
+  // gate Build mode's own Test button already uses.
+  const builtRobotIssues = useMemo(() => (robotDef ? validateRobotDef(robotDef) : []), [robotDef]);
+  // Must run before <BlocksPanel robot="built"> mounts (its dropdown fields
+  // are read at construction time) -- render-body write, not an effect, the
+  // same race-avoidance ordering BuilderPanel.tsx/robot-builder-programming.md
+  // already document.
+  if (simulateBuilt) setBuiltRobotFields(simulateBuilt.robot.actuators, simulateBuilt.robot.sensors);
+  // A built robot never populates pendingContent (only lesson "Try this"/
+  // project loads do, both car/arm/drone-only) -- excluded explicitly so a
+  // stale pending entry from before picking a built robot can never seed
+  // its Blocks/Python panels with content meant for a different robot kind.
+  const pendingForRobot = !simulateBuilt && pendingContent?.robot === robot ? pendingContent : null;
   // Read inside the PythonBridge's onDone closure (created once per
   // engine/runner change, so `mode` itself would go stale there) -- kept
   // current every render rather than via an effect, same "cheap enough to
@@ -195,6 +234,74 @@ export default function App() {
       setRunner(null);
     };
   }, [world]);
+
+  // Robot Builder B2: constructs a built robot's own engine/runner when
+  // picked, mirroring BuilderPanel.tsx's Test-mode construction effect
+  // exactly. Keyed on `simulateBuilt` itself (a fresh pick is a new object
+  // identity) rather than on `robotDef`, so Build mode editing its own
+  // in-progress document never rebuilds this -- a snapshot at pick time,
+  // the same reasoning Test mode's own effect documents for omitting
+  // `robot` from its deps.
+  useEffect(() => {
+    if (!simulateBuilt) return;
+    let cancelled = false;
+    let created: EngineBuiltRobot | null = null;
+    setBuiltEngineStatus("loading");
+    setBuiltEngineError("");
+    loadEngine()
+      .then((module) => {
+        if (cancelled) return;
+        created = new EngineBuiltRobot(module, simulateBuilt.robot, simulateBuilt.world ?? undefined);
+        setBuiltEngine(created);
+        setBuiltRunner(new BuiltProgramRunner(created, simulateBuilt.robot));
+        setBuiltEngineStatus("ready");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const message = error instanceof Error ? error.message : String(error);
+        setBuiltEngineStatus(message === ENGINE_MISSING_MESSAGE ? "missing" : "error");
+        setBuiltEngineError(message);
+      });
+    return () => {
+      cancelled = true;
+      created?.destroy();
+      setBuiltEngine(null);
+      setBuiltRunner(null);
+    };
+  }, [simulateBuilt]);
+
+  // Robot Builder B2: a dedicated Python bridge for the built robot, same
+  // shape as B1's BuilderPanel.tsx effect -- see
+  // docs/decisions/robot-builder-python-execution.md.
+  useEffect(() => {
+    if (!builtRunner) return;
+    const appendOutput = (line: OutputLine) =>
+      setBuiltPythonOutput((previous) => [...previous.slice(-499), line]);
+    const bridge = new PythonBridge<BuiltRobotApi>(
+      SIDECAR_URL,
+      builtRunner.api,
+      {
+        onStatus: setBuiltPythonConnected,
+        onStarted: () => {},
+        onOutput: (stream, text) => appendOutput({ stream, text }),
+        onDone: (exitCode) => {
+          builtPythonActiveRef.current = false;
+          builtRunner.abort();
+          setBuiltRunStatus("idle");
+          if (exitCode !== 0) {
+            appendOutput({ stream: "stderr", text: `--- exited with code ${exitCode} ---\n` });
+          }
+        },
+      },
+      executeBuiltRemoteRequest,
+    );
+    builtBridgeRef.current = bridge;
+    bridge.connect();
+    return () => {
+      builtBridgeRef.current = null;
+      bridge.dispose();
+    };
+  }, [builtRunner]);
 
   // Python sidecar bridge: robot calls from real local Python execute here.
   useEffect(() => {
@@ -338,6 +445,50 @@ export default function App() {
   }, []);
 
   const run = () => {
+    if (simulateBuilt) {
+      if (!builtRunner) return;
+      if (tab === "Python") {
+        const bridge = builtBridgeRef.current;
+        if (!bridge?.connected) {
+          setBuiltPythonOutput([
+            {
+              stream: "stderr",
+              text: "python sidecar is not running · start it with ./scripts/run-python-sidecar.sh\n",
+            },
+          ]);
+          return;
+        }
+        if (builtProgramActiveRef.current) builtRunner.abort();
+        builtRunner.arm();
+        builtPythonActiveRef.current = true;
+        setBuiltPythonOutput([]);
+        setBuiltRunStatus("running");
+        setBuiltRunError("");
+        bridge.run(pythonSourceRef.current);
+        return;
+      }
+      if (builtProgramActiveRef.current) builtRunner.abort();
+      builtRunner.arm();
+      builtProgramActiveRef.current = true;
+      setBuiltRunStatus("running");
+      setBuiltRunError("");
+      runProgram(jsCodeRef.current, builtRunner.api)
+        .then(() => setBuiltRunStatus("idle"))
+        .catch((error: unknown) => {
+          if (error instanceof ProgramStoppedError) {
+            setBuiltRunStatus("idle");
+          } else {
+            console.error("built robot program failed:", error);
+            setBuiltRunStatus("error");
+            setBuiltRunError(error instanceof Error ? error.message : String(error));
+          }
+        })
+        .finally(() => {
+          builtProgramActiveRef.current = false;
+          builtRunner.abort();
+        });
+      return;
+    }
     if (!engine || !runner) return;
     if (tab === "Python") {
       // Run the Python file through the local sidecar (Phase 3).
@@ -400,11 +551,26 @@ export default function App() {
   };
 
   const stop = () => {
+    if (simulateBuilt) {
+      if (builtPythonActiveRef.current) builtBridgeRef.current?.stop();
+      builtRunner?.abort();
+      return;
+    }
     haltEverything();
     if (mode === "compete") setCompeteRun((previous) => (previous ? finishRun(previous, "stopped") : previous));
   };
 
   const reset = () => {
+    if (simulateBuilt) {
+      if (builtPythonActiveRef.current) builtBridgeRef.current?.stop();
+      builtRunner?.abort();
+      // No reset() call exists on EngineBuiltRobot (unlike engine/arm/drone)
+      // -- a built robot's only way back to its start pose is a fresh
+      // instance, so this re-identities `simulateBuilt` to retrigger its
+      // own construction effect exactly like picking it fresh would.
+      setSimulateBuilt((previous) => (previous ? { ...previous } : previous));
+      return;
+    }
     if (!engine || !runner) return;
     haltEverything();
     engine.apply({ type: "reset" });
@@ -426,6 +592,18 @@ export default function App() {
     setCompetition(null);
     setCompeteRun(null);
     setCompeteDialogOpen(true);
+  };
+
+  const pickBuiltRobot = (picked: RobotDef) => {
+    haltEverything();
+    setBuiltRobotDialogOpen(false);
+    setSimulateBuilt({ robot: picked, world: null });
+  };
+
+  const chooseAnotherBuiltRobot = () => {
+    haltEverything();
+    setSimulateBuilt(null);
+    setBuiltRobotDialogOpen(true);
   };
 
   // Desktop window title follows the open project.
@@ -501,6 +679,10 @@ export default function App() {
   };
 
   const haltEverything = () => {
+    if (builtPythonActiveRef.current) builtBridgeRef.current?.stop();
+    builtRunner?.abort();
+    builtProgramActiveRef.current = false;
+    setBuiltRunStatus("idle");
     if (!engine || !runner) return;
     if (pythonActiveRef.current) bridgeRef.current?.stop();
     runner.abort();
@@ -513,8 +695,9 @@ export default function App() {
   };
 
   const switchRobot = (target: RobotKind) => {
-    if (target === robot) return;
+    if (target === robot && !simulateBuilt) return;
     haltEverything();
+    setSimulateBuilt(null);
     setHud(null);
     setRobot(target);
   };
@@ -672,15 +855,35 @@ export default function App() {
               notice,
             })
           : "choose a competition"
-        : formatStudioStatus({
-            robotLabel: robot === "arm" ? "Arm" : robot === "drone" ? "Drone" : world.name,
-            engineStatus,
-            hud,
-            runStatus,
-            pythonConnected,
-            hardware,
-            notice,
-          });
+        : simulateBuilt
+          ? [
+              `offline · ${simulateBuilt.robot.name}`,
+              builtEngineStatus === "loading" ? "engine: loading…" : null,
+              builtEngineStatus === "missing" ? "engine: not built · run scripts/build-engine-wasm.sh" : null,
+              builtEngineStatus === "error" ? `engine error: ${builtEngineError}` : null,
+              builtRunStatus === "running" ? "▶ running" : null,
+              builtRunStatus === "error" ? `program error: ${builtRunError}` : null,
+              builtPythonConnected ? "py ✓" : "py ✗",
+              notice || null,
+            ]
+              .filter((part): part is string => Boolean(part))
+              .join("  ·  ")
+          : formatStudioStatus({
+              robotLabel: robot === "arm" ? "Arm" : robot === "drone" ? "Drone" : world.name,
+              engineStatus,
+              hud,
+              runStatus,
+              pythonConnected,
+              hardware,
+              notice,
+            });
+
+  const runBarDisabled = Boolean(
+    mode === "build" ||
+      (mode === "compete" && (!competition || engineStatus !== "ready")) ||
+      (mode === "simulate" && simulateBuilt && builtEngineStatus !== "ready") ||
+      (mode === "simulate" && !simulateBuilt && engineStatus !== "ready"),
+  );
 
   return (
     <div className={mode === "build" ? "studio mode-build" : "studio"}>
@@ -885,6 +1088,17 @@ export default function App() {
               </>
             )}
           </>
+        ) : simulateBuilt ? (
+          <>
+            <h2>Built robot</h2>
+            <p className="compete-sidebar-note">{simulateBuilt.robot.name}</p>
+            <button className="link-button" onClick={chooseAnotherBuiltRobot}>
+              Choose a different robot
+            </button>
+            <button className="link-button" onClick={() => switchRobot("car")}>
+              Back to Car/Arm/Drone
+            </button>
+          </>
         ) : (
           <>
         <h2>Robots</h2>
@@ -900,6 +1114,12 @@ export default function App() {
               </button>
             </li>
           ))}
+          <li>
+            <button className="robot selectable" onClick={() => setBuiltRobotDialogOpen(true)}>
+              <span className="robot-icon">🔧</span>
+              <span>Built robot…</span>
+            </button>
+          </li>
         </ul>
         <div className="teleop-hint">
           <h2>Drive</h2>
@@ -984,7 +1204,23 @@ export default function App() {
       </aside>
 
       <main className="viewport">
-        {engine && arm && drone && runner ? (
+        {simulateBuilt ? (
+          builtEngineStatus === "ready" && builtEngine && builtRunner ? (
+            <TestViewport
+              robot={simulateBuilt.robot}
+              builtRobot={builtEngine}
+              world={simulateBuilt.world ?? undefined}
+              runner={builtRunner}
+            />
+          ) : (
+            <div className="viewport-note">
+              {builtEngineStatus === "loading" && "Loading physics engine…"}
+              {builtEngineStatus === "missing" &&
+                "Engine not built: run ./scripts/build-engine-wasm.sh, then reload"}
+              {builtEngineStatus === "error" && `Couldn't simulate this robot: ${builtEngineError}`}
+            </div>
+          )
+        ) : engine && arm && drone && runner ? (
           <Viewport3D
             key={robot}
             robot={robot}
@@ -1036,8 +1272,8 @@ export default function App() {
         <div className="code-content">
           <div className={tab === "Blocks" ? "tab-panel active" : "tab-panel"}>
             <BlocksPanel
-              key={robot}
-              robot={robot}
+              key={simulateBuilt ? "built" : robot}
+              robot={simulateBuilt ? "built" : robot}
               onCode={onCode}
               ref={blocksRef}
               initialWorkspace={pendingForRobot?.blocks}
@@ -1046,10 +1282,10 @@ export default function App() {
           </div>
           <div className={tab === "Python" ? "tab-panel active" : "tab-panel"}>
             <PythonPanel
-              key={robot}
+              key={simulateBuilt ? "built" : robot}
               generatedCode={pythonCode}
-              output={pythonOutput}
-              connected={pythonConnected}
+              output={simulateBuilt ? builtPythonOutput : pythonOutput}
+              connected={simulateBuilt ? builtPythonConnected : pythonConnected}
               onSource={onPythonSource}
               ref={pythonRef}
               initialOverride={
@@ -1061,7 +1297,29 @@ export default function App() {
             />
           </div>
           <div className={tab === "World" ? "tab-panel active padded" : "tab-panel padded"}>
-            {robot === "car" || robot === "drone" ? (
+            {simulateBuilt ? (
+              <label className="builder-world-picker">
+                World
+                <select
+                  value={builtWorldOptionId}
+                  onChange={(event) => {
+                    const id = event.target.value;
+                    setBuiltWorldOptionId(id);
+                    const option = WORLD_OPTIONS.find((o) => o.id === id);
+                    setSimulateBuilt((previous) =>
+                      previous ? { ...previous, world: option ? option.make() : null } : previous,
+                    );
+                  }}
+                >
+                  <option value="">None (floor only)</option>
+                  {WORLD_OPTIONS.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : robot === "car" || robot === "drone" ? (
               <WorldPanel key={worldEpoch} world={world} defaultWorld={defaultWorld} onApply={applyWorld} />
             ) : (
               <p className="placeholder-note">
@@ -1076,8 +1334,9 @@ export default function App() {
           <div className={tab === "C++" ? "tab-panel active padded" : "tab-panel padded"}>
             <pre className="cpp-preview">{cppCode}</pre>
             <p className="placeholder-note">
-              Real, compilable C++ against engine/api/{robot}.hpp — not runnable here (no browser
-              has a C++ compiler), but yours to take and build: see engine/api/README.md.
+              {simulateBuilt
+                ? "Illustrative preview only -- there is no real C++ SDK for a built robot yet (a fixed compiled header can't represent per-student actuator/sensor ids)."
+                : `Real, compilable C++ against engine/api/${robot}.hpp — not runnable here (no browser has a C++ compiler), but yours to take and build: see engine/api/README.md.`}
             </p>
           </div>
         </div>
@@ -1102,23 +1361,13 @@ export default function App() {
         ))}
 
       <footer className="run-bar">
-        <button
-          className="run"
-          onClick={run}
-          disabled={(mode !== "simulate" && mode !== "compete") || engineStatus !== "ready" || (mode === "compete" && !competition)}
-        >
+        <button className="run" onClick={run} disabled={runBarDisabled}>
           ▶ Run
         </button>
-        <button
-          onClick={stop}
-          disabled={(mode !== "simulate" && mode !== "compete") || engineStatus !== "ready" || (mode === "compete" && !competition)}
-        >
+        <button onClick={stop} disabled={runBarDisabled}>
           ⏹ Stop
         </button>
-        <button
-          onClick={reset}
-          disabled={(mode !== "simulate" && mode !== "compete") || engineStatus !== "ready" || (mode === "compete" && !competition)}
-        >
+        <button onClick={reset} disabled={runBarDisabled}>
           🔄 Reset
         </button>
         <span className="status">{statusText}</span>
@@ -1154,6 +1403,14 @@ export default function App() {
         <CompetitionDialog
           onPick={pickCompetition}
           onCancel={() => setCompeteDialogOpen(false)}
+        />
+      )}
+      {builtRobotDialogOpen && (
+        <BuiltRobotDialog
+          currentRobotDef={robotDef}
+          currentIssues={builtRobotIssues}
+          onPick={pickBuiltRobot}
+          onCancel={() => setBuiltRobotDialogOpen(false)}
         />
       )}
     </div>

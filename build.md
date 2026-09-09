@@ -2140,3 +2140,65 @@ real sidecar and finishes cleanly. See
 docs/decisions/robot-builder-python-execution.md for the full reasoning,
 including why C++ stays out of scope permanently and why `BuiltRobot` has
 no local/offline implementation.
+
+## Robot Builder — B2: built robots in Simulate mode (2026-09-09)
+
+Closes the other half of the gap the user flagged: a built robot could
+only ever be driven inside Build mode's own isolated Test-mode sandbox,
+never in the app's main Simulate mode where Car/Arm/Drone live. Now a
+student can pick a built robot from a 4th sidebar entry in Simulate mode
+and drive it for real -- same run-bar, same Blocks/Python tabs, real
+`okrobo.BuiltRobot` Python from B1.
+
+Deliberately does **not** widen `RobotKind` to a 4th value --
+`docs/decisions/robot-builder-programming.md` already recorded, before
+this was even a stated goal, that `RobotKind` reaches lessons/pack-content
+schema/`App.tsx`'s own picker in ways a built robot could never sensibly
+join. Instead, `App.tsx` gained an orthogonal `simulateBuilt` state,
+independent of `robot: RobotKind` -- Car/Arm/Drone's own always-resident
+engine trio is completely untouched by this feature. Architecturally
+honest too: Car/Arm/Drone are three fixed kinds multiplexed by one
+`ProgramRunner`; a built robot is on-demand, constructed/destroyed per
+pick, exactly like Build mode's own Test-mode lifecycle already is -- not
+a 4th peer value, a different kind of thing.
+
+Reused wholesale rather than re-implemented: `TestViewport.tsx` renders
+directly inside Simulate mode's own viewport in place of `Viewport3D`
+(the actual component, not a ported copy); the construction effect
+mirrors `BuilderPanel.tsx`'s own Test-mode one almost verbatim; Python
+execution reuses B1's `PythonBridge<BuiltRobotApi>` + `executeBuiltRemoteRequest`
+via a second bridge instance; `BlocksPanel`/`PythonPanel` needed zero
+changes (`BlocksRobotKind` already covered `"built"`); the World tab
+reuses Build mode's own `WORLD_OPTIONS` `<select>` (a built robot's
+`contracts/world-def/v0` is a structurally different, differently-named
+`WorldDef` from the Car/Drone arena's own -- imported under an alias,
+`BuiltWorldDef`, to avoid a real naming collision); the new
+`BuiltRobotDialog.tsx` picker mirrors `TemplateDialog.tsx`/`CompetitionDialog.tsx`'s
+exact shape, reusing Phase 8's existing `listPackRobots()` unchanged. One
+small new piece: `EngineBuiltRobot` has no `reset()` (Test mode never
+needed one), so Simulate mode's own Reset button re-identities
+`simulateBuilt` to retrigger the same construction effect a fresh pick
+uses, rather than adding a new WASM export for one button.
+
+Tests: `BuiltRobotDialog.test.tsx` (8 cases, mirroring
+`CompetitionDialog.test.tsx`'s own structure -- gated/ungated current-
+robot row, packs-section states, corrupt-pack resilience, Cancel). `npm
+run test` (800 passing, up from 792), `npm run typecheck`, `npm run
+build`. `scripts/lib/studio-e2e-check.mjs` gained a new "Simulate mode:
+built robot" section -- honestly scoped to what the shared e2e document
+actually allows: by that point in the run, Build mode's own long CAD-
+Kernel/Joint-Authoring sequence has left the document with several real,
+un-cleaned-up validation errors (a natural byproduct of exercising
+manufactured-cycle/rebuild-error/insert-delete test cases back to back,
+not a bug), so the permanent check proves the picker opens, correctly
+disables an invalid document with the right message, and the packs
+section settles cleanly -- itself real proof the validity gate works, not
+a weaker substitute. The full happy path (pick a valid robot, real
+`TestViewport` renders in Simulate mode, Run/Stop drive it for real) is
+proven by `BuiltRobotDialog.test.tsx`'s own controlled fixture and was
+verified by hand in a real headless-Chrome session: Build mode -> New
+Robot -> Simple Arm template -> Simulate mode -> 🔧 Built robot… -> pick
+it -> TestViewport renders -> Run drives the default starter -> Stop ->
+"Back to Car/Arm/Drone" restores the stock UI cleanly. This closes out
+the Robot Builder → Simulate-mode integration gap in full (B1 + B2). See
+docs/decisions/robot-builder-simulate-mode.md for the complete reasoning.

@@ -1406,6 +1406,46 @@ try {
   );
   check("Build mode: switching back to Simulate restores the sim UI", backToSimulate);
 
+  // -- simulate mode: a built robot (Robot Builder B2) ---------------------
+  // Coverage gap, stated plainly, mirroring this file's own established
+  // pattern for what's honestly provable in this harness: by this point
+  // Build mode's own long CAD-Kernel/Joint-Authoring sequence above has
+  // left the shared document with several real, un-cleaned-up validation
+  // errors (a natural byproduct of exercising manufactured-cycle/rebuild-
+  // error/insert-delete test cases back to back, never a bug) -- so the
+  // "current robot" row is genuinely, correctly disabled here, which is
+  // itself real proof the validity gate works, not a weaker substitute for
+  // testing the happy path. The happy path itself (picking a valid current
+  // robot renders a real TestViewport inside Simulate mode, Run/Stop drive
+  // it for real) is proven directly by BuiltRobotDialog.test.tsx (a
+  // controlled zero-issue fixture) and was verified by hand in a real
+  // headless-Chrome session against a fresh "Simple Arm" template. See
+  // docs/decisions/robot-builder-simulate-mode.md.
+  await page.evalClickText(".robot.selectable", "/Built robot/");
+  const builtDialogShown = await waitForCondition(
+    "[...document.querySelectorAll('.dialog h3')].some(h => h.textContent === 'Choose a built robot')",
+    5000,
+  );
+  check("Simulate mode: the 4th sidebar entry opens the built-robot picker", builtDialogShown);
+  const currentRobotGated = await waitForCondition(
+    "(() => { const row = document.querySelector('.project-row.template-row'); " +
+      "return !!row && row.disabled && row.title.includes('issues'); })()",
+    5000,
+  );
+  check("Simulate mode: a Build-mode document with real errors is correctly disabled, not pickable", currentRobotGated);
+  const packsSettled = await waitForCondition(
+    "[...document.querySelectorAll('.dialog-empty')].some(p => p.textContent?.includes('No installed packs carry a built robot'))",
+    5000,
+  );
+  check("Simulate mode: the picker's packs section settles to a clean empty state", packsSettled);
+
+  await page.evalClickText(".dialog-actions button", "/^Cancel$/");
+  const cancelledCleanly = await waitForCondition(
+    "!document.querySelector('.dialog-backdrop') && !!document.querySelector('.robot.selectable.active')",
+    5000,
+  );
+  check("Simulate mode: Cancel closes the built-robot picker without changing anything", cancelledCleanly);
+
   // -- compete mode: Competition Arena C2/C3 -------------------------------
   // Coverage gap, stated plainly, mirroring the Build-mode packs note above:
   // this harness runs as a plain browser tab against the Vite dev server
