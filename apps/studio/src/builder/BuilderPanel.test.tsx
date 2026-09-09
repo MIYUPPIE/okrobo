@@ -421,6 +421,110 @@ describe("BuilderPanel", () => {
     expect(screen.getByText("Click the parent body.")).toBeInTheDocument();
   });
 
+  it("Add Actuator is disabled with no hinge/slider/ball/free joint yet", () => {
+    render(<BuilderPanel robot={makeRobot()} onChange={() => {}} />);
+    expect(screen.getByRole("button", { name: "Add Actuator" })).toBeDisabled();
+  });
+
+  it("Add Actuator: clicking the tool shows ActuatorCreator directly (no viewport pick needed); Apply commits and returns to the normal tool", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    const base = makeRobot();
+    const robot: RobotDef = {
+      ...base,
+      bodies: [...base.bodies, { id: "wheel", name: "Wheel", transform: identity, mass: 0.1, inertia }],
+      joints: [{ id: "joint-1", name: "Joint 1", type: "hinge", parent: "base", child: "wheel", origin: identity, axis: [0, 1, 0] }],
+    };
+    render(<BuilderPanel robot={robot} onChange={onChange} />);
+
+    const addActuator = screen.getByRole("button", { name: "Add Actuator" });
+    expect(addActuator).not.toBeDisabled();
+    await user.click(addActuator);
+    expect(addActuator).toHaveClass("active");
+    expect(screen.getByLabelText("actuator name")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next: RobotDef = onChange.mock.calls[0][0];
+    expect(next.actuators).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Add Actuator" })).not.toHaveClass("active");
+  });
+
+  it("Add Sensor: picking a body shows SensorCreator; Apply commits and returns to the normal tool", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={onChange} />);
+
+    const addSensor = screen.getByRole("button", { name: "Add Sensor" });
+    await user.click(addSensor);
+    expect(addSensor).toHaveClass("active");
+    expect(screen.getByText("Click the body to mount the sensor on.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "pick base" }));
+    expect(screen.getByLabelText("sensor name")).toBeInTheDocument();
+    expect(screen.getByText("On Base")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next: RobotDef = onChange.mock.calls[0][0];
+    expect(next.sensors).toHaveLength(1);
+    expect(next.sensors[0].body).toBe("base");
+    expect(screen.queryByRole("button", { name: "Add Sensor" })).not.toHaveClass("active");
+  });
+
+  it("Add Sensor: Cancel returns to the normal tool without calling onChange", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<BuilderPanel robot={makeRobot()} onChange={onChange} />);
+
+    await user.click(screen.getByRole("button", { name: "Add Sensor" }));
+    await user.click(screen.getByRole("button", { name: "pick base" }));
+    expect(screen.getByLabelText("sensor name")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Add Sensor" })).not.toHaveClass("active");
+  });
+
+  it("Actuators & Sensors list: clicking an existing entry opens it for editing, prefilled; Apply replaces it in place", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    const base = makeRobot();
+    const robot: RobotDef = {
+      ...base,
+      sensors: [{ id: "sensor-1", name: "Front Lidar", type: "lidar", body: "base", transform: identity }],
+    };
+    render(<BuilderPanel robot={robot} onChange={onChange} />);
+
+    await user.click(screen.getByText("Front Lidar", { exact: false }));
+    expect(screen.getByText("Edit sensor")).toBeInTheDocument();
+    expect(screen.getByLabelText("sensor name")).toHaveValue("Front Lidar");
+
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next: RobotDef = onChange.mock.calls[0][0];
+    expect(next.sensors).toHaveLength(1);
+    expect(next.sensors[0].name).toBe("Front Lidar");
+  });
+
+  it("Actuators & Sensors list: two-click delete removes the entity via onChange", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    const base = makeRobot();
+    const robot: RobotDef = {
+      ...base,
+      sensors: [{ id: "sensor-1", name: "Front Lidar", type: "lidar", body: "base", transform: identity }],
+    };
+    render(<BuilderPanel robot={robot} onChange={onChange} />);
+
+    const deleteButton = screen.getByRole("button", { name: "delete sensor Front Lidar" });
+    await user.click(deleteButton);
+    expect(onChange).not.toHaveBeenCalled();
+    await user.click(deleteButton);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange.mock.calls[0][0].sensors).toEqual([]);
+  });
+
   it("Extrude shows the CadExtrudeCreator stub and hides BodyInspector", async () => {
     const user = userEvent.setup();
     render(<BuilderPanel robot={makeRobot()} onChange={() => {}} />);
@@ -790,14 +894,22 @@ describe("BuilderPanel", () => {
     expect(screen.getByText(`Click the body to ${title.toLowerCase()}.`)).toBeInTheDocument();
   });
 
-  it("all eleven tools stay mutually exclusive: activating any Cut/Fillet-Chamfer/Shell/Draft tool disables every Boss tool and Add Joint too", async () => {
+  it("all thirteen tools stay mutually exclusive: activating any Cut/Fillet-Chamfer/Shell/Draft tool disables every Boss tool, Add Joint, Add Actuator, and Add Sensor too", async () => {
     const user = userEvent.setup();
     const base = makeRobot();
-    const robot: RobotDef = { ...base, bodies: [...base.bodies, { id: "wheel", name: "Wheel", transform: identity, mass: 0.1, inertia }] };
+    const robot: RobotDef = {
+      ...base,
+      bodies: [...base.bodies, { id: "wheel", name: "Wheel", transform: identity, mass: 0.1, inertia }],
+      // A real targetable joint, so "Add Actuator" being disabled below is
+      // proof of mutual exclusivity, not just the separate "no joint yet" gate.
+      joints: [{ id: "joint-1", name: "Joint 1", type: "hinge", parent: "base", child: "wheel", origin: identity, axis: [0, 1, 0] }],
+    };
     render(<BuilderPanel robot={robot} onChange={() => {}} />);
 
     await user.click(screen.getByRole("button", { name: "Boundary Cut" }));
     expect(screen.getByRole("button", { name: "Add Joint" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add Actuator" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add Sensor" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Extrude" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Revolve" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Boundary" })).toBeDisabled();

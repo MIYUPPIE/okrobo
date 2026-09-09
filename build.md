@@ -2202,3 +2202,80 @@ it -> TestViewport renders -> Run drives the default starter -> Stop ->
 "Back to Car/Arm/Drone" restores the stock UI cleanly. This closes out
 the Robot Builder → Simulate-mode integration gap in full (B1 + B2). See
 docs/decisions/robot-builder-simulate-mode.md for the complete reasoning.
+
+## Robot Builder — D1: actuator & sensor authoring (2026-09-09)
+
+The user flagged another real gap: even with B1/B2's real Python execution
+and Simulate-mode integration shipped, Build mode still had no way to
+*add* an actuator or sensor to a hand-built robot -- both existed only in
+two hardcoded templates (Rover, Simple Arm). Test mode's `ActuatorPanel`/
+`SensorPanel` were always real (Phases 3/4, real MuJoCo physics); nothing
+populated them for a custom-built robot. Closed with two new toolbar
+tools, "Add Actuator" and "Add Sensor," plus a new Actuators/Sensors list
+for viewing, editing, and deleting what's already there -- and, per the
+user's own ask, real explanatory copy baked directly into both creator
+forms (one sentence per actuator/sensor type, updating live as the
+student changes the selection), not a separate doc to go find.
+
+`ActuatorCreator.tsx`/`SensorCreator.tsx` mirror `JointCreator.tsx`'s own
+draft/live-validate/Apply idiom almost mechanically (`issuesIntroducedBy`-
+gated Apply, `nextActuatorId`/`nextSensorId` mirroring `nextJointId`). Both
+also support editing an existing entity in place, reusing `robotEdits.ts`'s
+new `applyActuator`/`applySensor`'s own `replacingId` parameter -- CAD
+Kernel Phase 7.3's "click any step to edit it" precedent applied here too.
+An actuator's target is a joint chosen from a `<select>` (no viewport pick
+-- a dropdown is the right UI for "one of a short named list," not a
+spatial point), filtered to exclude `fixed` joints (`validateRobotDef`
+already rejects actuating one). A sensor DOES need a body pick, reusing
+the existing single-body `TARGET_PICK_TOOLS` flow Fillet/Chamfer/Shell/
+Draft already established, unchanged. `encoder` is the one sensor type
+that mounts via joint, not body+transform -- the form visually branches on
+it, hiding the mount-position fields and showing a joint picker instead,
+filtered to joints actually connected to the picked body.
+
+One live warning `validateRobotDef` itself can't provide: an actuator
+targeting a `ball`/`free` joint is schema-legal but MJCF has no matching
+actuator element for it (already documented in
+`docs/decisions/robot-builder-physics.md`) -- the control would silently
+do nothing in Test mode, so the creator shows a non-blocking banner for
+this case. `ActuatorSensorList.tsx` is a new, separate component (neither
+actuators nor sensors have a tree position the way bodies do), mirroring
+`FeatureTreeList.tsx`'s own "click to edit, two-click delete" row idiom
+and CSS classes directly, not `HierarchyList.tsx`'s body-only shape.
+
+A real, non-obvious e2e-harness bug found and fixed while verifying this
+in a real browser: two new always-visible toolbar buttons shifted every
+later toolbar button's on-screen position, exposing a latent
+coordinate-click race (`scripts/lib/studio-e2e-check.mjs`'s own
+`page.clickText(".builder-toolbar button"/"​.hierarchy-row", ...)` calls
+compute a pixel position then dispatch at it -- if the DOM shifts in
+between, the click misses; `cdp.mjs`'s own `evalClick` docstring already
+names this exact risk). Fixed by converting every such toolbar/hierarchy-
+row click in that file to `evalClickText`/`evalClick` (a real DOM
+`.click()`, immune to the race) -- a systematic hardening pass across the
+whole file, not a one-off patch, verified by running the full e2e suite
+twice in a row for stability after the fix.
+
+A real user-reported bug found right after shipping: "actuator button not
+clicking." Root cause: `.builder-toolbar button` had no `:disabled` style
+anywhere in `App.css` -- a disabled button looked pixel-identical to an
+enabled one, so a fresh "Blank" robot's default-disabled "Add Actuator"
+(needs a joint first) looked broken rather than disabled. Not new to this
+phase (every existing toolbar tool had the same gap), but this phase is
+what made it show up in practice, since a fresh robot always starts with
+zero joints. Fixed with a real `:disabled` rule (dimmed + `not-allowed`
+cursor), verified in a real browser both ways: correctly non-interactive
+with no joint, correctly opens the form once a real hinge joint exists.
+
+Tests: `ActuatorCreator.test.tsx` (8 cases), `SensorCreator.test.tsx` (8),
+`ActuatorSensorList.test.tsx` (5), `robotEdits.test.ts` extended (+12,
+including one proving the new single-entity delete functions agree with
+`removeBody`'s own existing cascade), `BuilderPanel.test.tsx` extended
+(+7). `npm run test` (838 passing, up from 800), `npm run typecheck`,
+`npm run build`. `./scripts/check-studio-e2e.sh` gained a fully self-
+contained "Add Actuator / Add Sensor" section (adds its own fresh bodies
+and hinge joint, rather than depending on whatever joint types the long
+CAD-Kernel/Joint-Authoring sequence above happened to leave behind) --
+passed twice in a row alongside the full existing suite. See
+docs/decisions/robot-builder-actuator-sensor-authoring.md for the complete
+reasoning.

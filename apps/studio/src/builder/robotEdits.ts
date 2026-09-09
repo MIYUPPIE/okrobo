@@ -5,7 +5,7 @@
 // numeric utilities (no scene graph, no rendering) -- still no React.
 
 import * as THREE from "three";
-import type { Body, Feature, Geometry, Issue, RobotDef, Transform } from "../contracts/robotDef";
+import type { Actuator, Body, Feature, Geometry, Issue, RobotDef, Sensor, Transform } from "../contracts/robotDef";
 
 const DEFAULT_STARTER_COLOR: [number, number, number] = [0.3, 0.5, 0.9];
 const DEFAULT_BODY_COLOR: [number, number, number] = [0.6, 0.6, 0.6];
@@ -160,6 +160,50 @@ export function nextJointId(robot: RobotDef): string {
   let n = robot.joints.length + 1;
   while (existing.has(`joint-${n}`)) n += 1;
   return `joint-${n}`;
+}
+
+/** "actuator-N", bumped past any existing id collision -- mirrors nextJointId. */
+export function nextActuatorId(robot: RobotDef): string {
+  const existing = new Set(robot.actuators.map((a) => a.id));
+  let n = robot.actuators.length + 1;
+  while (existing.has(`actuator-${n}`)) n += 1;
+  return `actuator-${n}`;
+}
+
+/** "sensor-N", bumped past any existing id collision -- mirrors nextJointId. */
+export function nextSensorId(robot: RobotDef): string {
+  const existing = new Set(robot.sensors.map((s) => s.id));
+  let n = robot.sensors.length + 1;
+  while (existing.has(`sensor-${n}`)) n += 1;
+  return `sensor-${n}`;
+}
+
+/** Appends `actuator`, or replaces the entry whose id is `replacingId` (an
+ * edit of an existing actuator) -- ActuatorCreator's own Apply. */
+export function applyActuator(robot: RobotDef, actuator: Actuator, replacingId?: string): RobotDef {
+  if (replacingId === undefined) return { ...robot, actuators: [...robot.actuators, actuator] };
+  return { ...robot, actuators: robot.actuators.map((a) => (a.id === replacingId ? actuator : a)) };
+}
+
+/** Appends `sensor`, or replaces the entry whose id is `replacingId` (an
+ * edit of an existing sensor) -- SensorCreator's own Apply. */
+export function applySensor(robot: RobotDef, sensor: Sensor, replacingId?: string): RobotDef {
+  if (replacingId === undefined) return { ...robot, sensors: [...robot.sensors, sensor] };
+  return { ...robot, sensors: robot.sensors.map((s) => (s.id === replacingId ? sensor : s)) };
+}
+
+/** Removes a single actuator by id -- the direct counterpart to the
+ * cascading actuator cleanup removeBody already does when its target joint
+ * disappears. */
+export function deleteActuator(robot: RobotDef, actuatorId: string): RobotDef {
+  return { ...robot, actuators: robot.actuators.filter((a) => a.id !== actuatorId) };
+}
+
+/** Removes a single sensor by id -- the direct counterpart to the cascading
+ * sensor cleanup removeBody already does when its mounting body/joint
+ * disappears. */
+export function deleteSensor(robot: RobotDef, sensorId: string): RobotDef {
+  return { ...robot, sensors: robot.sensors.filter((s) => s.id !== sensorId) };
 }
 
 function matrixFromTransform(transform: Transform): THREE.Matrix4 {

@@ -1440,6 +1440,19 @@ body {
   cursor: pointer;
 }
 
+/* A disabled toolbar button (e.g. "Add Actuator" before any non-fixed
+   joint exists) previously looked identical to an enabled one -- same
+   cursor, same color -- so clicking it appeared to silently do nothing.
+   Real, user-reported confusion, not just a cosmetic gap: every disabled
+   tool needs its own title="..." explaining why (already set at each
+   call site), but that only helps once this state actually reads as
+   disabled at a glance. */
+.builder-toolbar button:disabled {
+  color: var(--text-dim);
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .builder-toolbar button.active {
   background: var(--panel-2);
   color: var(--text);

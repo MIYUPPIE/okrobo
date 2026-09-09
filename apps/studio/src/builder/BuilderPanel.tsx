@@ -12,7 +12,9 @@ import { runProgram } from "../program/execute";
 import { ProgramStoppedError } from "../program/ProgramRunner";
 import { executeBuiltRemoteRequest, PythonBridge, SIDECAR_URL } from "../python/PythonBridge";
 import { type OutputLine, PythonPanel } from "../PythonPanel";
+import { ActuatorCreator } from "./ActuatorCreator";
 import { ActuatorPanel } from "./ActuatorPanel";
+import { ActuatorSensorList } from "./ActuatorSensorList";
 import { BodyInspector } from "./BodyInspector";
 import { BuilderViewport, type GizmoMode } from "./BuilderViewport";
 import { CadBoundaryCreator } from "./CadBoundaryCreator";
@@ -31,7 +33,8 @@ import type { FeatureInsertKind } from "./FeatureTreeList";
 import { HierarchyList } from "./HierarchyList";
 import { JointCreator } from "./JointCreator";
 import { deleteFeatureStep, insertFeatureStep, moveFeatureStep, recomputeFeatureStep } from "./recomputeFeatureStep";
-import { makeDefaultBody, nextBodyId, removeBody } from "./robotEdits";
+import { deleteActuator, deleteSensor, makeDefaultBody, nextBodyId, removeBody } from "./robotEdits";
+import { SensorCreator } from "./SensorCreator";
 import { SensorPanel } from "./SensorPanel";
 import { TestViewport } from "./TestViewport";
 import { WORLD_OPTIONS } from "./worldExamples";
@@ -70,10 +73,16 @@ type ProgramStatus = "idle" | "running" | "error";
  * tool of that same shape, targeting an existing box/cylinder body;
  * "shell"/"draft" (Phase 6) are two more of that same shape, targeting
  * faces instead of edges -- standalone only this phase, no embedded step
- * in the Boss creators (see docs/decisions/cad-kernel-shell-draft.md). */
+ * in the Boss creators (see docs/decisions/cad-kernel-shell-draft.md).
+ * "add-sensor" (Robot Builder D1) is a seventh single-body-pick tool of
+ * that same shape, targeting the sensor's own mount body; "add-actuator"
+ * (also D1) needs no pick at all -- its target is a joint chosen from a
+ * short list inside the creator itself, not a spatial point. */
 type BuilderTool =
   | "transform"
   | "add-joint"
+  | "add-actuator"
+  | "add-sensor"
   | "extrude"
   | "revolve"
   | "boundary"
@@ -91,10 +100,11 @@ interface JointDraft {
 const CUT_TOOLS: ReadonlySet<BuilderTool> = new Set(["extruded-cut", "revolved-cut", "boundary-cut"]);
 /** Every tool that needs a single existing-body pick before it can show
  * its own creator/editor panel -- Cut's three tools, Fillet/Chamfer's one,
- * and Shell/Draft's two. Drives the shared bodyPick/suppressedBodyId
- * wiring; CUT_TOOLS itself stays narrower, for the handful of things
- * still genuinely Cut-specific (hint copy, which creator to render). */
-const TARGET_PICK_TOOLS: ReadonlySet<BuilderTool> = new Set([...CUT_TOOLS, "fillet-chamfer", "shell", "draft"]);
+ * Shell/Draft's two, and Add Sensor's one. Drives the shared bodyPick/
+ * suppressedBodyId wiring; CUT_TOOLS itself stays narrower, for the
+ * handful of things still genuinely Cut-specific (hint copy, which
+ * creator to render). */
+const TARGET_PICK_TOOLS: ReadonlySet<BuilderTool> = new Set([...CUT_TOOLS, "fillet-chamfer", "shell", "draft", "add-sensor"]);
 
 export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   const [selectedBodyId, setSelectedBodyId] = useState<string | null>(robot.bodies[0]?.id ?? null);
@@ -302,6 +312,38 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
     setJointDraft(null);
   };
 
+  // Robot Builder D1: editing an EXISTING actuator/sensor (from
+  // ActuatorSensorList) is a separate concern from the add-tools above --
+  // no re-picking needed, so it's its own pair of ids rather than folded
+  // into builderTool/pickTargetId.
+  const [editingActuatorId, setEditingActuatorId] = useState<string | null>(null);
+  const [editingSensorId, setEditingSensorId] = useState<string | null>(null);
+
+  const toggleActuatorTool = () => {
+    setBuilderTool((current) => (current === "add-actuator" ? "transform" : "add-actuator"));
+  };
+
+  const applyActuatorCreator = (next: RobotDef) => {
+    onChange(next);
+    setBuilderTool("transform");
+    setEditingActuatorId(null);
+  };
+
+  const cancelActuatorCreator = () => {
+    setBuilderTool("transform");
+    setEditingActuatorId(null);
+  };
+
+  const applySensorCreator = (next: RobotDef) => {
+    setEditingSensorId(null);
+    applyTargetEditResult(next);
+  };
+
+  const cancelSensorCreator = () => {
+    setEditingSensorId(null);
+    cancelCadTool();
+  };
+
   const toggleExtrudeTool = () => {
     setBuilderTool((current) => (current === "extrude" ? "transform" : "extrude"));
     setCadPreview(null);
@@ -418,6 +460,23 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
     setEdgeOverlay(null);
     setFacePicks([]);
     setFaceOverlay(null);
+  };
+
+  const toggleSensorTool = () => {
+    setBuilderTool((current) => (current === "add-sensor" ? "transform" : "add-sensor"));
+    setPickTargetId(null);
+  };
+
+  const startEditActuator = (id: string) => {
+    setBuilderTool("transform");
+    setEditingSensorId(null);
+    setEditingActuatorId(id);
+  };
+
+  const startEditSensor = (id: string) => {
+    setBuilderTool("transform");
+    setEditingActuatorId(null);
+    setEditingSensorId(id);
   };
 
   /** Single-body pick for any of the six TARGET_PICK_TOOLS -- no parent-
@@ -694,6 +753,15 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
             + Add body
           </button>
         )}
+        {builderMode === "edit" && (
+          <ActuatorSensorList
+            robot={robot}
+            onEditActuator={startEditActuator}
+            onEditSensor={startEditSensor}
+            onDeleteActuator={(id) => onChange(deleteActuator(robot, id))}
+            onDeleteSensor={(id) => onChange(deleteSensor(robot, id))}
+          />
+        )}
       </aside>
 
       {builderMode === "edit" ? (
@@ -736,6 +804,23 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
               onClick={toggleJointTool}
             >
               Add Joint
+            </button>
+            <button
+              type="button"
+              className={builderTool === "add-actuator" ? "active" : ""}
+              disabled={robot.joints.filter((j) => j.type !== "fixed").length === 0 || otherCadToolActive("add-actuator")}
+              title={robot.joints.filter((j) => j.type !== "fixed").length === 0 ? "Add a hinge, slider, ball, or free joint first" : undefined}
+              onClick={toggleActuatorTool}
+            >
+              Add Actuator
+            </button>
+            <button
+              type="button"
+              className={builderTool === "add-sensor" ? "active" : ""}
+              disabled={robot.bodies.length === 0 || otherCadToolActive("add-sensor")}
+              onClick={toggleSensorTool}
+            >
+              Add Sensor
             </button>
             <button
               type="button"
@@ -817,6 +902,7 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
           {builderTool === "fillet-chamfer" && pickTargetId === null && <p className="joint-pick-hint">Click the body to fillet or chamfer.</p>}
           {builderTool === "shell" && pickTargetId === null && <p className="joint-pick-hint">Click the body to shell.</p>}
           {builderTool === "draft" && pickTargetId === null && <p className="joint-pick-hint">Click the body to draft.</p>}
+          {builderTool === "add-sensor" && pickTargetId === null && <p className="joint-pick-hint">Click the body to mount the sensor on.</p>}
         </div>
       ) : (
         <div className="builder-stage">
@@ -912,7 +998,31 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
 
       <aside className="builder-inspector">
         {builderMode === "edit" ? (
-          jointDraft?.childId ? (
+          editingActuatorId ? (
+            <ActuatorCreator
+              robot={robot}
+              existing={robot.actuators.find((a) => a.id === editingActuatorId)}
+              onApply={applyActuatorCreator}
+              onCancel={cancelActuatorCreator}
+            />
+          ) : editingSensorId ? (
+            (() => {
+              const existingSensor = robot.sensors.find((s) => s.id === editingSensorId);
+              return existingSensor ? (
+                <SensorCreator
+                  robot={robot}
+                  bodyId={existingSensor.body}
+                  existing={existingSensor}
+                  onApply={applySensorCreator}
+                  onCancel={cancelSensorCreator}
+                />
+              ) : null;
+            })()
+          ) : builderTool === "add-actuator" ? (
+            <ActuatorCreator robot={robot} onApply={applyActuatorCreator} onCancel={cancelActuatorCreator} />
+          ) : builderTool === "add-sensor" && pickTargetId ? (
+            <SensorCreator robot={robot} bodyId={pickTargetId} onApply={applySensorCreator} onCancel={cancelSensorCreator} />
+          ) : jointDraft?.childId ? (
             <JointCreator
               robot={robot}
               parentId={jointDraft.parentId}
@@ -1256,7 +1366,9 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
                       ? "Pick a body to shell in the 3D view."
                       : builderTool === "draft"
                         ? "Pick a body to draft in the 3D view."
-                        : "Select a body to edit it."}
+                        : builderTool === "add-sensor"
+                          ? "Pick a body to mount the sensor on in the 3D view."
+                          : "Select a body to edit it."}
             </p>
           )
         ) : builtRobot ? (

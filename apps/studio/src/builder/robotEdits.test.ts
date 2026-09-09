@@ -2,15 +2,21 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
-import { parseRobotDef, validateRobotDef, type Feature, type Issue, type Transform } from "../contracts/robotDef";
+import { parseRobotDef, validateRobotDef, type Feature, type Issue, type Sensor, type Transform } from "../contracts/robotDef";
 import {
+  applyActuator,
+  applySensor,
   computeJointOrigin,
+  deleteActuator,
+  deleteSensor,
   issuesIntroducedBy,
   makeCadBody,
   makeDefaultBody,
   makeDefaultRobotDef,
+  nextActuatorId,
   nextBodyId,
   nextJointId,
+  nextSensorId,
   removeBody,
   replaceBodyGeometry,
 } from "./robotEdits";
@@ -294,5 +300,86 @@ describe("issuesIntroducedBy", () => {
     const before = [issue("robot-cycle", "a")];
     const after = [issue("robot-cycle", "b")];
     expect(issuesIntroducedBy(before, after)).toEqual([issue("robot-cycle", "b")]);
+  });
+});
+
+describe("nextActuatorId", () => {
+  it("picks actuator-N past the current count", () => {
+    expect(nextActuatorId(loadTwoLinkArm())).toBe("actuator-2"); // shoulder_motor already exists
+  });
+
+  it("starts at actuator-1 for a document with no actuators yet", () => {
+    expect(nextActuatorId(makeDefaultRobotDef())).toBe("actuator-1");
+  });
+});
+
+describe("nextSensorId", () => {
+  it("picks sensor-N past the current count", () => {
+    expect(nextSensorId(loadTwoLinkArm())).toBe("sensor-3"); // shoulder_encoder, tip_camera already exist
+  });
+
+  it("starts at sensor-1 for a document with no sensors yet", () => {
+    expect(nextSensorId(makeDefaultRobotDef())).toBe("sensor-1");
+  });
+});
+
+describe("applyActuator", () => {
+  it("appends a new actuator when no replacingId is given", () => {
+    const robot = loadTwoLinkArm();
+    const next = applyActuator(robot, { id: "actuator-2", name: "Elbow Motor", type: "motor", target_joint: "joint2" });
+    expect(next.actuators.map((a) => a.id)).toEqual(["shoulder_motor", "actuator-2"]);
+  });
+
+  it("replaces the actuator matching replacingId, in place", () => {
+    const robot = loadTwoLinkArm();
+    const edited = { id: "shoulder_motor", name: "Shoulder Servo", type: "servo" as const, target_joint: "joint1" };
+    const next = applyActuator(robot, edited, "shoulder_motor");
+    expect(next.actuators).toEqual([edited]);
+  });
+});
+
+describe("applySensor", () => {
+  it("appends a new sensor when no replacingId is given", () => {
+    const robot = loadTwoLinkArm();
+    const next = applySensor(robot, { id: "sensor-3", name: "New Sensor", type: "distance", body: "base", transform: { position: [0, 0, 0], rotation_rpy: [0, 0, 0] } });
+    expect(next.sensors.map((s) => s.id)).toEqual(["shoulder_encoder", "tip_camera", "sensor-3"]);
+  });
+
+  it("replaces the sensor matching replacingId, in place", () => {
+    const robot = loadTwoLinkArm();
+    const edited: Sensor = { id: "tip_camera", name: "Renamed", type: "distance", body: "link2", transform: { position: [0, 0, 0], rotation_rpy: [0, 0, 0] } };
+    const next = applySensor(robot, edited, "tip_camera");
+    expect(next.sensors.map((s) => s.id)).toEqual(["shoulder_encoder", "tip_camera"]);
+    expect(next.sensors[1]).toEqual(edited);
+  });
+});
+
+describe("deleteActuator / deleteSensor", () => {
+  it("removes a single actuator by id, leaving everything else untouched", () => {
+    const robot = loadTwoLinkArm();
+    const next = deleteActuator(robot, "shoulder_motor");
+    expect(next.actuators).toEqual([]);
+    expect(next.joints).toEqual(robot.joints);
+    expect(next.sensors).toEqual(robot.sensors);
+  });
+
+  it("removes a single sensor by id, leaving everything else untouched", () => {
+    const robot = loadTwoLinkArm();
+    const next = deleteSensor(robot, "shoulder_encoder");
+    expect(next.sensors.map((s) => s.id)).toEqual(["tip_camera"]);
+    expect(next.actuators).toEqual(robot.actuators);
+  });
+
+  it("agrees with removeBody's own cascade: deleting both entities removeBody would cascade produces the same result", () => {
+    const robot = loadTwoLinkArm();
+    // removeBody("link1") cascades away joint1/joint2 (both reference link1),
+    // which in turn cascades away shoulder_motor (targets joint1) and
+    // shoulder_encoder (joint=joint1) -- tip_camera survives (body=link2,
+    // no joint). Reaching the same actuators/sensors via the new single-
+    // entity delete functions alone (no joint removal) proves they agree.
+    const viaCascade = removeBody(robot, "link1");
+    const viaDirectDelete = deleteSensor(deleteActuator(robot, "shoulder_motor"), "shoulder_encoder");
+    expect(viaDirectDelete.actuators).toEqual(viaCascade.actuators);
+    expect(viaDirectDelete.sensors).toEqual(viaCascade.sensors);
   });
 });

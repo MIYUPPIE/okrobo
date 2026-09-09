@@ -583,21 +583,21 @@ try {
   // (issuesIntroducedBy) are proven directly by robotEdits.test.ts and
   // JointCreator.test.tsx, not re-derived here. See
   // docs/decisions/robot-builder-joints.md.
-  await page.clickText(".builder-toolbar button", "/^Add Joint$/");
+  await page.evalClickText(".builder-toolbar button", "/^Add Joint$/");
   const jointHintShown = await waitForCondition(
     "document.querySelector('.joint-pick-hint')?.textContent === 'Click the parent body.'",
     5000,
   );
   check("Build mode: Add Joint enters the picking tool with a hint", jointHintShown);
 
-  await page.clickText(".hierarchy-row", "/^Chassis$/");
+  await page.evalClickText(".hierarchy-row", "/^Chassis$/");
   const jointHintAdvanced = await waitForCondition(
     "document.querySelector('.joint-pick-hint')?.textContent === 'Click the child body.'",
     5000,
   );
   check("Build mode: picking the parent advances the hint to the child", jointHintAdvanced);
 
-  await page.clickText(".hierarchy-row", "/^body-2$/");
+  await page.evalClickText(".hierarchy-row", "/^body-2$/");
   const jointFormShown = await waitForCondition(
     "document.querySelector('.builder-inspector h4')?.textContent === 'New joint'",
     5000,
@@ -611,7 +611,7 @@ try {
   );
   check("Build mode: Apply commits the joint -- the child is no longer a separate root", jointApplied);
 
-  await page.clickText(".hierarchy-row", "/^Chassis$/");
+  await page.evalClickText(".hierarchy-row", "/^Chassis$/");
   await waitForCondition("document.querySelector('[aria-label=\"body name\"]')?.value === 'Chassis'", 5000);
   await page.setInputValue('[aria-label="body mass"]', "2.5");
   // evalClickText, not clickText: a field edit immediately followed by
@@ -625,7 +625,7 @@ try {
   );
   check("Build mode: editing mass and clicking Apply commits with no error issue", massApplied);
 
-  await page.clickText(".builder-toolbar button", "/^Rotate$/");
+  await page.evalClickText(".builder-toolbar button", "/^Rotate$/");
   const rotateActive = await waitForCondition(
     "[...document.querySelectorAll('.builder-toolbar button')].find(b => b.textContent === 'Rotate')?.classList.contains('active')",
     5000,
@@ -795,7 +795,12 @@ try {
   // the Add Joint section, since Test mode requires zero error-severity
   // issues and an unattached second body would introduce one; nothing below
   // re-enters Test mode. See docs/decisions/cad-kernel-sketch-ui.md.
-  await page.clickText(".builder-toolbar button", "/^Extrude$/");
+  // evalClickText, not clickText: this fires right after switching back
+  // from Test mode, a just-prior DOM change a coordinate-based click can
+  // race (see evalClick's own docstring in cdp.mjs) -- two new toolbar
+  // buttons (Add Actuator/Add Sensor, Robot Builder D1) made this a real
+  // miss rather than a latent, never-triggered risk.
+  await page.evalClickText(".builder-toolbar button", "/^Extrude$/");
   const cadFormShown = await waitForCondition(
     "document.querySelector('.builder-inspector h4')?.textContent === 'New CAD part'",
     5000,
@@ -846,7 +851,7 @@ try {
 
   // Fast and deterministic: no worker round-trip should ever happen for a
   // degenerate dimension, so this needs no long poll.
-  await page.clickText(".builder-toolbar button", "/^Extrude$/");
+  await page.evalClickText(".builder-toolbar button", "/^Extrude$/");
   await waitForCondition("document.querySelector('.builder-inspector h4')?.textContent === 'New CAD part'", 5000);
   await page.setInputValue('[aria-label="cad width"]', "0");
   const degenerateRejectedLocally = await waitForCondition(
@@ -932,7 +937,7 @@ try {
     "Build mode: Extruded Cut enters the picking tool with a hint",
     await waitForCondition("document.querySelector('.joint-pick-hint')?.textContent === 'Click the body to cut.'", 5000),
   );
-  await page.clickText(".hierarchy-row", "/^body-2$/");
+  await page.evalClickText(".hierarchy-row", "/^body-2$/");
   check(
     "Build mode: picking a target body shows the Extruded Cut creation form",
     await waitForCondition("document.querySelector('.builder-inspector h4')?.textContent === 'New CAD part (Extruded Cut)'", 5000),
@@ -953,7 +958,7 @@ try {
   );
 
   await page.evalClickText(".builder-toolbar button", "/^Revolved Cut$/");
-  await page.clickText(".hierarchy-row", "/^body-2$/");
+  await page.evalClickText(".hierarchy-row", "/^body-2$/");
   check(
     "Build mode: Revolved Cut targets the same (already-cad_mesh) body and computes a real preview",
     await waitForCondition("!document.querySelector('.cad-extrude-creator .inspector-actions button.primary')?.disabled", 10000),
@@ -965,7 +970,7 @@ try {
   );
 
   await page.evalClickText(".builder-toolbar button", "/^Boundary Cut$/");
-  await page.clickText(".hierarchy-row", "/^body-2$/");
+  await page.evalClickText(".hierarchy-row", "/^body-2$/");
   check(
     "Build mode: Boundary Cut targets the same body and computes a real preview",
     await waitForCondition("!document.querySelector('.cad-extrude-creator .inspector-actions button.primary')?.disabled", 10000),
@@ -1031,7 +1036,7 @@ try {
     "Build mode: Fillet/Chamfer enters the picking tool with a hint",
     await waitForCondition("document.querySelector('.joint-pick-hint')?.textContent === 'Click the body to fillet or chamfer.'", 5000),
   );
-  await page.clickText(".hierarchy-row", `/^${freshBoxId}$/`);
+  await page.evalClickText(".hierarchy-row", `/^${freshBoxId}$/`);
   check(
     "Build mode: picking a box body shows the Fillet/Chamfer editor",
     await waitForCondition("document.querySelector('.builder-inspector h4')?.textContent === 'Fillet / Chamfer'", 5000),
@@ -1398,6 +1403,100 @@ try {
       45000,
     ),
   );
+
+  // -- robot builder: Add Actuator / Add Sensor (Robot Builder D1) --------
+  // Self-contained: adds its own two fresh bodies and a fresh hinge joint
+  // first, rather than depending on whatever joints the long CAD-Kernel/
+  // Joint-Authoring sequence above happened to leave behind (some of which
+  // are "fixed" type, not targetable by an actuator). The field-by-field
+  // authoring logic itself (issuesIntroducedBy gating, encoder's joint-not-
+  // transform branch, the ball/free-joint warning) is proven directly by
+  // ActuatorCreator.test.tsx/SensorCreator.test.tsx/robotEdits.test.ts, not
+  // re-derived here -- this only proves the real browser wiring: the
+  // toolbar tools, the pick flow, and the new Actuators/Sensors list's own
+  // edit/delete affordances. See
+  // docs/decisions/robot-builder-actuator-sensor-authoring.md.
+  const bodyNamesBefore = await page.evaluate("[...document.querySelectorAll('.hierarchy-row')].map(b => b.textContent)");
+  const countBefore = bodyNamesBefore.length;
+  await page.evalClick(".builder-add-body");
+  await page.evalClick(".builder-add-body");
+  const twoNewBodies = await waitForCondition(`document.querySelectorAll('.hierarchy-row').length >= ${countBefore + 2}`, 5000);
+  check("Build mode: two more bodies added for a fresh joint/actuator/sensor fixture", twoNewBodies);
+
+  // Body order in the hierarchy is tree order, not insertion order -- diff
+  // against the "before" snapshot instead of assuming the two new ones are
+  // last, so this doesn't depend on where buildKinematicTree happens to
+  // place a fresh unattached root.
+  const bodyNamesAfter = await page.evaluate("[...document.querySelectorAll('.hierarchy-row')].map(b => b.textContent)");
+  const beforeSet = new Set(bodyNamesBefore);
+  const [firstNew, secondNew] = bodyNamesAfter.filter((name) => !beforeSet.has(name));
+
+  await page.evalClickText(".builder-toolbar button", "/^Add Joint$/");
+  await page.evalClickText(".hierarchy-row", new RegExp(`^${firstNew}$`));
+  await page.evalClickText(".hierarchy-row", new RegExp(`^${secondNew}$`));
+  await waitForCondition("document.querySelector('.builder-inspector h4')?.textContent === 'New joint'", 5000);
+  await page.setSelectValue('[aria-label="joint type"]', "hinge");
+  await page.evalClickText(".inspector-actions button", "/^Apply$/");
+  const hingeJointAdded = await waitForCondition(
+    "document.querySelector('.builder-inspector h4')?.textContent !== 'New joint'",
+    5000,
+  );
+  check("Build mode: a fresh hinge joint is added for the actuator/sensor fixture", hingeJointAdded);
+
+  await page.evalClickText(".builder-toolbar button", "/^Add Actuator$/");
+  const actuatorFormShown = await waitForCondition(
+    "document.querySelector('.builder-inspector h4')?.textContent === 'New actuator'",
+    5000,
+  );
+  check("Build mode: Add Actuator shows the creation form directly, no viewport pick needed", actuatorFormShown);
+
+  await page.evalClickText(".inspector-actions button", "/^Apply$/");
+  const actuatorInList = await waitForCondition(
+    "[...document.querySelectorAll('.actuator-sensor-list .feature-tree-step')].some(b => b.textContent?.includes('actuator-1'))",
+    5000,
+  );
+  check("Build mode: Apply adds the actuator, shown in the new Actuators list", actuatorInList);
+
+  await page.evalClickText(".builder-toolbar button", "/^Add Sensor$/");
+  const sensorHintShown = await waitForCondition(
+    "document.querySelector('.joint-pick-hint')?.textContent === 'Click the body to mount the sensor on.'",
+    5000,
+  );
+  check("Build mode: Add Sensor enters the picking tool with a hint", sensorHintShown);
+
+  await page.evalClickText(".hierarchy-row", new RegExp(`^${firstNew}$`));
+  const sensorFormShown = await waitForCondition(
+    "document.querySelector('.builder-inspector h4')?.textContent === 'New sensor'",
+    5000,
+  );
+  check("Build mode: picking a body shows the sensor creation form", sensorFormShown);
+
+  await page.evalClickText(".inspector-actions button", "/^Apply$/");
+  const sensorInList = await waitForCondition(
+    "[...document.querySelectorAll('.actuator-sensor-list .feature-tree-step')].some(b => b.textContent?.includes('sensor-1'))",
+    5000,
+  );
+  check("Build mode: Apply adds the sensor, shown in the new Sensors list", sensorInList);
+
+  await page.evalClickText(".actuator-sensor-list .feature-tree-step", "/sensor-1/");
+  const sensorEditShown = await waitForCondition(
+    "document.querySelector('.builder-inspector h4')?.textContent === 'Edit sensor' && " +
+      "document.querySelector('[aria-label=\"sensor name\"]')?.value === 'sensor-1'",
+    5000,
+  );
+  check("Build mode: clicking an existing sensor opens it for editing, prefilled", sensorEditShown);
+  await page.evalClickText(".inspector-actions button", "/^Cancel$/");
+
+  // aria-label, not the generic .feature-tree-delete class + text: the
+  // actuator added earlier shares that exact class and "Delete" text, so a
+  // loosely-scoped click here would hit its row instead (first DOM match).
+  await page.evalClick('[aria-label="delete sensor sensor-1"]');
+  await page.evalClick('[aria-label="delete sensor sensor-1"]');
+  const sensorDeleted = await waitForCondition(
+    "![...document.querySelectorAll('.actuator-sensor-list .feature-tree-step')].some(b => b.textContent?.includes('sensor-1'))",
+    5000,
+  );
+  check("Build mode: two-click delete removes the sensor from the list", sensorDeleted);
 
   await page.clickText(".mode-toggle button", "/^Simulate$/");
   const backToSimulate = await waitForCondition(
