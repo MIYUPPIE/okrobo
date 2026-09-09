@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
+import type { RobotDef } from "../contracts/robotDef";
+import { EngineBuiltRobot } from "../engine/EngineBuiltRobot";
+import { loadEngine } from "../engine/loader";
+import { BuiltProgramRunner } from "../program/BuiltProgramRunner";
 import { ProgramStoppedError } from "../program/ProgramRunner";
 import { makeRunner } from "../program/testEngine";
-import { executeRemoteRequest } from "./PythonBridge";
+import { executeBuiltRemoteRequest, executeRemoteRequest } from "./PythonBridge";
 
 describe("executeRemoteRequest (real WASM engine)", () => {
   it("maps movement methods with args", async () => {
@@ -119,5 +123,103 @@ describe("executeRemoteRequest (real WASM engine)", () => {
     runner.abort();
     await expect(request).rejects.toBeInstanceOf(ProgramStoppedError);
     engine.destroy();
+  });
+});
+
+const IDENTITY = { position: [0, 0, 0] as [number, number, number], rotation_rpy: [0, 0, 0] as [number, number, number] };
+
+/** A base + one hinge-jointed link, one servo actuator, one encoder sensor
+ * on the same joint -- mirrors BuiltProgramRunner.test.ts's own fixture. */
+function makeHingeArmDoc(): RobotDef {
+  return {
+    id: "bridge-test",
+    name: "Bridge Test",
+    description: "",
+    root_placement: { position: [0, 0, 0.05], rotation_rpy: [0, 0, 0] },
+    bodies: [
+      {
+        id: "base",
+        name: "Base",
+        transform: IDENTITY,
+        mass: 0.5,
+        inertia: { ixx: 0.01, iyy: 0.01, izz: 0.01 },
+        visual: { type: "box", size: [0.1, 0.1, 0.05] },
+        collision: { type: "box", size: [0.1, 0.1, 0.05] },
+      },
+      {
+        id: "link1",
+        name: "Link 1",
+        transform: { position: [0.1, 0, 0], rotation_rpy: [0, 0, 0] },
+        mass: 0.1,
+        inertia: { ixx: 0.001, iyy: 0.001, izz: 0.001 },
+        visual: { type: "box", size: [0.2, 0.04, 0.04] },
+        collision: { type: "box", size: [0.2, 0.04, 0.04] },
+      },
+    ],
+    joints: [
+      {
+        id: "joint1",
+        name: "Joint 1",
+        type: "hinge",
+        parent: "base",
+        child: "link1",
+        origin: IDENTITY,
+        axis: [0, 1, 0],
+        limits: { lower: -3.14, upper: 3.14 },
+        damping: 0.5,
+      },
+    ],
+    actuators: [{ id: "shoulder", name: "Shoulder", type: "servo", target_joint: "joint1" }],
+    sensors: [{ id: "shoulder_encoder", name: "Shoulder Encoder", type: "encoder", body: "link1", joint: "joint1", transform: IDENTITY }],
+  };
+}
+
+describe("executeBuiltRemoteRequest (real WASM engine)", () => {
+  it("built_set moves the target actuator", async () => {
+    const module = await loadEngine();
+    const doc = makeHingeArmDoc();
+    const built = new EngineBuiltRobot(module, doc);
+    const runner = new BuiltProgramRunner(built, doc);
+
+    await executeBuiltRemoteRequest(runner.api, "built_set", { actuator_id: "shoulder", value: 1.2 });
+    for (let i = 0; i < 200; i++) runner.tick(0.01);
+    const reading = built.sensorReadings().find((r) => r.id === "shoulder_encoder");
+    expect(reading?.values[0]).toBeCloseTo(1.2, 1);
+    built.destroy();
+  });
+
+  it("built_read returns the named sensor's reading", async () => {
+    const module = await loadEngine();
+    const doc = makeHingeArmDoc();
+    const built = new EngineBuiltRobot(module, doc);
+    const runner = new BuiltProgramRunner(built, doc);
+
+    const result = await executeBuiltRemoteRequest(runner.api, "built_read", { sensor_id: "shoulder_encoder" });
+    expect(result).toEqual([0]);
+    built.destroy();
+  });
+
+  it("wait/stop reuse the same generic dispatch as car/arm/drone", async () => {
+    const module = await loadEngine();
+    const doc = makeHingeArmDoc();
+    const built = new EngineBuiltRobot(module, doc);
+    const runner = new BuiltProgramRunner(built, doc);
+
+    await executeBuiltRemoteRequest(runner.api, "built_set", { actuator_id: "shoulder", value: 1.0 });
+    const wait = executeBuiltRemoteRequest(runner.api, "wait", { seconds: 0.05 });
+    for (let i = 0; i < 10; i++) runner.tick(0.01);
+    await wait;
+    await executeBuiltRemoteRequest(runner.api, "stop", {});
+    expect(() => runner.api.set("shoulder", 0)).not.toThrow();
+    built.destroy();
+  });
+
+  it("rejects an unknown method", async () => {
+    const module = await loadEngine();
+    const doc = makeHingeArmDoc();
+    const built = new EngineBuiltRobot(module, doc);
+    const runner = new BuiltProgramRunner(built, doc);
+    await expect(executeBuiltRemoteRequest(runner.api, "fly", {})).rejects.toThrow("unknown method");
+    built.destroy();
   });
 });

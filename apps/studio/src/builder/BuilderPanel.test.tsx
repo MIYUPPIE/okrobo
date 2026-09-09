@@ -260,6 +260,16 @@ vi.mock("./CadPrimitiveRootEditor", () => ({
 vi.mock("../BlocksPanel", () => ({
   BlocksPanel: (props: { robot: string }) => <div data-testid="blocks-panel-stub" data-robot={props.robot} />,
 }));
+// jsdom can't construct Monaco's real editor (InstantiationService) -- same
+// reasoning as BlocksPanel above. Real Python execution against the sidecar
+// is proven by scripts/lib/studio-e2e-check.mjs and PythonBridge's own
+// integration tests; BuilderPanel's own tests only need to prove the wiring
+// (a bridge/runner is constructed, Run/Stop dispatch to the right place).
+vi.mock("../PythonPanel", () => ({
+  PythonPanel: (props: { connected: boolean; output: { text: string }[] }) => (
+    <div data-testid="python-panel-stub" data-connected={props.connected} data-output-count={props.output.length} />
+  ),
+}));
 vi.mock("./exportRobot", () => ({ exportRobotDef: vi.fn().mockResolvedValue(undefined) }));
 // CAD Kernel Phase 7.3 (edit-any-step): recomputeFeatureStep's own real
 // behavior (calling into the CAD worker via cadClient.ts's replayFeatures)

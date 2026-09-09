@@ -583,7 +583,7 @@ describe("built-robot blocks (Robot Builder Phase 6)", () => {
     expect(js).toContain('robot.read("front_lidar")[0]');
   });
 
-  it("Python/C++ previews are illustrative-only, not claiming a real package/SDK exists", () => {
+  it("Python is real (okrobo.BuiltRobot), C++ stays an illustrative-only preview", () => {
     setBuiltRobotFields([{ id: "wheel_motor", name: "Wheel Motor" }], [{ id: "front_lidar", name: "Front Lidar" }]);
     const ws = () =>
       load({
@@ -594,9 +594,9 @@ describe("built-robot blocks (Robot Builder Phase 6)", () => {
       });
 
     const py = generatePython(ws(), "built");
-    expect(py).toContain("Illustrative only");
+    expect(py).toContain("from okrobo import BuiltRobot");
     expect(py).toContain('robot.set("wheel_motor", 1)');
-    expect(py).not.toContain("from okrobo");
+    expect(py).not.toContain("Illustrative only");
     workspace.dispose();
 
     const cpp = generateCpp(ws(), "built");

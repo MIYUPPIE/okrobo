@@ -2068,3 +2068,75 @@ including a real pick-and-play run in headless Chrome. This closes out
 Competition Arena's C1-C3 scope in full. See
 docs/decisions/competition-arena-definition-scoring.md for the complete
 reasoning.
+
+## Robot Builder — B1: real Python execution (2026-09-09)
+
+The user flagged unfinished work from earlier phases -- specifically that a
+Build-mode robot's sensors/actuators (Robot Builder Phases 3/4, real MuJoCo
+physics, done since 2026-09-04) only ever worked inside Build mode's own
+isolated Test-mode sandbox, and even there its Python tab was explicit,
+labeled illustrative-only text with no real backend ("no real Python API
+for a built robot yet -- a future phase"). This closes that gap: Test
+mode's Python tab is now real, sidecar-connected, sidecar-executed code,
+exactly like Car/Arm/Drone's own Python tabs. C++ stays illustrative-only
+**permanently** -- a fixed compiled header genuinely can't represent
+per-student dynamic actuator/sensor ids, already documented in
+`docs/decisions/robot-builder-programming.md` as a real (not deferred)
+non-goal.
+
+`runtime/python/okrobo/worker.py` gained a `BuiltRobot` remote-proxy class
+(`set`/`read`/`wait`/`stop`), mirroring `Arm`/`Drone`'s exact shape --
+`wait`/`stop` reuse the same generic RPC names Robot/Arm/Drone already use,
+`built_set`/`built_read` are the two new ones. Unlike Robot/Arm/Drone,
+`BuiltRobot` has no local/offline implementation anywhere in the `okrobo`
+package (a built robot's shape is arbitrary and per-student, with no fixed
+physics to mirror) -- it exists only as this remote proxy and can never
+run standalone outside the studio. `sidecar.py` needed zero changes,
+confirmed fully method-agnostic before writing any of this.
+
+`apps/studio/src/python/PythonBridge.ts`'s `PythonBridge` class became
+generic (`PythonBridge<TRobot = RobotApi>`) with an injectable dispatch
+function (default `executeRemoteRequest`, so every existing 3-arg call
+site compiles unchanged), plus a new narrow `executeBuiltRemoteRequest`
+handling `built_set`/`built_read`/`wait`/`stop` against `BuiltRobotApi`.
+Considered and rejected: extending `ProgramRunner`/`RobotApi` itself to
+also cover built robots -- that class's `move()`/`tick()` machinery is
+Car-wheel-specific and would tangle two genuinely different execution
+models together.
+
+A useful correction found by direct verification before writing any code:
+`okroboBlocks.ts`'s Python codegen for the two built-robot blocks
+(`okrobo_built_set_actuator`/`okrobo_built_read_sensor`) was **already**
+real, correct code (`robot.set("id", value)` / `robot.read("id")[0]`) --
+only the `BUILT_PYTHON_HEADER` constant and its own stale comments said
+"illustrative only." Shrunk that part of the work considerably once
+confirmed by reading the actual generator functions instead of assuming
+the whole codegen path needed rewriting.
+
+`BuilderPanel.tsx`'s Test-mode program drawer replaced its `<pre>` preview
++ placeholder note with a real, connected `PythonPanel` (the same
+component Simulate mode already uses) wired to a dedicated
+`PythonBridge<BuiltRobotApi>`, constructed/torn down alongside
+`builtRunner`. `runProgramCode`/`stopProgram` gained the same
+Blocks-vs-Python branch `App.tsx`'s own `run()` already has.
+
+Tests: `test_worker.py` (+3, RPC-shape and generic-name-reuse cases),
+`PythonBridge.test.ts` (+4, `executeBuiltRemoteRequest` against a real
+compiled WASM `EngineBuiltRobot`+`BuiltProgramRunner` fixture),
+`integration.test.ts` (+1, a real spawned sidecar running a real
+`from okrobo import BuiltRobot` program end to end, asserting both stdout
+and the actual actuator movement), `okroboBlocks.test.ts` (updated: Python
+assertion flipped from "illustrative" to "real import", C++ untouched),
+`BuilderPanel.test.tsx` (a new `PythonPanel` mock, matching the existing
+`BlocksPanel` mock -- jsdom can't construct Monaco's real editor).
+`scripts/lib/studio-e2e-check.mjs`'s Test-mode Python check now asserts a
+real, sidecar-aware panel instead of the old illustrative note. `npm run
+test` (792 passing, up from 787), `npm run typecheck`, `npm run build`,
+`./scripts/check-studio-e2e.sh` all green. Manually verified against a
+**real running sidecar** in a real headless-Chrome session: Build mode ->
+New Robot -> Simple Arm template -> Test mode -> Python tab shows
+"python: connected", Run executes a real `BuiltRobot` program against the
+real sidecar and finishes cleanly. See
+docs/decisions/robot-builder-python-execution.md for the full reasoning,
+including why C++ stays out of scope permanently and why `BuiltRobot` has
+no local/offline implementation.

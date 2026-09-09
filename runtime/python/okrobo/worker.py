@@ -168,10 +168,33 @@ def make_okrobo_module(rpc) -> types.ModuleType:
         def stop(self) -> None:
             rpc("stop")
 
+    class BuiltRobot:
+        """Remote proxy for a Robot Builder document (contracts/robot-def/v0).
+
+        Unlike Robot/Arm/Drone, there is no local/offline implementation of
+        this class anywhere in the okrobo package: a built robot's shape is
+        arbitrary and per-student, with no fixed physics to mirror, so it
+        only ever exists as this remote proxy and can never run standalone
+        outside the studio.
+        """
+
+        def set(self, actuator_id: str, value: float) -> None:
+            rpc("built_set", actuator_id=actuator_id, value=value)
+
+        def read(self, sensor_id: str) -> list:
+            return [float(v) for v in rpc("built_read", sensor_id=sensor_id)]
+
+        def wait(self, seconds: float = 1.0) -> None:
+            rpc("wait", seconds=seconds)
+
+        def stop(self) -> None:
+            rpc("stop")
+
     module = types.ModuleType("okrobo")
     module.Robot = Robot
     module.Arm = Arm
     module.Drone = Drone
+    module.BuiltRobot = BuiltRobot
     # Make the stand-in a real package pointing at the installed okrobo
     # directory, so `from okrobo.vision import find_color` and friends load the
     # genuine submodules while `okrobo.Robot` stays the remote proxy. Without

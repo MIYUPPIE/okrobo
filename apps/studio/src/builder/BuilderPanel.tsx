@@ -7,9 +7,11 @@ import { validateRobotDef, type CadPick, type Feature, type RobotDef, type Trans
 import type { WorldDef } from "../contracts/worldDef";
 import { EngineBuiltRobot } from "../engine/EngineBuiltRobot";
 import { ENGINE_MISSING_MESSAGE, loadEngine } from "../engine/loader";
-import { BuiltProgramRunner } from "../program/BuiltProgramRunner";
+import { BuiltProgramRunner, type BuiltRobotApi } from "../program/BuiltProgramRunner";
 import { runProgram } from "../program/execute";
 import { ProgramStoppedError } from "../program/ProgramRunner";
+import { executeBuiltRemoteRequest, PythonBridge, SIDECAR_URL } from "../python/PythonBridge";
+import { type OutputLine, PythonPanel } from "../PythonPanel";
 import { ActuatorPanel } from "./ActuatorPanel";
 import { BodyInspector } from "./BodyInspector";
 import { BuilderViewport, type GizmoMode } from "./BuilderViewport";
@@ -161,6 +163,17 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   const [programError, setProgramError] = useState("");
   const programActiveRef = useRef(false);
 
+  // Robot Builder Python execution (real okrobo.BuiltRobot via the sidecar,
+  // see docs/decisions/robot-builder-python-execution.md) -- a dedicated
+  // bridge scoped to Test mode's own builtRunner, mirroring App.tsx's own
+  // PythonBridge-construction effect but trimmed (no ports/hardware/flash --
+  // a built robot has no serial/hardware path).
+  const [builtPythonConnected, setBuiltPythonConnected] = useState(false);
+  const [builtPythonOutput, setBuiltPythonOutput] = useState<OutputLine[]>([]);
+  const builtBridgeRef = useRef<PythonBridge<BuiltRobotApi> | null>(null);
+  const builtPythonActiveRef = useRef(false);
+  const pythonSourceRef = useRef("");
+
   const issues = useMemo(() => validateRobotDef(robot), [robot]);
   const errorCount = issues.filter((i) => i.severity === "error").length;
   const selectedBody = selectedBodyId ? (robot.bodies.find((b) => b.id === selectedBodyId) ?? null) : null;
@@ -213,6 +226,39 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
     // Test-mode toolbar's <select> below is meant to take effect live.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [builderMode, worldDef]);
+
+  // Robot Builder Python execution: a fresh bridge per builtRunner instance,
+  // reconnecting to the local sidecar the same way App.tsx's own Simulate-
+  // mode bridge does -- see docs/decisions/robot-builder-python-execution.md.
+  useEffect(() => {
+    if (!builtRunner) return;
+    const appendOutput = (line: OutputLine) =>
+      setBuiltPythonOutput((previous) => [...previous.slice(-499), line]);
+    const bridge = new PythonBridge<BuiltRobotApi>(
+      SIDECAR_URL,
+      builtRunner.api,
+      {
+        onStatus: setBuiltPythonConnected,
+        onStarted: () => {},
+        onOutput: (stream, text) => appendOutput({ stream, text }),
+        onDone: (exitCode) => {
+          builtPythonActiveRef.current = false;
+          builtRunner.abort();
+          setProgramStatus("idle");
+          if (exitCode !== 0) {
+            appendOutput({ stream: "stderr", text: `--- exited with code ${exitCode} ---\n` });
+          }
+        },
+      },
+      executeBuiltRemoteRequest,
+    );
+    builtBridgeRef.current = bridge;
+    bridge.connect();
+    return () => {
+      builtBridgeRef.current = null;
+      bridge.dispose();
+    };
+  }, [builtRunner]);
 
   const addBody = () => {
     const id = nextBodyId(robot);
@@ -553,6 +599,26 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
   // so a finished (or stopped) program leaves the robot at rest.
   const runProgramCode = () => {
     if (!builtRunner) return;
+    if (programTab === "Python") {
+      const bridge = builtBridgeRef.current;
+      if (!bridge?.connected) {
+        setBuiltPythonOutput([
+          {
+            stream: "stderr",
+            text: "python sidecar is not running · start it with ./scripts/run-python-sidecar.sh\n",
+          },
+        ]);
+        return;
+      }
+      if (programActiveRef.current) builtRunner.abort();
+      builtRunner.arm();
+      builtPythonActiveRef.current = true;
+      setBuiltPythonOutput([]);
+      setProgramStatus("running");
+      setProgramError("");
+      bridge.run(pythonSourceRef.current);
+      return;
+    }
     if (programActiveRef.current) builtRunner.abort();
     builtRunner.arm();
     programActiveRef.current = true;
@@ -574,7 +640,10 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
       });
   };
 
-  const stopProgram = () => builtRunner?.abort();
+  const stopProgram = () => {
+    if (builtPythonActiveRef.current) builtBridgeRef.current?.stop();
+    builtRunner?.abort();
+  };
 
   // Robot Builder Phase 6: must run before BlocksPanel's own mount effect
   // calls Blockly.inject below (which renders the flyout's block previews
@@ -819,12 +888,15 @@ export function BuilderPanel({ robot, onChange }: BuilderPanelProps) {
                   onCode={(js, python, cpp) => setProgramCode({ js, python, cpp })}
                 />
               </div>
-              <div className={programTab === "Python" ? "tab-panel active padded" : "tab-panel padded"}>
-                <pre className="cpp-preview">{programCode.python}</pre>
-                <p className="placeholder-note">
-                  Illustrative preview only -- there is no real Python API for a built robot yet
-                  (a future phase). This isn't runnable here.
-                </p>
+              <div className={programTab === "Python" ? "tab-panel active" : "tab-panel"}>
+                <PythonPanel
+                  generatedCode={programCode.python}
+                  output={builtPythonOutput}
+                  connected={builtPythonConnected}
+                  onSource={(code) => {
+                    pythonSourceRef.current = code;
+                  }}
+                />
               </div>
               <div className={programTab === "C++" ? "tab-panel active padded" : "tab-panel padded"}>
                 <pre className="cpp-preview">{programCode.cpp}</pre>

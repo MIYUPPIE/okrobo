@@ -4,8 +4,12 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { RobotDef } from "../contracts/robotDef";
+import { EngineBuiltRobot } from "../engine/EngineBuiltRobot";
+import { loadEngine } from "../engine/loader";
+import { BuiltProgramRunner } from "../program/BuiltProgramRunner";
 import { makeRunner } from "../program/testEngine";
-import { PythonBridge, type BridgeEvents } from "./PythonBridge";
+import { executeBuiltRemoteRequest, PythonBridge, type BridgeEvents } from "./PythonBridge";
 
 const RUNTIME_DIR = new URL("../../../../runtime/python", import.meta.url).pathname;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -265,5 +269,85 @@ describe("python sidecar end to end (real sidecar, real engine)", () => {
 
     bridge.dispose();
     engine.destroy();
+  }, 30000);
+
+  it("an unmodified okrobo BuiltRobot student file drives a real built robot", async () => {
+    const identity = { position: [0, 0, 0] as [number, number, number], rotation_rpy: [0, 0, 0] as [number, number, number] };
+    const doc: RobotDef = {
+      id: "integration-test",
+      name: "Integration Test",
+      description: "",
+      root_placement: { position: [0, 0, 0.05], rotation_rpy: [0, 0, 0] },
+      bodies: [
+        {
+          id: "base",
+          name: "Base",
+          transform: identity,
+          mass: 0.5,
+          inertia: { ixx: 0.01, iyy: 0.01, izz: 0.01 },
+          visual: { type: "box", size: [0.1, 0.1, 0.05] },
+          collision: { type: "box", size: [0.1, 0.1, 0.05] },
+        },
+        {
+          id: "link1",
+          name: "Link 1",
+          transform: { position: [0.1, 0, 0], rotation_rpy: [0, 0, 0] },
+          mass: 0.1,
+          inertia: { ixx: 0.001, iyy: 0.001, izz: 0.001 },
+          visual: { type: "box", size: [0.2, 0.04, 0.04] },
+          collision: { type: "box", size: [0.2, 0.04, 0.04] },
+        },
+      ],
+      joints: [
+        {
+          id: "joint1",
+          name: "Joint 1",
+          type: "hinge",
+          parent: "base",
+          child: "link1",
+          origin: identity,
+          axis: [0, 1, 0],
+          limits: { lower: -3.14, upper: 3.14 },
+          damping: 0.5,
+        },
+      ],
+      actuators: [{ id: "shoulder", name: "Shoulder", type: "servo", target_joint: "joint1" }],
+      sensors: [{ id: "shoulder_encoder", name: "Shoulder Encoder", type: "encoder", body: "link1", joint: "joint1", transform: identity }],
+    };
+
+    const module = await loadEngine();
+    const built = new EngineBuiltRobot(module, doc);
+    const builtRunner = new BuiltProgramRunner(built, doc);
+    const capture = makeCapture();
+    const bridge = new PythonBridge(url, builtRunner.api, capture.events, executeBuiltRemoteRequest);
+    bridge.connect();
+    await waitFor(() => capture.connected.value);
+
+    const tickOnce = () => {
+      for (let i = 0; i < 100; i++) builtRunner.tick(0.01);
+    };
+
+    bridge.run(
+      [
+        "from okrobo import BuiltRobot",
+        "robot = BuiltRobot()",
+        "robot.set('shoulder', 1.2)",
+        "robot.wait(1.0)",
+        "print('shoulder:', round(robot.read('shoulder_encoder')[0], 2))",
+      ].join("\n"),
+    );
+    await waitFor(() => capture.done.value, tickOnce);
+
+    expect(capture.done.exitCode).toBe(0);
+    // The servo actuator settles close to but not exactly at its target
+    // after 1s (real damped dynamics, not an instant snap) -- measured at
+    // 1.19, so this asserts "close to the target", not an exact string.
+    const stdout = capture.output.join("");
+    expect(stdout).toMatch(/shoulder: 1\.1\d|shoulder: 1\.2/);
+    const reading = built.sensorReadings().find((r) => r.id === "shoulder_encoder");
+    expect(reading?.values[0]).toBeCloseTo(1.2, 1);
+
+    bridge.dispose();
+    built.destroy();
   }, 30000);
 });

@@ -428,9 +428,8 @@ pythonGenerator.forBlock["okrobo_drone_turn_right"] = (block) =>
   `drone.turn_right(${block.getFieldValue("DEGREES")})\n`;
 pythonGenerator.forBlock["okrobo_drone_altitude"] = () => ["drone.altitude()", PyOrder.FUNCTION_CALL];
 pythonGenerator.forBlock["okrobo_drone_distance"] = () => ["drone.distance()", PyOrder.FUNCTION_CALL];
-// Illustrative preview text only -- no real okrobo.BuiltRobot package exists
-// (see the "built" branch of generatePython below and
-// docs/decisions/robot-builder-programming.md).
+// Real code against okrobo.BuiltRobot (see worker.py's remote proxy and
+// docs/decisions/robot-builder-python-execution.md).
 pythonGenerator.forBlock["okrobo_built_set_actuator"] = (block) => {
   const id = block.getFieldValue("ACTUATOR");
   if (!id) return "\n";
@@ -845,11 +844,10 @@ const PYTHON_HEADERS: Record<RobotKind, string> = {
 
 const VISION_BLOCK_TYPES = ["okrobo_see_color", "okrobo_color_bearing"];
 
-// Robot Builder Phase 6: no okrobo.BuiltRobot package exists -- this header
-// is the "built" branch's illustrative-only substitute for PYTHON_HEADERS
-// below, not a real package import.
-const BUILT_PYTHON_HEADER =
-  "# Illustrative only -- no okrobo.BuiltRobot exists yet.\n# A real built-robot Python API is future work; this previews the same\n# shape Blocks/C++ already use.\nrobot = ...\n\n";
+// A real okrobo.BuiltRobot exists (see worker.py's remote proxy and
+// docs/decisions/robot-builder-python-execution.md) -- unlike the "built"
+// branch's C++ counterpart below, this header is a real, runnable import.
+const BUILT_PYTHON_HEADER = "from okrobo import BuiltRobot\n\nrobot = BuiltRobot()\n\n";
 
 export function generatePython(workspace: Blockly.Workspace, robot: BlocksRobotKind = "car"): string {
   pythonReceiver = robot === "built" ? "robot" : RECEIVER_BY_ROBOT[robot];

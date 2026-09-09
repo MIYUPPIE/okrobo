@@ -140,6 +140,33 @@ def test_lidar_returns_floats():
     assert "2.0" in stdout
 
 
+def test_built_robot_set_becomes_rpc_request():
+    code = "from okrobo import BuiltRobot\nrobot = BuiltRobot()\nrobot.set('shoulder', 1.5)\n"
+    requests, _, stderr, exit_code = run_worker(code, lambda r: {"ok": True, "result": None})
+    assert exit_code == 0, stderr
+    assert requests[0]["method"] == "built_set"
+    assert requests[0]["args"] == {"actuator_id": "shoulder", "value": 1.5}
+
+
+def test_built_robot_read_returns_list():
+    code = "from okrobo import BuiltRobot\nrobot = BuiltRobot()\nprint(robot.read('touch')[0])\n"
+    requests, stdout, stderr, exit_code = run_worker(
+        code, lambda r: {"ok": True, "result": [1.0]}
+    )
+    assert exit_code == 0, stderr
+    assert requests[0]["method"] == "built_read"
+    assert requests[0]["args"] == {"sensor_id": "touch"}
+    assert "1.0" in stdout
+
+
+def test_built_robot_wait_and_stop_reuse_generic_rpc_names():
+    code = "from okrobo import BuiltRobot\nrobot = BuiltRobot()\nrobot.wait(0.5)\nrobot.stop()\n"
+    requests, _, stderr, exit_code = run_worker(code, lambda r: {"ok": True, "result": None})
+    assert exit_code == 0, stderr
+    assert [r["method"] for r in requests] == ["wait", "stop"]
+    assert requests[0]["args"] == {"seconds": 0.5}
+
+
 def test_student_code_can_import_okrobo_submodules():
     """The injected okrobo must be a real package.
 

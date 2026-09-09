@@ -1,3 +1,4 @@
+import type { BuiltRobotApi } from "../program/BuiltProgramRunner";
 import type { RobotApi } from "../program/ProgramRunner";
 
 // Client side of contracts/robot-remote/v1: connects to the local Python
@@ -124,15 +125,53 @@ export async function executeRemoteRequest(
   }
 }
 
-export class PythonBridge {
+/** Dispatch for a built robot (contracts/robot-def/v0) -- a second, narrow
+ * counterpart to executeRemoteRequest above, since BuiltRobotApi's shape
+ * (set/read by string id) has nothing in common with RobotApi's fixed
+ * car/arm/drone vocabulary. `wait`/`stop` reuse the exact same RPC method
+ * names Robot/Arm/Drone already use (harmless -- one worker process only
+ * ever hosts one class per run). Exported for tests. */
+export async function executeBuiltRemoteRequest(
+  robot: BuiltRobotApi,
+  method: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  switch (method) {
+    case "built_set":
+      robot.set(String(args.actuator_id ?? ""), num(args.value, 0));
+      return null;
+    case "built_read":
+      return robot.read(String(args.sensor_id ?? ""));
+    case "wait":
+      return robot.wait(num(args.seconds, 1));
+    case "stop":
+      return robot.stop();
+    default:
+      throw new Error(`unknown method: ${method}`);
+  }
+}
+
+/** `TRobot` defaults to `RobotApi`/`executeRemoteRequest` (every existing
+ * call site stays unchanged) -- a built robot's own bridge instance passes
+ * `BuiltRobotApi`/`executeBuiltRemoteRequest` explicitly instead. */
+export class PythonBridge<TRobot = RobotApi> {
   private ws: WebSocket | null = null;
   private disposed = false;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly url: string,
-    private readonly robot: RobotApi,
+    private readonly robot: TRobot,
     private readonly events: BridgeEvents,
+    private readonly executeRequest: (
+      robot: TRobot,
+      method: string,
+      args: Record<string, unknown>,
+    ) => Promise<unknown> = executeRemoteRequest as unknown as (
+      robot: TRobot,
+      method: string,
+      args: Record<string, unknown>,
+    ) => Promise<unknown>,
   ) {}
 
   connect(): void {
@@ -249,7 +288,7 @@ export class PythonBridge {
       case "request": {
         const id = message.id;
         try {
-          const result = await executeRemoteRequest(
+          const result = await this.executeRequest(
             this.robot,
             String(message.method),
             (message.args ?? {}) as Record<string, unknown>,

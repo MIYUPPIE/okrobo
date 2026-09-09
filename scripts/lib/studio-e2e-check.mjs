@@ -733,12 +733,17 @@ try {
     ),
   );
 
+  // Robot Builder Python execution: the Python tab is now a real, connected-
+  // or-offline PythonPanel (see docs/decisions/robot-builder-python-execution.md)
+  // -- this harness has no real sidecar running, so it shows the same
+  // "python: offline" fallback Simulate mode's own Python tab already shows
+  // in that state, proving this is the real component, not the old preview.
   await page.clickText(".builder-program-drawer .code-tab", "/^Python$/");
-  const pythonPreviewShown = await waitForCondition(
-    "document.querySelector('.builder-program-drawer .tab-panel.active .placeholder-note')?.textContent?.includes('no real Python API')",
+  const pythonRealPanelShown = await waitForCondition(
+    "document.querySelector('.builder-program-drawer .tab-panel.active .python-note')?.textContent?.includes('python: offline')",
     5000,
   );
-  check("Test mode: the Python tab shows an illustrative-only preview, not a real API", pythonPreviewShown);
+  check("Test mode: the Python tab is a real, sidecar-connected PythonPanel", pythonRealPanelShown);
 
   await page.clickText(".builder-program-drawer .code-tab", "/^C\\+\\+$/");
   const cppPreviewShown = await waitForCondition(
