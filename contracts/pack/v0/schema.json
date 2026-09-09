@@ -51,6 +51,11 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "Paths to contracts/world-def/v0 documents (Robot Builder Phase 8) -- distinct from `worlds` (contracts/world/v0, the Car/Drone arena)."
+        },
+        "competitions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Paths to contracts/competition/v0 documents (Competition Arena)."
         }
       }
     }

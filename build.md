@@ -1917,3 +1917,62 @@ end to end.
 pre-set in the shell), eval passing 3/3 expected classes, `corePack.test.ts`
 6/6. See docs/decisions/vision-lab-object-detection.md for the full
 reasoning.
+
+## Competition Arena — C1: Definition + Scoring (2026-09-09)
+
+The first of three sub-phases scoping "Competition Arena" out of a much
+larger platform brainstorm (`nextphase.md`, untracked): a student picks a
+competition (arena + objectives + scoring + time limit) and runs their
+EXISTING robot program against it. C1 ships only the definition contract
+and the pure scoring engine underneath it -- no UI yet (C2), no shipped
+content yet (C3).
+
+New `contracts/competition/v0`: `robot` ("car" only, forward-compatible
+enum), `arena` (embedded, field-for-field identical to
+`contracts/world/v1` -- nothing in the pack system lets one content file
+reference another, so a competition stays one portable document), and
+`objectives[]` -- three independent, unordered kinds for v0: `reach_zone`
+(a circle worth points, awarded once), `avoid_obstacle_collision` (a
+penalty per distinct hit), `time_limit` (ends the run). Deliberately
+**TypeScript-only** -- the one contract in this repo with no Python/C++
+mirror, because a competition is judged from OUTSIDE the student's own
+program (which still just calls `robot.forward()`/`robot.findColor()`
+exactly as before) -- there's no student-callable surface and no engine
+change to mirror in the first place.
+
+The real finding driving the scoring design: checked `engine/src/world.cpp`
+directly before writing any of this, and confirmed the Car/Drone World's
+own `collided` flag is wall-boundary-only -- a robot drives straight
+through an "obstacle" box today, since obstacles only ever feed the
+ray-cast distance/lidar sensor. `avoid_obstacle_collision` can't reuse
+that flag; `apps/studio/src/compete/score.ts`'s own `circleIntersectsAabb`
+computes overlap independently from the robot's own pose (already exposed
+every tick via `EngineWorld.state()`) and the arena's own obstacle list --
+zero new engine/WASM work needed. Collision penalties are edge-triggered
+per obstacle (one continuous overlap = one hit, not one per tick);
+`reach_zone` is idempotent (awarded once, on first touch).
+
+`ProgramRunner.tick()` gained one new optional trailing parameter
+(`onStep?: (state, dt) => void`), called once per simulated step --
+purely additive, every existing call site (`Viewport3D.tsx`,
+`apps/studio/src/builder/TestViewport.tsx`) passes no third argument and
+is unaffected (proven by a regression test). `state()` is now computed
+once per iteration and reused for both the pre-existing movement-collision
+check and the new hook, instead of twice.
+
+Tests: `competitionDef.test.ts` (examples/invalid fixtures, mirroring
+`robotDef.test.ts`'s own harness exactly), `score.test.ts` (16 cases:
+`circleIntersectsAabb` edge/corner/inside cases, reach_zone
+idempotency, collision edge-triggering including two obstacles overlapping
+in the same tick, time-limit accumulation deliberately avoiding an
+exact-1.0-second float boundary, plus one hand-computed full-run fixture),
+`packCompetitions.test.ts` (mirrors `packRobots.test.ts`), extensions to
+`ProgramRunner.test.ts`/`manifest.test.ts`/`store.test.ts`/`corePack.test.ts`.
+`npm run test`, `npm run typecheck`, `npm run build` all green. No
+contract change needed for Python/C++, so `pytest`/`ctest` re-run clean as
+a pure regression check. See
+docs/decisions/competition-arena-definition-scoring.md for the full
+reasoning, including the complete list of what's deliberately out of
+scope (ordered checkpoints, Robot-Builder-authored robots in
+competitions, AI opponents, tournaments, team mode, an AI coach, and the
+full "OKHUB FutureLab" rebrand itself).

@@ -1,0 +1,22 @@
+{
+  "id": "basic-sprint",
+  "name": "Basic Sprint",
+  "description": "Reach the far zone, avoid the crate, before time runs out.",
+  "robot": "car",
+  "arena": {
+    "name": "Sprint Arena",
+    "arena_width": 3,
+    "arena_height": 2,
+    "robot_radius": 0.1,
+    "wheel_base": 0.15,
+    "start": { "x": 0.5, "y": 1, "theta": 0 },
+    "obstacles": [
+      { "x": 1.5, "y": 1, "width": 0.3, "height": 0.3, "color": [200, 60, 60], "label": "crate" }
+    ]
+  },
+  "objectives": [
+    { "type": "reach_zone", "x": 2.6, "y": 1, "radius": 0.2, "points": 100 },
+    { "type": "avoid_obstacle_collision", "penalty_per_hit": 10 },
+    { "type": "time_limit", "seconds": 60 }
+  ]
+}

@@ -10,6 +10,7 @@ import { parseRobotDef } from "../contracts/robotDef";
 import { DEFAULT_ARM } from "../contracts/robotApi";
 import { parseWorldDef } from "../contracts/worldDef";
 import { validateWorld } from "../lib/validateWorld";
+import { parseCompetitionDef, validateCompetitionDef } from "../compete/competitionDef";
 import { parseLesson } from "./lesson";
 import { validateManifest } from "./manifest";
 import { jointChain, parseUrdf } from "./urdf";
@@ -33,9 +34,20 @@ describe("core pack", () => {
       ...manifest.contents.worlds,
       ...manifest.contents.robots,
       ...manifest.contents.lessons,
+      ...manifest.contents.competitions,
     ];
     for (const file of listed) {
       expect(() => read(file), `missing pack file: ${file}`).not.toThrow();
+    }
+  });
+
+  // Competition Arena C3: real content, not just "the file exists" --
+  // parses and validates cleanly via the same functions Compete mode's own
+  // picker uses.
+  it("ships competitions that parse and validate cleanly", () => {
+    for (const file of manifest.contents.competitions) {
+      const competition = parseCompetitionDef(JSON.parse(read(file)));
+      expect(validateCompetitionDef(competition)).toEqual([]);
     }
   });
 
@@ -111,6 +123,10 @@ describe("core pack", () => {
       }
       for (const worldDef of packManifest.contents.world_defs) {
         const parsed = parseWorldDef(JSON.parse(readFileSync(join(packDir, worldDef), "utf8")));
+        expect(parsed.id.length).toBeGreaterThan(0);
+      }
+      for (const competition of packManifest.contents.competitions) {
+        const parsed = parseCompetitionDef(JSON.parse(readFileSync(join(packDir, competition), "utf8")));
         expect(parsed.id.length).toBeGreaterThan(0);
       }
     }

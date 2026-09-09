@@ -1,4 +1,4 @@
-import { ARM_JOINT_NAMES } from "../contracts/robotApi";
+import { ARM_JOINT_NAMES, type State } from "../contracts/robotApi";
 import type { EngineArm } from "../engine/EngineArm";
 import type { EngineDrone } from "../engine/EngineDrone";
 import type { EngineWorld } from "../engine/EngineWorld";
@@ -216,15 +216,25 @@ export class ProgramRunner {
   }
 
   /** Step every world. Called from the render loop with this frame's budget. */
-  tick(steps: number): void {
+  /** Competition Arena C1: `onStep`, when given, is called once per
+   * simulated step with this tick's own engine state and dt -- the hook
+   * apps/studio/src/compete/score.ts's evaluateTick() runs through (see
+   * docs/decisions/competition-arena-definition-scoring.md). Purely
+   * additive: every existing call site passes no third argument and is
+   * unaffected. `state()` is computed once per iteration and reused for
+   * both the existing movement-collision check below and `onStep`, rather
+   * than calling it twice. */
+  tick(steps: number, onStep?: (state: State, dt: number) => void): void {
     for (let i = 0; i < steps; i++) {
       this.engine.step(this.dt);
       this.engineArm?.step(this.dt);
       this.engineDrone?.step(this.dt);
+      const state = this.engine.state();
+      onStep?.(state, this.dt);
       const m = this.movement;
       if (m) {
         m.stepsLeft -= 1;
-        const collided = this.engine.state().collided;
+        const collided = state.collided;
         if (m.stepsLeft <= 0 || collided) {
           if (!collided && m.remainder > 1e-12) this.engine.step(m.remainder);
           this.finishMovement();

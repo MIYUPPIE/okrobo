@@ -46,6 +46,11 @@ export interface Viewport3DProps {
   autopilotRef: React.RefObject<boolean>;
   onState: (hud: HudInfo) => void;
   onAutoStop: () => void;
+  /** Competition Arena C1: forwarded straight to ProgramRunner.tick()'s own
+   * new optional onStep hook, one call per simulated step. undefined
+   * outside Compete mode, so nothing else changes. See
+   * docs/decisions/competition-arena-definition-scoring.md. */
+  onEngineStep?: (state: State, dt: number) => void;
 }
 
 export function Viewport3D({
@@ -58,6 +63,7 @@ export function Viewport3D({
   autopilotRef,
   onState,
   onAutoStop,
+  onEngineStep,
 }: Viewport3DProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -336,7 +342,7 @@ export function Viewport3D({
       // Both worlds always step; wheels/joints only move when commanded.
       const plan = planSteps(accumulator, elapsed, DT, MAX_STEPS_PER_FRAME);
       accumulator = plan.accumulator;
-      runner.tick(plan.steps);
+      runner.tick(plan.steps, onEngineStep);
 
       if (robot === "car" && carGroup) {
         // Phase 1 built-in behavior: cruise forward, halt at the wall.
@@ -401,7 +407,7 @@ export function Viewport3D({
       renderer.dispose();
       container.removeChild(renderer.domElement);
     };
-  }, [robot, engine, arm, drone, world, runner, autopilotRef, onState, onAutoStop]);
+  }, [robot, engine, arm, drone, world, runner, autopilotRef, onState, onAutoStop, onEngineStep]);
 
   return <div ref={containerRef} className="viewport-3d" />;
 }

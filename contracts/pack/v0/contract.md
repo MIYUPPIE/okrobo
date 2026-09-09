@@ -12,7 +12,8 @@ robotics-pack/
 ├── robots/*.urdf        URDF subset (contracts/urdf below)
 ├── lessons/*.md         lesson markdown with runnable steps
 ├── robot_defs/*.json    contracts/robot-def/v0 (Robot Builder Phase 8)
-└── world_defs/*.json    contracts/world-def/v0 (Robot Builder Phase 8)
+├── world_defs/*.json    contracts/world-def/v0 (Robot Builder Phase 8)
+└── competitions/*.json  contracts/competition/v0 (Competition Arena)
 ```
 
 ## robot_defs / world_defs (Robot Builder Phase 8)
@@ -28,6 +29,15 @@ treats unknown `contents` keys leniently -- see
 `parseRobotDef`/`parseWorldDef` (never through the URDF importer), and
 surfaced to a student through Build mode's "New Robot" picker, not a
 generic file browser.
+
+## competitions (Competition Arena)
+
+Paths to `contracts/competition/v0` documents -- a self-contained arena +
+objectives + scoring challenge for the Car robot (see
+`docs/decisions/competition-arena-definition-scoring.md`). Added the same
+additive way `robot_defs`/`world_defs` were. Loaded via
+`parseCompetitionDef` and surfaced through Compete mode's own competition
+picker, not a generic file browser.
 
 ## Index (asset store / school server)
 

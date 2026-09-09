@@ -193,4 +193,28 @@ describe("ProgramRunner movements (real WASM engine)", () => {
     await expect(move).resolves.toBeUndefined();
     engine.destroy();
   });
+
+  // Competition Arena C1: tick()'s own new optional onStep hook (see
+  // docs/decisions/competition-arena-definition-scoring.md).
+  it("onStep fires exactly once per simulated step, with monotonically increasing tick and a constant dt", async () => {
+    const { engine, runner } = await makeRunner();
+    const seen: { tick: number; dt: number }[] = [];
+    runner.tick(10, (state, dt) => seen.push({ tick: state.tick, dt }));
+    expect(seen).toHaveLength(10);
+    const dts = new Set(seen.map((s) => s.dt));
+    expect(dts.size).toBe(1); // every call sees the same dt
+    for (let i = 1; i < seen.length; i++) {
+      expect(seen[i].tick).toBeGreaterThan(seen[i - 1].tick);
+    }
+    engine.destroy();
+  });
+
+  it("tick(steps) with no callback behaves exactly as before -- a plain regression guard", async () => {
+    const { engine, runner } = await makeRunner();
+    const move = runner.api.forward(0.1);
+    runner.tick(100); // no third argument, same call shape every existing site uses
+    await move;
+    expect(engine.state().pose.x).toBeCloseTo(1.1, 9);
+    engine.destroy();
+  });
 });

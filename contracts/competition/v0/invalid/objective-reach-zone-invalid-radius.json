@@ -1,0 +1,17 @@
+{
+  "id": "reach-zone-invalid-radius",
+  "name": "Reach Zone Invalid Radius",
+  "robot": "car",
+  "arena": {
+    "name": "Plain Arena",
+    "arena_width": 2,
+    "arena_height": 2,
+    "robot_radius": 0.1,
+    "wheel_base": 0.15,
+    "start": { "x": 0.5, "y": 0.5, "theta": 0 },
+    "obstacles": []
+  },
+  "objectives": [
+    { "type": "reach_zone", "x": 1.5, "y": 1.5, "radius": 0, "points": 50 }
+  ]
+}

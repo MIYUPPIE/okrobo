@@ -12,6 +12,8 @@ export interface PackContents {
   /** contracts/world-def/v0 documents (Robot Builder Phase 8) -- distinct
    * from `worlds` (contracts/world/v0, the Car/Drone arena). */
   world_defs: string[];
+  /** contracts/competition/v0 documents (Competition Arena). */
+  competitions: string[];
 }
 
 export interface PackManifest {
@@ -106,6 +108,7 @@ export function validateManifest(data: unknown): PackManifest {
       lessons: stringArray(contents.lessons, "contents.lessons", id),
       robot_defs: stringArray(contents.robot_defs, "contents.robot_defs", id),
       world_defs: stringArray(contents.world_defs, "contents.world_defs", id),
+      competitions: stringArray(contents.competitions, "contents.competitions", id),
     },
     url: typeof d.url === "string" ? d.url : undefined,
     signature: d.signature as string | undefined,

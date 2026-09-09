@@ -1,0 +1,18 @@
+{
+  "id": "duplicate-time-limit",
+  "name": "Duplicate Time Limit",
+  "robot": "car",
+  "arena": {
+    "name": "Plain Arena",
+    "arena_width": 2,
+    "arena_height": 2,
+    "robot_radius": 0.1,
+    "wheel_base": 0.15,
+    "start": { "x": 0.5, "y": 0.5, "theta": 0 },
+    "obstacles": []
+  },
+  "objectives": [
+    { "type": "time_limit", "seconds": 60 },
+    { "type": "time_limit", "seconds": 120 }
+  ]
+}
