@@ -2,7 +2,7 @@
   "id": "core",
   "name": "Core Pack",
   "description": "Installed with the studio: the arena world, the car and arm robots, and the first lessons.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "requires": { "studio": "0.1.0" },
   "contents": {
     "worlds": ["worlds/arena.json"],
@@ -11,7 +11,13 @@
       "lessons/01-drive-to-the-wall.md",
       "lessons/02-wave-the-arm.md",
       "lessons/03-fly-a-square.md",
-      "lessons/04-pick-and-drop.md"
+      "lessons/04-pick-and-drop.md",
+      "lessons/05-welcome-to-compete-mode.md"
+    ],
+    "competitions": [
+      "competitions/sprint-to-the-zone.json",
+      "competitions/obstacle-slalom.json",
+      "competitions/precision-docking.json"
     ]
   }
 }

@@ -100,6 +100,15 @@ export default function App() {
   const autopilotRef = useRef(false);
   const programActiveRef = useRef(false);
   const pythonActiveRef = useRef(false);
+  // The WASM world steps every animation frame regardless of Run/Stop (see
+  // Viewport3D.tsx's own "both worlds always step" comment) -- so without
+  // this gate, a competition's own clock would start ticking the instant an
+  // arena loads, not when the student presses Run, and would keep ticking
+  // after Stop. Flipped true by every one of run()'s three paths (cruise,
+  // Python, Blocks/C++ program) and false by haltEverything()/the program
+  // .finally(), mirroring how programActiveRef/pythonActiveRef already track
+  // "is something actually driving the robot right now."
+  const competeActiveRef = useRef(false);
   const jsCodeRef = useRef("");
   const pythonSourceRef = useRef("");
   const bridgeRef = useRef<PythonBridge | null>(null);
@@ -237,6 +246,7 @@ export default function App() {
           appendOutput({ stream: "stderr", text: `--- exited with code ${exitCode} ---\n` });
         }
         if (modeRef.current === "compete") {
+          competeActiveRef.current = false;
           setCompeteRun((previous) => (previous ? finishRun(previous, "program_ended") : previous));
         }
       },
@@ -303,16 +313,21 @@ export default function App() {
   // Viewport3D's effect already depends on this identity via its deps array.
   const onEngineStep = useCallback(
     (state: { pose: { x: number; y: number; theta: number } }, dt: number) => {
-      if (!competition) return;
-      setCompeteRun((previous) => {
-        if (!previous) return previous;
-        const next = evaluateTick(competition, previous, state.pose, dt);
-        if (next.timeUp && !previous.timeUp) haltEverything();
-        return next;
-      });
+      if (!competition || !competeActiveRef.current) return;
+      // Pure state transition only -- no side effect here. React (Strict
+      // Mode especially) may invoke a setState updater more than once per
+      // real event to check for impurities, so a call to haltEverything()
+      // from inside this updater could double-fire. The auto-halt-on-
+      // time-up side effect lives in the useEffect below instead, which
+      // only re-runs when `competeRun.timeUp` actually changes.
+      setCompeteRun((previous) => (previous ? evaluateTick(competition, previous, state.pose, dt) : previous));
     },
     [competition],
   );
+  useEffect(() => {
+    if (competeRun?.timeUp) haltEverything();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [competeRun?.timeUp]);
   const onCode = useCallback((js: string, python: string, cpp: string) => {
     jsCodeRef.current = js;
     setPythonCode(python);
@@ -340,6 +355,7 @@ export default function App() {
       autopilotRef.current = false;
       runner.arm();
       pythonActiveRef.current = true;
+      if (mode === "compete") competeActiveRef.current = true;
       setPythonOutput([]);
       setRunStatus("python");
       bridge.run(pythonSourceRef.current);
@@ -351,6 +367,7 @@ export default function App() {
       // No blocks on the workspace: fall back to the Phase 1 cruise.
       engine.apply({ type: "drive", left: CRUISE_SPEED, right: CRUISE_SPEED });
       autopilotRef.current = true;
+      if (mode === "compete") competeActiveRef.current = true;
       setRunStatus("cruise");
       return;
     }
@@ -358,6 +375,7 @@ export default function App() {
     autopilotRef.current = false;
     runner.arm();
     programActiveRef.current = true;
+    if (mode === "compete") competeActiveRef.current = true;
     setRunStatus("program");
     runProgram(code, runner.api)
       .then(() => setRunStatus("idle"))
@@ -374,7 +392,10 @@ export default function App() {
         engine.apply({ type: "stop" });
         arm?.apply({ type: "stop" });
         drone?.apply({ type: "drone_stop" });
-        if (mode === "compete") setCompeteRun((previous) => (previous ? finishRun(previous, "program_ended") : previous));
+        if (mode === "compete") {
+          competeActiveRef.current = false;
+          setCompeteRun((previous) => (previous ? finishRun(previous, "program_ended") : previous));
+        }
       });
   };
 
@@ -484,6 +505,7 @@ export default function App() {
     if (pythonActiveRef.current) bridgeRef.current?.stop();
     runner.abort();
     autopilotRef.current = false;
+    competeActiveRef.current = false;
     engine.apply({ type: "stop" });
     arm?.apply({ type: "stop" });
     drone?.apply({ type: "drone_stop" });

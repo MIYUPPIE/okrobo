@@ -1,0 +1,20 @@
+{
+  "id": "sprint-to-the-zone",
+  "name": "Sprint to the Zone",
+  "description": "An open, obstacle-free arena -- just reach the far zone before time runs out.",
+  "robot": "car",
+  "arena": {
+    "name": "Sprint Arena",
+    "description": "A long, empty 3x2 m arena. Nothing in the way -- this one is about getting there, not dodging anything.",
+    "arena_width": 3,
+    "arena_height": 2,
+    "robot_radius": 0.1,
+    "wheel_base": 0.15,
+    "start": { "x": 0.3, "y": 1.0, "theta": 0 },
+    "obstacles": []
+  },
+  "objectives": [
+    { "type": "reach_zone", "x": 2.7, "y": 1.0, "radius": 0.25, "points": 100 },
+    { "type": "time_limit", "seconds": 60 }
+  ]
+}

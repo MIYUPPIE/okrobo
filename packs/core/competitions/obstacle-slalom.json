@@ -1,0 +1,25 @@
+{
+  "id": "obstacle-slalom",
+  "name": "Obstacle Slalom",
+  "description": "Three posts straddle the direct path, alternating side to side -- drive straight and you'll clip one. Use the distance sensor to weave around them on the way to the zone.",
+  "robot": "car",
+  "arena": {
+    "name": "Slalom Corridor",
+    "description": "A 4x2 m corridor with three posts forcing a weave down the middle.",
+    "arena_width": 4,
+    "arena_height": 2,
+    "robot_radius": 0.1,
+    "wheel_base": 0.15,
+    "start": { "x": 0.3, "y": 1.0, "theta": 0 },
+    "obstacles": [
+      { "x": 1.2, "y": 0.85, "width": 0.3, "height": 0.3, "color": [200, 60, 60], "label": "post 1" },
+      { "x": 2.0, "y": 1.15, "width": 0.3, "height": 0.3, "color": [60, 110, 230], "label": "post 2" },
+      { "x": 2.8, "y": 0.85, "width": 0.3, "height": 0.3, "color": [200, 60, 60], "label": "post 3" }
+    ]
+  },
+  "objectives": [
+    { "type": "reach_zone", "x": 3.6, "y": 1.0, "radius": 0.25, "points": 150 },
+    { "type": "avoid_obstacle_collision", "penalty_per_hit": 15 },
+    { "type": "time_limit", "seconds": 60 }
+  ]
+}

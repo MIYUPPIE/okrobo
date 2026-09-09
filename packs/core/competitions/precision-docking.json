@@ -1,0 +1,25 @@
+{
+  "id": "precision-docking",
+  "name": "Precision Docking",
+  "description": "A walled bay sits across the arena with a narrow gate. Line up, drive in, and stop inside the small docking zone without clipping the bay walls.",
+  "robot": "car",
+  "arena": {
+    "name": "Docking Bay",
+    "description": "A 3x3 m arena with a three-sided bay on the far side and a 0.6 m gate.",
+    "arena_width": 3,
+    "arena_height": 3,
+    "robot_radius": 0.1,
+    "wheel_base": 0.15,
+    "start": { "x": 0.3, "y": 1.5, "theta": 0 },
+    "obstacles": [
+      { "x": 2.8, "y": 1.5, "width": 0.2, "height": 1.0, "color": [120, 120, 120], "label": "back wall" },
+      { "x": 2.45, "y": 1.9, "width": 0.7, "height": 0.2, "color": [120, 120, 120], "label": "top wall" },
+      { "x": 2.45, "y": 1.1, "width": 0.7, "height": 0.2, "color": [120, 120, 120], "label": "bottom wall" }
+    ]
+  },
+  "objectives": [
+    { "type": "reach_zone", "x": 2.5, "y": 1.5, "radius": 0.15, "points": 200 },
+    { "type": "avoid_obstacle_collision", "penalty_per_hit": 20 },
+    { "type": "time_limit", "seconds": 90 }
+  ]
+}

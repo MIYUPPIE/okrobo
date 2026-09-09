@@ -1,4 +1,4 @@
-# Decision: Competition Arena — C1-C2 (Definition + Scoring, then Compete mode UI)
+# Decision: Competition Arena — C1-C3 (Definition + Scoring, Compete mode UI, real content)
 
 **Date:** 2026-09-09
 
@@ -74,3 +74,34 @@ The approved plan's own wording suggested Compete mode would get "its own JSX bl
 ## Verification (C2)
 
 `apps/studio`: `npm run test` (new: `CompetitionDialog.test.tsx`, `CompeteHud.test.tsx`, `CompeteReport.test.tsx` — 787 total, up from 774), `npm run typecheck`, `npm run build` (852 modules). `./scripts/check-studio-e2e.sh` — real headless Chrome run, 5 new "Compete mode" checks pass alongside the full existing suite (see `scripts/lib/studio-e2e-check.mjs`'s own Compete-mode section for exactly what is and isn't provable without real competition content).
+
+---
+
+## C3: Real competition packs + a lesson
+
+Three competitions in `packs/core/competitions/`, each using only C1's three objective types, grounded only in the Car's real sensors (lidar/distance, no line sensor exists, so nothing "line-following" is proposed):
+
+- **Sprint to the Zone** — an open, obstacle-free 3x2 m arena, one `reach_zone`, a 60s `time_limit`. The "does the whole pipeline work at all" case.
+- **Obstacle Slalom** — a 4x2 m corridor with three posts straddling the direct path, alternating side to side, so driving straight clips at least one; `reach_zone` + `avoid_obstacle_collision` (15/hit) + a 60s `time_limit`. Exercises the distance sensor for real avoidance, not just a decorative obstacle.
+- **Precision Docking** — a 3x3 m arena with a three-sided bay (a 0.6 m gate) tucked in the corner; a small-radius (0.15 m) `reach_zone` deep inside it, `avoid_obstacle_collision` (20/hit), a generous 90s `time_limit`. The tight zone radius against the bay's own walls (0.05 m clearance at full points) is what makes "precision" real rather than nominal.
+
+Plus `packs/core/lessons/05-welcome-to-compete-mode.md` (introduces Compete mode, points at Sprint to the Zone first, then a rough obstacle-dodge starter for Slalom) and a `packs/core/pack.json` version bump (1.0.0 → 1.1.0) adding both.
+
+### A real correctness bug found while wiring this up: the compete clock ran before Run was pressed
+
+`Viewport3D.tsx`'s own render loop steps both physics worlds every animation frame regardless of Run/Stop ("both worlds always step; wheels/joints only move when commanded" — true before this phase too, for the idle-camera-preview case). `onEngineStep` (added in C2) rode along on that same unconditional step call, which meant a competition's own clock started ticking the instant its arena loaded — before the student ever pressed Run — and kept ticking after Stop, since haltEverything() only zeroes wheel velocity, it doesn't stop world.step() itself.
+
+Fixed with `competeActiveRef` (`apps/studio/src/App.tsx`): flipped true by each of `run()`'s three paths (cruise, Python, Blocks/C++ program) right as it starts driving, flipped false by `haltEverything()` and the program's own `.finally()`. `onEngineStep` now gates on it directly, so `evaluateTick` — and the clock it drives — only advances while something is actually driving the robot. A second, smaller fix rode along: the original code called `haltEverything()` from *inside* a `setCompeteRun` functional updater (to auto-stop on time-up) — React (Strict Mode especially) can invoke a state updater more than once per real event to check for purity, which could have double-fired that side effect. Moved to a `useEffect` keyed on `competeRun?.timeUp` instead, so the updater itself stays a pure state transition.
+
+### e2e: a real pick-and-play run, not just the empty state
+
+C2's own e2e section could only prove the empty-state picker (no bundled competitions existed yet). With real content now shipped, `scripts/lib/studio-e2e-check.mjs`'s Compete-mode section drives the full loop for real: picks "Sprint to the Zone" from the actual bundled list, presses Run, confirms the scoreboard's own clock advances live, presses Stop, and confirms a real report renders with a total-score line and at least one objective row. One test-harness gotcha surfaced and fixed here (not an app bug): a much earlier lesson's "Try this" step leaves the shared Blocks/Python `tab` state on Python for the rest of the suite, and Run on the Python tab correctly no-ops with no sidecar running in this harness — the same behavior Simulate mode would show. The Compete-mode section now reselects the Blocks tab first so the check is deterministic and sidecar-independent.
+
+## Non-goals (C3 specifically)
+
+- No further objective types, no checkpoints, no arm/drone competitions — unchanged from C1/C2.
+- No installed-pack competition content is exercised by the e2e suite (no Tauri desktop harness here) — only the bundled ones. Installed-pack competitions are proven directly by `packCompetitions.test.ts` and `CompetitionDialog.test.tsx`'s own mocked pack-section tests instead.
+
+## Verification (C3)
+
+`apps/studio`: `npm run test` (787 passing, unchanged count — the 3 new competitions and the new lesson are exercised by `corePack.test.ts`'s existing loops, not new test files), `npm run typecheck`, `npm run build` (856 modules). `./scripts/check-studio-e2e.sh` — full real pick-Run-Stop-report loop passes in headless Chrome, plus the existing "Lessons tab lists at least the five core lessons" bump.

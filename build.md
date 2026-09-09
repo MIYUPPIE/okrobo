@@ -2022,3 +2022,49 @@ scoreboard, Stop shows a report) is proven directly by `score.test.ts` /
 once `packs/core/competitions/*.json` exist. See
 docs/decisions/competition-arena-definition-scoring.md for the full
 reasoning.
+
+## Competition Arena — C3: real competition packs + a lesson (2026-09-09)
+
+Three real competitions in `packs/core/competitions/`, using only C1's
+three objective types, grounded in the Car's real lidar/distance sensor
+(no line sensor exists, so nothing "line-following"): **Sprint to the
+Zone** (open arena, one `reach_zone`, generous time limit -- the simplest
+end-to-end path), **Obstacle Slalom** (three posts straddling the direct
+line, forcing real distance-sensor avoidance, `avoid_obstacle_collision`
++ a tighter time limit), **Precision Docking** (a walled bay behind a
+0.6 m gate, a 0.15 m-radius zone tucked inside with only 0.05 m clearance
+to the back wall -- genuine precision, not nominal). Plus
+`packs/core/lessons/05-welcome-to-compete-mode.md` and a `pack.json`
+version bump (1.0.0 → 1.1.0).
+
+Real bug found and fixed while wiring this up: `Viewport3D.tsx` steps
+both physics worlds every animation frame regardless of Run/Stop (true
+since Phase 1, for the idle-camera-preview case) -- C2's `onEngineStep`
+rode along on that same unconditional step, so a competition's clock
+started counting down the instant its arena loaded, before Run was ever
+pressed, and kept counting after Stop. Fixed with a new
+`competeActiveRef` in `App.tsx`, flipped true by each of `run()`'s three
+paths (cruise/Python/program) and false by `haltEverything()`/the
+program's own `.finally()`; `onEngineStep` now gates on it. A second,
+smaller fix rode along: the time-up auto-stop had been calling
+`haltEverything()` from inside a `setCompeteRun` functional updater --
+React can invoke an updater more than once per event to check purity, so
+this moved to a `useEffect` keyed on `competeRun?.timeUp` instead, keeping
+the updater itself a pure transition.
+
+`scripts/lib/studio-e2e-check.mjs`'s Compete-mode section now drives a
+real pick-Run-Stop-report loop against the actual bundled competitions
+(previously only the empty-state picker was provable, since no content
+existed yet). Caught and fixed one test-harness gotcha along the way (not
+an app bug): a much earlier lesson's "Try this" step leaves the shared
+Blocks/Python tab on Python for the rest of the suite, so the Compete
+section now reselects Blocks first before pressing Run, matching real
+sidecar-gated behavior instead of tripping over leftover test state.
+
+`npm run test` (787 passing, same count -- the new competitions/lesson
+are covered by `corePack.test.ts`'s existing loops), `npm run typecheck`,
+`npm run build` (856 modules), `./scripts/check-studio-e2e.sh` all green,
+including a real pick-and-play run in headless Chrome. This closes out
+Competition Arena's C1-C3 scope in full. See
+docs/decisions/competition-arena-definition-scoring.md for the complete
+reasoning.

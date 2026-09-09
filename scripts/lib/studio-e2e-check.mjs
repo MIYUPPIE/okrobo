@@ -405,9 +405,9 @@ try {
 
   // -- lessons: list, open, "Try this" loads code and can switch robots -------
   await page.clickText(".code-tab", "/^Lessons$/");
-  const lessonsReady = await waitForCondition("document.querySelectorAll('.lesson-card').length >= 3", 5000);
+  const lessonsReady = await waitForCondition("document.querySelectorAll('.lesson-card').length >= 5", 5000);
   const lessonCount = await page.evaluate("document.querySelectorAll('.lesson-card').length");
-  check("Lessons tab lists at least the three core lessons", lessonsReady, `${lessonCount} lessons`);
+  check("Lessons tab lists at least the five core lessons (including Compete mode's own)", lessonsReady, `${lessonCount} lessons`);
 
   await page.clickText(".lesson-card", "/Wave the arm/");
   const stepsReady = await waitForCondition("document.querySelectorAll('.lesson-step').length >= 2", 5000);
@@ -1401,48 +1401,74 @@ try {
   );
   check("Build mode: switching back to Simulate restores the sim UI", backToSimulate);
 
-  // -- compete mode: Competition Arena C2 ---------------------------------
+  // -- compete mode: Competition Arena C2/C3 -------------------------------
   // Coverage gap, stated plainly, mirroring the Build-mode packs note above:
-  // core/competitions/*.json don't exist yet (that's C3's job) and this
-  // harness runs as a plain browser tab against the Vite dev server, so
-  // there is neither a bundled nor an installed-pack competition to pick
-  // here. What this section proves for real: the 3rd mode switches in
-  // cleanly, the picker dialog opens automatically with both sections
-  // settled to their real empty states (not a stuck "Loading…"), Cancel
-  // leaves Compete mode in its own clean "nothing chosen" state with
-  // Run/Stop/Reset all disabled, and switching back to Simulate restores
-  // the sim UI exactly like Build mode's own check above. The live-run
-  // path (pick a competition, watch the scoreboard update, Stop shows a
-  // report) is proven directly by score.test.ts, CompeteHud.test.tsx, and
-  // CompeteReport.test.tsx against real CompetitionRunState values; once
-  // C3 ships real bundled competitions this section gains a real pick and
-  // a real live run. See docs/decisions/competition-arena-definition-scoring.md.
+  // this harness runs as a plain browser tab against the Vite dev server
+  // (isTauri() is false), so there is no installed desktop pack to pick a
+  // competition from -- only the bundled ones (packs/core/competitions/,
+  // shipped via import.meta.glob, no Tauri IPC needed) are reachable here.
+  // What this section proves for real: the 3rd mode switches in cleanly,
+  // the picker lists the real bundled competitions (sorted by file name,
+  // same order bundledCompetitions() itself sorts by) with the
+  // installed-pack section settled to its real empty state, picking one
+  // rebuilds the arena and starts the scoreboard, Run actually drives the
+  // car and the scoreboard's own clock advances live, Stop freezes it and
+  // shows a real end-of-run report, and switching back to Simulate
+  // restores the sim UI. The Blocks tab is reselected first -- a much
+  // earlier lesson's "Try this" step (tryLessonStep) leaves the shared
+  // `tab` state on Python, and Run on the Python tab correctly no-ops with
+  // no sidecar running in this harness (same as it would in Simulate mode);
+  // that's real, existing, sidecar-gated behavior, not something this
+  // section means to exercise.
+  await page.evalClickText(".code-tab", "/^Blocks$/");
   await page.clickText(".mode-toggle button", "/^Compete$/");
   const competeDialogShown = await waitForCondition(
     "[...document.querySelectorAll('.dialog h3')].some(h => h.textContent === 'Choose a competition')",
     5000,
   );
   check("Compete mode: switching in opens the competition picker", competeDialogShown);
-  const competeEmptyStatesSettled = await waitForCondition(
-    "[...document.querySelectorAll('.dialog-empty')].some(p => p.textContent === 'No bundled competitions yet.') && " +
+  const competeBundledListed = await waitForCondition(
+    "[...document.querySelectorAll('.template-row .project-name')].map(n => n.textContent).join(',') === " +
+      "'Obstacle Slalom,Precision Docking,Sprint to the Zone' && " +
       "[...document.querySelectorAll('.dialog-empty')].some(p => p.textContent?.includes('No installed packs carry a competition'))",
     5000,
   );
-  check("Compete mode: the picker settles to a clean empty state (no competitions yet)", competeEmptyStatesSettled);
+  check("Compete mode: the picker lists the three real bundled competitions", competeBundledListed);
 
-  await page.clickText(".dialog-actions button", "/^Cancel$/");
-  const competeEmptySidebar = await waitForCondition(
-    "!document.querySelector('.dialog-backdrop') && " +
-      "[...document.querySelectorAll('.compete-sidebar-note')].some(p => p.textContent === 'No competition chosen yet.')",
+  await page.clickText(".template-row .project-name", "/^Sprint to the Zone$/");
+  const competeHudShown = await waitForCondition(
+    "document.querySelector('.compete-hud h4')?.textContent === 'Sprint to the Zone' && " +
+      "!!document.querySelector('.viewport-3d canvas')",
     5000,
   );
-  check("Compete mode: Cancel closes the picker and shows the empty sidebar state", competeEmptySidebar);
-  check(
-    "Compete mode: Run/Stop/Reset stay disabled with no competition chosen",
-    await page.evaluate(
-      "[...document.querySelectorAll('.run-bar button')].every(b => b.disabled)",
-    ),
+  check("Compete mode: picking a competition rebuilds the arena and shows the scoreboard", competeHudShown);
+
+  const timeBeforeRun = await page.evaluate(
+    "document.querySelector('.compete-hud-row:nth-child(3) span:nth-child(2)')?.textContent",
   );
+  await page.evalClick(".run-bar .run");
+  const scoreboardLive = await waitForCondition(
+    `document.querySelector('.compete-hud-row:nth-child(3) span:nth-child(2)')?.textContent !== ${JSON.stringify(timeBeforeRun)}`,
+    5000,
+  );
+  check("Compete mode: Run drives the car and the scoreboard's own clock updates live", scoreboardLive, `before: ${timeBeforeRun}`);
+
+  await page.evalClick(".run-bar .run + button"); // Stop (run-bar footer entry point)
+  const competeReportShown = await waitForCondition(
+    "!!document.querySelector('.compete-report') && " +
+      "document.querySelector('.compete-report-total')?.textContent?.includes('Total score') && " +
+      "document.querySelectorAll('.compete-report-table tbody tr').length >= 1",
+    5000,
+  );
+  check("Compete mode: Stop ends the run and shows a report with a total score and objective rows", competeReportShown);
+
+  await page.evalClickText(".dialog-actions button", "/Choose another competition/");
+  const competePickerReopened = await waitForCondition(
+    "[...document.querySelectorAll('.dialog h3')].some(h => h.textContent === 'Choose a competition')",
+    5000,
+  );
+  check("Compete mode: 'Choose another competition' returns to the picker", competePickerReopened);
+  await page.evalClickText(".dialog-actions button", "/^Cancel$/");
 
   await page.clickText(".mode-toggle button", "/^Simulate$/");
   const backToSimulateFromCompete = await waitForCondition(
