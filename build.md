@@ -2479,3 +2479,43 @@ runs after the `engineStatus` fix (down from ~1-in-3 flaky before it), plus
 two manual screenshot passes confirming the ground markers and maze layout
 are visibly correct in a real browser, not just numerically so. See
 docs/decisions/competition-arena-definition-scoring.md's C4 addendum.
+
+## Competition run history: best scores, remembered across sessions (2026-09-10)
+
+User: "pick from nextphase.md" -- delegated the choice this time. Picked
+run history over the other remaining buildable candidates (most of what's
+left in the Competition Mode brainstorm section needs real multi-robot
+physics this engine doesn't have, still correctly deferred): it directly
+builds on the web-persistence work just shipped, and it's the missing data
+layer underneath three separate brainstorm items at once -- Competition
+Analytics, Competition Readiness Score, and Tournament Mode all assume
+"what happened on past runs" exists somewhere, and nothing persisted a
+run's own result before this. Scoped via plan-mode.
+
+New `apps/studio/src/compete/runHistory.ts` mirrors `projects/webStore.ts`'s
+own two conventions exactly: an injectable `KeyValueStore` (default: real
+`localStorage`, Node+vitest doesn't reliably provide one) and one JSON blob
+per competition id, capped at 20 most-recent runs. Wired into `App.tsx` via
+a new `useEffect` keyed on `competeRun?.finished` (never inside the
+`setCompeteRun` updater itself, same Strict-Mode-purity reasoning already
+documented for the existing `timeUp` effect). Surfaces as a "Best: N" hint
+on each competition's own row in the picker, and a "New best!" / "Best: N"
+line in the end-of-run report.
+
+**A real bug caught by this feature's own new e2e check before it
+shipped**: the first cut computed "new best" via `score > (previousBest ??
+-Infinity)`, so a competition's genuinely first-ever run trivially "beat" a
+nonexistent best and showed "New best!" when nothing should show at all.
+`CompeteReport.test.tsx` couldn't catch it (it tests rendering against an
+explicit prop, not the computation that builds one) and `App.tsx` has no
+unit test file by this project's own convention -- caught instead by a
+real-browser e2e run. Fixed: `isNewBest: previousBest !== null && score >
+previousBest`.
+
+Tests: `runHistory.test.ts` (7, new), `CompeteReport.test.tsx` (+3),
+`CompetitionDialog.test.tsx` (+3). `npm run test` (912 passing, up from
+899), `npm run typecheck`, `npm run build`. `./scripts/check-studio-e2e.sh`
+gained a real two-competition-run localStorage round trip (first run shows
+no best line, the picker's own row then shows the recorded best, a second
+run shows the comparison) -- 3 consecutive clean real-browser runs after
+the fix. See docs/decisions/competition-run-history.md.

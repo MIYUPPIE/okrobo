@@ -354,6 +354,21 @@ body {
   font-size: 13px;
 }
 
+.compete-report-best {
+  margin: -4px 0 10px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.compete-report-best.new-best {
+  color: #4caf50;
+  font-weight: 600;
+}
+
+.template-best-score {
+  color: #4caf50;
+}
+
 .compete-sidebar-note {
   font-size: 12px;
   color: var(--text-dim);

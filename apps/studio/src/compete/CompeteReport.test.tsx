@@ -61,6 +61,44 @@ describe("CompeteReport", () => {
     expect(screen.queryByText("Reach the zone")).not.toBeInTheDocument();
   });
 
+  // Competition run history: best-score display.
+  it("shows nothing when this is the competition's first-ever recorded run", () => {
+    const run = finishRun(evaluateTick(competition, initRunState(competition), { x: 0, y: 0, theta: 0 }, 0.1), "stopped");
+    render(<CompeteReport competition={competition} run={run} onRunAgain={() => {}} onChooseAnother={() => {}} />);
+    expect(screen.queryByText(/New best/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Best:/)).not.toBeInTheDocument();
+  });
+
+  it("shows 'New best!' when this run beat the previous best", () => {
+    const run = finishRun(evaluateTick(competition, initRunState(competition), { x: 0, y: 0, theta: 0 }, 0.1), "stopped");
+    render(
+      <CompeteReport
+        competition={competition}
+        run={run}
+        bestScore={{ previousBest: 50, isNewBest: true }}
+        onRunAgain={() => {}}
+        onChooseAnother={() => {}}
+      />,
+    );
+    expect(screen.getByText(/New best/)).toBeInTheDocument();
+    expect(screen.queryByText(/^Best: 50/)).not.toBeInTheDocument();
+  });
+
+  it("shows the previous best when this run didn't beat it", () => {
+    const run = finishRun(evaluateTick(competition, initRunState(competition), { x: 0, y: 0, theta: 0 }, 0.1), "stopped");
+    render(
+      <CompeteReport
+        competition={competition}
+        run={run}
+        bestScore={{ previousBest: 500, isNewBest: false }}
+        onRunAgain={() => {}}
+        onChooseAnother={() => {}}
+      />,
+    );
+    expect(screen.getByText("Best: 500")).toBeInTheDocument();
+    expect(screen.queryByText(/New best/)).not.toBeInTheDocument();
+  });
+
   it("Run again and Choose another competition call their own handlers", async () => {
     const run = finishRun(initRunState(competition), "program_ended");
     const onRunAgain = vi.fn();

@@ -1728,12 +1728,48 @@ try {
   );
   check("Compete mode: Stop ends the run and shows a report with a total score and objective rows", competeReportShown);
 
+  // -- Competition run history: a real localStorage round trip -----------
+  // This e2e harness always boots a fresh temp Chrome profile (see
+  // check-studio-e2e.sh's own --user-data-dir), so the Sprint run just
+  // above is genuinely this competition's first-ever recorded run in this
+  // session -- no best-score line should show yet. The exact score
+  // comparison math (locked/active/achieved-style state derivation) is
+  // proven directly by runHistory.test.ts/CompeteReport.test.tsx; this
+  // only proves the real browser wiring: App.tsx actually persists a
+  // record on finish, and both the report and the picker actually read it
+  // back on a second encounter.
+  const noBestYet = await page.evaluate(
+    "!document.querySelector('.compete-report-best') && !document.querySelector('.template-best-score')",
+  );
+  check("Compete mode: no best-score line yet on Sprint to the Zone's first-ever run this session", noBestYet);
+
   await page.evalClickText(".dialog-actions button", "/Choose another competition/");
   const competePickerReopened = await waitForCondition(
     "[...document.querySelectorAll('.dialog h3')].some(h => h.textContent === 'Choose a competition')",
     5000,
   );
   check("Compete mode: 'Choose another competition' returns to the picker", competePickerReopened);
+
+  const bestScoreHintShown = await waitForCondition(
+    "[...document.querySelectorAll('.template-row')].some(row => row.textContent?.includes('Sprint to the Zone') && /Best: \\d+/.test(row.textContent))",
+    5000,
+  );
+  check("Compete mode: Sprint to the Zone's own row now shows a real recorded best score", bestScoreHintShown);
+
+  await page.evalClickText(".template-row .project-name", "/^Sprint to the Zone$/");
+  await waitForCondition("document.querySelector('.compete-hud h4')?.textContent === 'Sprint to the Zone' && !!document.querySelector('.viewport-3d canvas')", 5000);
+  await page.evalClickText(".code-tab", "/^Blocks$/");
+  await page.evalClick(".run-bar .run");
+  await sleep(600);
+  await page.evalClick(".run-bar .run + button"); // Stop
+  const secondRunBestShown = await waitForCondition(
+    "!!document.querySelector('.compete-report-best')",
+    5000,
+  );
+  check("Compete mode: the second run's own report shows a best-score comparison line", secondRunBestShown, await page.evaluate("document.querySelector('.compete-report-best')?.textContent ?? ''"));
+
+  await page.evalClickText(".dialog-actions button", "/Choose another competition/");
+  await waitForCondition("[...document.querySelectorAll('.dialog h3')].some(h => h.textContent === 'Choose a competition')", 5000);
 
   // -- Competition Arena C4: ordered checkpoints (Object Delivery Race) ----
   // The sequencing LOGIC itself (locked -> unlocked -> achieved, tiers,

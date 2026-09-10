@@ -2,12 +2,17 @@ import { useEffect, useState } from "react";
 import type { CompetitionDef } from "./competitionDef";
 import { bundledCompetitions } from "./bundledCompetitions";
 import { listPackCompetitions, type PackCompetitions } from "./packCompetitions";
+import { getBestScore } from "./runHistory";
 
 // Compete mode's own competition picker (Competition Arena C2), mirroring
 // apps/studio/src/builder/TemplateDialog.tsx's own shape exactly -- same
 // "bundled section + installed-pack section" split, same async-load
 // posture (loading is two IPC round-trips per installed pack; most packs
 // carry none, an expected quiet empty state, not an error).
+//
+// Competition run history: each row also shows its own best score, when
+// one's been recorded -- a plain synchronous localStorage read
+// (runHistory.ts), no loading state needed unlike the pack sections.
 
 export function CompetitionDialog({ onPick, onCancel }: { onPick: (competition: CompetitionDef) => void; onCancel: () => void }) {
   const [packCompetitions, setPackCompetitions] = useState<PackCompetitions[] | null>(null);
@@ -35,14 +40,19 @@ export function CompetitionDialog({ onPick, onCancel }: { onPick: (competition: 
           <p className="dialog-empty">No bundled competitions yet.</p>
         ) : (
           <ul className="project-list">
-            {bundled.map((competition) => (
-              <li key={competition.file}>
-                <button className="project-row template-row" onClick={() => onPick(competition.make())}>
-                  <span className="project-name">{competition.label}</span>
-                  <span className="template-description">{competition.make().description ?? ""}</span>
-                </button>
-              </li>
-            ))}
+            {bundled.map((competition) => {
+              const made = competition.make();
+              const best = getBestScore(made.id);
+              return (
+                <li key={competition.file}>
+                  <button className="project-row template-row" onClick={() => onPick(made)}>
+                    <span className="project-name">{competition.label}</span>
+                    <span className="template-description">{made.description ?? ""}</span>
+                    {best !== null && <span className="template-description template-best-score">Best: {best}</span>}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
 
@@ -54,14 +64,19 @@ export function CompetitionDialog({ onPick, onCancel }: { onPick: (competition: 
         ) : (
           <ul className="project-list">
             {packCompetitions.map(({ pack, competitions }) =>
-              competitions.map((competition, index) => (
-                <li key={`${pack.id}:${index}`}>
-                  <button className="project-row template-row" onClick={() => onPick(competition.make())}>
-                    <span className="project-name">{competition.label}</span>
-                    <span className="template-description">from {pack.name}</span>
-                  </button>
-                </li>
-              )),
+              competitions.map((competition, index) => {
+                const made = competition.make();
+                const best = getBestScore(made.id);
+                return (
+                  <li key={`${pack.id}:${index}`}>
+                    <button className="project-row template-row" onClick={() => onPick(made)}>
+                      <span className="project-name">{competition.label}</span>
+                      <span className="template-description">from {pack.name}</span>
+                      {best !== null && <span className="template-description template-best-score">Best: {best}</span>}
+                    </button>
+                  </li>
+                );
+              }),
             )}
           </ul>
         )}

@@ -30,8 +30,9 @@ import { runProgram } from "./program/execute";
 import { ProgramRunner, ProgramStoppedError } from "./program/ProgramRunner";
 import { CompetitionDialog } from "./compete/CompetitionDialog";
 import { CompeteHud } from "./compete/CompeteHud";
-import { CompeteReport } from "./compete/CompeteReport";
+import { CompeteReport, type BestScoreInfo } from "./compete/CompeteReport";
 import type { CompetitionDef } from "./compete/competitionDef";
+import { getBestScore, recordRun } from "./compete/runHistory";
 import { evaluateTick, finishRun, initRunState, type CompetitionRunState } from "./compete/score";
 import {
   createProject,
@@ -171,6 +172,10 @@ export default function App() {
   const [competition, setCompetition] = useState<CompetitionDef | null>(null);
   const [competeRun, setCompeteRun] = useState<CompetitionRunState | null>(null);
   const [competeDialogOpen, setCompeteDialogOpen] = useState(false);
+  // Competition run history: this run's own best-score comparison, shown
+  // by CompeteReport. Cleared whenever a fresh run starts (pickCompetition/
+  // reset) so a stale "New best!" can never linger onto the next attempt.
+  const [lastRunBest, setLastRunBest] = useState<BestScoreInfo | null>(null);
 
   // Robot Builder B2: a built robot in Simulate mode. Deliberately
   // orthogonal to `robot: RobotKind` (car/arm/drone stay untouched, an
@@ -461,6 +466,31 @@ export default function App() {
       .filter((outcome) => outcome.objective.type === "reach_zone")
       .map((outcome): ZoneMarkerState => (outcome.locked ? "locked" : outcome.achieved ? "achieved" : "active"));
   }, [competeRun]);
+  // Competition run history: records every finished run and remembers
+  // whether it beat the previous best, for CompeteReport to show. Keyed on
+  // the primitive `competeRun?.finished` (not the whole object) so this
+  // fires exactly once per finish, the same convention the timeUp effect
+  // above already uses -- and, same reasoning as that effect's own
+  // comment, this reads/writes runHistory.ts from here, never from inside
+  // the setCompeteRun updater itself.
+  useEffect(() => {
+    if (!competeRun?.finished || !competition) return;
+    const previousBest = getBestScore(competition.id);
+    recordRun(competition.id, {
+      score: competeRun.totalScore,
+      elapsedSeconds: competeRun.elapsedSeconds,
+      finishReason: competeRun.finishReason ?? "stopped",
+      timestamp: Date.now(),
+    });
+    // previousBest === null means this is the competition's first-ever
+    // recorded run -- never "new best" (there's nothing to have beaten),
+    // matching CompeteReport's own "show nothing on a genuine first run"
+    // behavior. A naive `?? -Infinity` comparison would make every first
+    // run trivially "beat" a nonexistent best -- caught by this feature's
+    // own e2e check before it shipped.
+    setLastRunBest({ previousBest, isNewBest: previousBest !== null && competeRun.totalScore > previousBest });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [competeRun?.finished]);
   const onCode = useCallback((js: string, python: string, cpp: string) => {
     jsCodeRef.current = js;
     setPythonCode(python);
@@ -602,7 +632,10 @@ export default function App() {
     engine.apply({ type: "reset" });
     arm?.apply({ type: "reset" });
     drone?.apply({ type: "drone_reset" });
-    if (mode === "compete" && competition) setCompeteRun(initRunState(competition));
+    if (mode === "compete" && competition) {
+      setCompeteRun(initRunState(competition));
+      setLastRunBest(null);
+    }
   };
 
   const pickCompetition = (picked: CompetitionDef) => {
@@ -610,6 +643,7 @@ export default function App() {
     applyWorld(picked.arena);
     setCompetition(picked);
     setCompeteRun(initRunState(picked));
+    setLastRunBest(null);
     setCompeteDialogOpen(false);
   };
 
@@ -1287,6 +1321,7 @@ export default function App() {
           <CompeteReport
             competition={competition}
             run={competeRun}
+            bestScore={lastRunBest ?? undefined}
             onRunAgain={reset}
             onChooseAnother={chooseAnotherCompetition}
           />

@@ -5,10 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CompetitionDef } from "./competitionDef";
 import { bundledCompetitions } from "./bundledCompetitions";
 import { listPackCompetitions } from "./packCompetitions";
+import { getBestScore } from "./runHistory";
 import { CompetitionDialog } from "./CompetitionDialog";
 
 vi.mock("./bundledCompetitions", () => ({ bundledCompetitions: vi.fn() }));
 vi.mock("./packCompetitions", () => ({ listPackCompetitions: vi.fn() }));
+vi.mock("./runHistory", () => ({ getBestScore: vi.fn() }));
 
 const arena = {
   name: "Arena",
@@ -27,6 +29,7 @@ function makeCompetition(id: string, name: string, description?: string): Compet
 beforeEach(() => {
   vi.mocked(bundledCompetitions).mockReturnValue([]);
   vi.mocked(listPackCompetitions).mockResolvedValue([]);
+  vi.mocked(getBestScore).mockReturnValue(null);
 });
 
 afterEach(() => {
@@ -107,5 +110,37 @@ describe("CompetitionDialog", () => {
 
     await user.click(screen.getByText("Pack Sprint"));
     expect(onPick).toHaveBeenCalledWith(packCompetition);
+  });
+
+  // Competition run history: best-score hints.
+  it("shows no best-score hint when none has been recorded", () => {
+    const sprint = makeCompetition("sprint", "Sprint to the Zone");
+    vi.mocked(bundledCompetitions).mockReturnValue([{ file: "sprint.json", label: sprint.name, make: () => sprint }]);
+
+    render(<CompetitionDialog onPick={() => {}} onCancel={() => {}} />);
+    expect(screen.queryByText(/Best:/)).not.toBeInTheDocument();
+  });
+
+  it("shows a bundled competition's own best score when one's been recorded", () => {
+    const sprint = makeCompetition("sprint", "Sprint to the Zone");
+    vi.mocked(bundledCompetitions).mockReturnValue([{ file: "sprint.json", label: sprint.name, make: () => sprint }]);
+    vi.mocked(getBestScore).mockImplementation((id) => (id === "sprint" ? 230 : null));
+
+    render(<CompetitionDialog onPick={() => {}} onCancel={() => {}} />);
+    expect(screen.getByText("Best: 230")).toBeInTheDocument();
+  });
+
+  it("shows a pack competition's own best score when one's been recorded", async () => {
+    const packCompetition = makeCompetition("pack-sprint", "Pack Sprint");
+    vi.mocked(listPackCompetitions).mockResolvedValue([
+      {
+        pack: { id: "arena-pack", name: "Arena Pack", version: "1.0.0" },
+        competitions: [{ label: "Pack Sprint", make: () => packCompetition }],
+      },
+    ]);
+    vi.mocked(getBestScore).mockImplementation((id) => (id === "pack-sprint" ? 75 : null));
+
+    render(<CompetitionDialog onPick={() => {}} onCancel={() => {}} />);
+    await waitFor(() => expect(screen.getByText("Best: 75")).toBeInTheDocument());
   });
 });

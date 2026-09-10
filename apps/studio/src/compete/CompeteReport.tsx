@@ -29,14 +29,23 @@ function reasonLabel(reason: FinishReason | null): string {
   }
 }
 
+/** Computed by App.tsx (the only place that knows the exact moment a run
+ * finished and reads runHistory.ts) -- this component stays read-only
+ * against its own props, same posture as every other field here. */
+export interface BestScoreInfo {
+  previousBest: number | null;
+  isNewBest: boolean;
+}
+
 export interface CompeteReportProps {
   competition: CompetitionDef;
   run: CompetitionRunState;
+  bestScore?: BestScoreInfo;
   onRunAgain: () => void;
   onChooseAnother: () => void;
 }
 
-export function CompeteReport({ competition, run, onRunAgain, onChooseAnother }: CompeteReportProps) {
+export function CompeteReport({ competition, run, bestScore, onRunAgain, onChooseAnother }: CompeteReportProps) {
   return (
     <div className="compete-report">
       <h3>{competition.name} -- {reasonLabel(run.finishReason)}</h3>
@@ -67,6 +76,10 @@ export function CompeteReport({ competition, run, onRunAgain, onChooseAnother }:
       <p className="compete-report-total">
         Total score: <strong>{run.totalScore}</strong> · Time: {run.elapsedSeconds.toFixed(1)}s
       </p>
+      {bestScore?.isNewBest && <p className="compete-report-best new-best">🎉 New best!</p>}
+      {bestScore && !bestScore.isNewBest && bestScore.previousBest !== null && (
+        <p className="compete-report-best">Best: {bestScore.previousBest}</p>
+      )}
       <div className="dialog-actions">
         <button onClick={onRunAgain}>Run again</button>
         <button onClick={onChooseAnother}>Choose another competition</button>
