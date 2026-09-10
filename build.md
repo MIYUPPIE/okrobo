@@ -2377,3 +2377,54 @@ message, fix it via the new Joints list, confirm Add Actuator becomes
 enabled and actually works) -- every step passed. See
 docs/decisions/robot-builder-joint-editing.md for the complete reasoning.
 This closes the Robot Builder initiative's full D1+D2+D3 scope.
+
+## Web persistence: import a robot file + real Save/Open on the web build (2026-09-10)
+
+User: "i should be able to import existing robots and also save robots on web
+perfectly." Investigated first: the entire File menu (New Project/Open/Save/
+Save As, recent projects) was `disabled={!inDesktop}` -- a web user had no
+way to persist a project at all, and there was no Import counterpart to the
+existing single-robot "Export" button on either platform.
+
+Scoped via plan-mode. Two pieces, both shipped together:
+- A browser-local project store (`apps/studio/src/projects/webStore.ts`,
+  localStorage-backed) mirroring `src-tauri/src/projects.rs`'s own behavioral
+  contract field-for-field (id/timestamp semantics, list ordering, exact
+  error messages) -- wired into `projects/api.ts`'s existing 5 functions via
+  an `inDesktop` branch, so every caller (`App.tsx`, `BuiltRobotDialog.tsx`,
+  `projectRobots.ts`) needed zero changes. The File menu button itself is now
+  un-gated; only "Asset Store..." (pack install/signing, a separate
+  filesystem-bound concern) stays desktop-only.
+- `apps/studio/src/builder/importRobot.ts`, the reciprocal of Export, wired
+  into `TemplateDialog.tsx`'s "New Robot" picker as a third "From a file"
+  section -- reachable only from the empty-robot state, so it never risks
+  clobbering an in-progress robot without a confirm step, the same safety
+  every other row there already has for free.
+
+**A real, surprising find while writing tests**: this repo's Node 26 +
+vitest + jsdom combination does not actually provide a working
+`localStorage` global (Node's own built-in Web Storage implementation
+returns `undefined` unless launched with `--localstorage-file`, and jsdom
+here defers to it rather than installing its own) -- caught by a failing
+diagnostic test, not assumed. Fixed by making the storage backend an
+injectable `KeyValueStore` parameter (defaulting to the real global for
+production, a plain in-memory fake in tests) rather than adding
+`fake-indexeddb` or wiring a Node flag into the test runner.
+
+Tests: `webStore.test.ts` (10, mirroring `projects.rs`'s own 8-case suite
+plus 2 new defensive cases), `projects/api.test.ts` (2, new -- proves the
+`inDesktop` routing itself, nothing tested this before), `importRobot.test.ts`
+(4), `TemplateDialog.test.tsx` extended (+2). `npm run test` (878 passing, up
+from 860), `npm run typecheck`, `npm run build`.
+
+`./scripts/check-studio-e2e.sh` gained a full File > Save As -> Open ->
+Save-in-place -> Delete round trip against the real browser-local store (the
+first-ever real-browser proof web save actually works), plus an Import check
+using a new `DOM.setFileInputFiles`-based helper in `cdp.mjs` (CDP's own
+documented way to inject a real file into a file input) feeding a real
+fixture file the script writes to disk. One pre-existing check needed
+narrowing (the new "From a file" row shares the existing template-row
+styling class, so a bare `.template-row .project-name` query started
+picking it up too) -- found and fixed by actually running the suite. Passed
+twice in a row for stability. See
+docs/decisions/robot-builder-web-persistence.md.

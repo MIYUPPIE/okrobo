@@ -1,10 +1,14 @@
-// Typed wrappers over the Tauri shell's project-store commands
-// (src-tauri/src/projects.rs). Only callable when running inside the
-// desktop app; `inDesktop` gates the File menu.
+// Typed wrappers over the project-store contract (src-tauri/src/
+// projects.rs). Two backends behind one interface: real Tauri IPC commands
+// on the desktop app, a localStorage-backed store (webStore.ts) everywhere
+// else -- every caller (App.tsx, BuiltRobotDialog.tsx, projectRobots.ts)
+// just calls these functions, unaware which backend answered. See
+// docs/decisions/robot-builder-web-persistence.md.
 
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import type { RobotDef } from "../contracts/robotDef";
 import type { WorldDef } from "../lib/validateWorld";
+import { webCreateProject, webDeleteProject, webListProjects, webLoadProject, webSaveProject } from "./webStore";
 
 export const inDesktop = isTauri();
 
@@ -39,18 +43,18 @@ export interface ProjectPayload {
   robot_def: RobotDef | null;
 }
 
-export const listProjects = () => invoke<ProjectMeta[]>("list_projects");
+export const listProjects = () => (inDesktop ? invoke<ProjectMeta[]>("list_projects") : webListProjects());
 
 export const createProject = (name: string, payload: ProjectPayload) =>
-  invoke<ProjectMeta>("create_project", { name, payload });
+  inDesktop ? invoke<ProjectMeta>("create_project", { name, payload }) : webCreateProject(name, payload);
 
 export const saveProject = (id: string, payload: ProjectPayload) =>
-  invoke<ProjectMeta>("save_project", { id, payload });
+  inDesktop ? invoke<ProjectMeta>("save_project", { id, payload }) : webSaveProject(id, payload);
 
 export const loadProject = (id: string) =>
-  invoke<[ProjectMeta, ProjectPayload]>("load_project", { id });
+  inDesktop ? invoke<[ProjectMeta, ProjectPayload]>("load_project", { id }) : webLoadProject(id);
 
-export const deleteProject = (id: string) => invoke<void>("delete_project", { id });
+export const deleteProject = (id: string) => (inDesktop ? invoke<void>("delete_project", { id }) : webDeleteProject(id));
 
 // --- packs (contracts/pack/v0) ---
 

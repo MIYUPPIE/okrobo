@@ -161,6 +161,26 @@ export async function connect(cdpPort, { retries = 20, delayMs = 500 } = {}) {
     }
   };
 
+  /**
+   * Injects a real local file into a (possibly hidden) `<input type="file">`
+   * -- CDP's own documented mechanism for this (`DOM.setFileInputFiles`),
+   * since a plain synthetic click/change event can't hand a browser file
+   * input real file bytes the way a person picking a file from a native
+   * dialog does. `path` is a real filesystem path readable by the Chrome
+   * process (a fixture file this script writes itself, same convention as
+   * every other self-contained fixture in this file).
+   */
+  const setFileInputFiles = async (selector, path) => {
+    const doc = await send("DOM.getDocument", {});
+    const rootNodeId = doc.result?.root?.nodeId;
+    if (!rootNodeId) throw new Error("setFileInputFiles: DOM.getDocument returned no root");
+    const found = await send("DOM.querySelector", { nodeId: rootNodeId, selector });
+    const nodeId = found.result?.nodeId;
+    if (!nodeId) throw new Error(`setFileInputFiles: no element matches ${selector}`);
+    const result = await send("DOM.setFileInputFiles", { files: [path], nodeId });
+    if (result.error) throw new Error(`setFileInputFiles: ${result.error.message}`);
+  };
+
   const close = () => ws.close();
 
   return {
@@ -174,6 +194,7 @@ export async function connect(cdpPort, { retries = 20, delayMs = 500 } = {}) {
     setInputValue,
     setSelectValue,
     keyPress,
+    setFileInputFiles,
     close,
   };
 }

@@ -9,6 +9,9 @@
 //
 // env: CDP_PORT, URL. Exits non-zero and prints which check failed.
 
+import { writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { connect, sleep } from "./cdp.mjs";
 
 const CDP_PORT = Number(process.env.CDP_PORT || 9270);
@@ -478,13 +481,15 @@ try {
   check("Build mode: switching in shows the empty-state stage (no robot yet)", builderStageReady);
 
   // -- robot builder: New Robot template picker (Phase 7) -----------------
-  // A real robot only gets created here once per project (there is no
-  // "start over" affordance once robotDef is set, so this dialog is only
-  // reachable this one time in this whole e2e run) -- the rest of this
-  // section's flow (Add/Delete body, Test mode's empty-actuator-panel
-  // check) depends on starting from the single-box Blank starter exactly
-  // like every check below already assumed before this phase, so this
-  // picks Blank rather than a multi-body template. Two-Wheeled Rover's own
+  // Robot Builder D2 later added a real "start over" affordance (Build
+  // mode's own "New Robot" two-click confirm, clearing just robotDef) --
+  // this dialog IS reachable a second time later in this same run (see the
+  // "web persistence: importing a robot file" section far below, which
+  // uses exactly that path) but the rest of THIS section's flow (Add/
+  // Delete body, Test mode's empty-actuator-panel check) still depends on
+  // starting from the single-box Blank starter exactly like every check
+  // below already assumed, so this picks Blank rather than a multi-body
+  // template. Two-Wheeled Rover's own
   // exact body list, and that it actually drives/turns under real physics,
   // are proven directly (not re-derived here) by robotTemplates.test.ts,
   // TemplateDialog.test.tsx, and robotTemplates.physics.test.ts against the
@@ -501,7 +506,13 @@ try {
   check(
     "Build mode: the template picker lists Blank, Two-Wheeled Rover, and Simple Arm with descriptions",
     await page.evaluate(
-      "[...document.querySelectorAll('.template-row .project-name')].map(n => n.textContent).join(',') === 'Blank,Two-Wheeled Rover,Simple Arm' && " +
+      // Scoped to the FIRST .project-list specifically -- the dialog also
+      // has a "From your packs" and (web persistence round) a "From a
+      // file" section, each its own .project-list of .template-row rows,
+      // so a bare '.template-row .project-name' query would pick up their
+      // rows too (the packs one happens to be empty in this harness, but
+      // "From a file" always renders exactly one row).
+      "[...document.querySelectorAll('.project-list')[0].querySelectorAll('.project-name')].map(n => n.textContent).join(',') === 'Blank,Two-Wheeled Rover,Simple Arm' && " +
         "[...document.querySelectorAll('.template-description')].every(d => (d.textContent ?? '').length > 0)",
     ),
   );
@@ -1544,6 +1555,52 @@ try {
   );
   check("Build mode: two-click delete removes the sensor from the list", sensorDeleted);
 
+  // -- web persistence: importing a robot file (the reciprocal of Export) --
+  // Reuses Robot Builder D2's own "New Robot" two-click-confirm to clear
+  // the current document and reach the empty state's "+ New Robot" button
+  // again -- the only way back to TemplateDialog after the first pick (see
+  // the comment on that section above). A real file, written to disk by
+  // this script itself (not driven through the Export button's own
+  // download, which headless Chrome can't easily intercept), is fed into
+  // the hidden file input via CDP's DOM.setFileInputFiles (cdp.mjs's new
+  // setFileInputFiles helper) -- proving the real browser File API read
+  // path end to end. See docs/decisions/robot-builder-web-persistence.md.
+  await page.evalClickText(".builder-hierarchy-header button", "/^New Robot$/");
+  await page.evalClickText(".builder-hierarchy-header button", "/clear robot\\?/");
+  const backToEmptyState = await waitForCondition("!!document.querySelector('.builder-new-robot')", 5000);
+  check("Build mode: New Robot's two-click confirm clears the document back to the empty state", backToEmptyState);
+
+  const importFixturePath = join(tmpdir(), "okrobo-e2e-import-fixture.robot-def.json");
+  writeFileSync(
+    importFixturePath,
+    JSON.stringify({
+      id: "e2e-imported-rover",
+      name: "E2E Imported Rover",
+      description: "",
+      root_placement: { position: [0, 0, 0], rotation_rpy: [0, 0, 0] },
+      bodies: [
+        { id: "chassis", name: "Chassis", transform: { position: [0, 0, 0], rotation_rpy: [0, 0, 0] }, mass: 1, inertia: { ixx: 0.01, iyy: 0.01, izz: 0.01 } },
+        { id: "arm", name: "Arm", transform: { position: [0.1, 0, 0], rotation_rpy: [0, 0, 0] }, mass: 0.2, inertia: { ixx: 0.01, iyy: 0.01, izz: 0.01 } },
+      ],
+      joints: [],
+      actuators: [],
+      sensors: [],
+    }),
+  );
+
+  await page.clickText(".builder-new-robot", "/New Robot/");
+  await waitForCondition(
+    "[...document.querySelectorAll('.dialog h3')].some(h => h.textContent === 'New robot')",
+    5000,
+  );
+  await page.setFileInputFiles('[aria-label="import robot file"]', importFixturePath);
+  const importedRobotShown = await waitForCondition(
+    "document.querySelector('[aria-label=\"body name\"]')?.value === 'Chassis' && " +
+      "document.querySelectorAll('.hierarchy-row').length === 2",
+    5000,
+  );
+  check("Build mode: importing a real .robot-def.json file loads it into the Robot Builder", importedRobotShown);
+
   await page.clickText(".mode-toggle button", "/^Simulate$/");
   const backToSimulate = await waitForCondition(
     "!!document.querySelector('.sidebar') && !!document.querySelector('.viewport-3d canvas')",
@@ -1679,6 +1736,81 @@ try {
     5000,
   );
   check("Compete mode: switching back to Simulate restores the sim UI", backToSimulateFromCompete);
+
+  // -- web persistence: the File menu's Save/Open/Delete now work on the
+  // plain web build (previously Tauri-only end to end) ---------------------
+  // Runs last and cleans up after itself (deletes the project it creates)
+  // since the earlier Simulate-mode "saved-projects section settles to a
+  // clean empty state" check (above) depends on there being none. See
+  // docs/decisions/robot-builder-web-persistence.md. Ctrl+S itself isn't
+  // separately exercised here -- it calls the exact same actionSave() the
+  // menu's own "Save" item does, already proven below; the keybinding wiring
+  // is a one-line gate removal, not independently risky.
+  await page.evalClickText(".menu-item", "/^File$/");
+  const fileMenuItems = await menuItemTexts();
+  check(
+    "File menu is enabled and reachable on the plain web build (was Tauri-only)",
+    fileMenuItems.some((t) => t === "New Project") &&
+      fileMenuItems.some((t) => t.startsWith("Open")) &&
+      fileMenuItems.some((t) => t.startsWith("Save")),
+    JSON.stringify(fileMenuItems),
+  );
+  const assetStoreStillDesktopOnly = await page.evaluate(
+    "[...document.querySelectorAll('.menu-dropdown button')].find(b => b.textContent.includes('Asset Store'))?.disabled",
+  );
+  check("Asset Store stays desktop-only even though the rest of the File menu is now enabled", assetStoreStillDesktopOnly === true);
+
+  await page.evalClickText(".menu-dropdown button", "/^Save/");
+  const saveAsDialogShown = await waitForCondition(
+    "[...document.querySelectorAll('.dialog h3')].some((h) => h.textContent === 'Save project as')",
+    5000,
+  );
+  check("File > Save with no project open yet asks for a name (Save As)", saveAsDialogShown);
+
+  const PROJECT_NAME = "E2E Web Save Project";
+  await page.setInputValue(".dialog input", PROJECT_NAME);
+  await page.evalClickText(".dialog-actions button", "/^Save$/");
+  const savedAsNamed = await waitForCondition(
+    `document.querySelector('.project-chip')?.textContent === ${JSON.stringify(PROJECT_NAME)} && /saved/.test(document.querySelector('.run-bar .status')?.textContent ?? '')`,
+    5000,
+  );
+  check("Saving actually persists to the browser-local web store (localStorage, not just in memory)", savedAsNamed, await status());
+
+  await page.evalClickText(".menu-item", "/^File$/");
+  await page.evalClickText(".menu-dropdown button", "/^Open/");
+  const openDialogListsIt = await waitForCondition(
+    `[...document.querySelectorAll('.project-row .project-name')].some((s) => s.textContent === ${JSON.stringify(PROJECT_NAME)})`,
+    5000,
+  );
+  check("File > Open… lists the just-saved project (a real round trip through the web store)", openDialogListsIt);
+
+  await page.evalClickText(".project-row", new RegExp(`^${PROJECT_NAME}`));
+  const reopened = await waitForCondition(
+    `!document.querySelector('.dialog-backdrop') && /opened ${PROJECT_NAME}/.test(document.querySelector('.run-bar .status')?.textContent ?? '')`,
+    5000,
+  );
+  check("Opening it loads it back and closes the dialog", reopened);
+
+  await page.evalClickText(".menu-item", "/^File$/");
+  await page.evalClickText(".menu-dropdown button", "/^Save/"); // now saves in place, no dialog (currentProject is set)
+  const savedInPlace = await waitForCondition(
+    "!document.querySelector('.dialog-backdrop') && /saved/.test(document.querySelector('.run-bar .status')?.textContent ?? '')",
+    5000,
+  );
+  check("File > Save on an already-open project saves in place, no Save-As dialog", savedInPlace);
+
+  // Clean up: delete the project this section created, restoring the clean-
+  // empty-state precondition the earlier Simulate-mode check above assumed.
+  await page.evalClickText(".menu-item", "/^File$/");
+  await page.evalClickText(".menu-dropdown button", "/^Open/");
+  await page.evalClick(".delete-btn"); // only one project in the list at this point; first click asks to confirm
+  await page.evalClick(".delete-btn.confirm");
+  const deletedAndListEmpty = await waitForCondition(
+    "[...document.querySelectorAll('.dialog-empty')].some((p) => p.textContent === 'No saved projects yet.')",
+    5000,
+  );
+  check("Deleting it via Open… removes it -- the list settles back to empty", deletedAndListEmpty);
+  await page.evalClickText(".dialog-actions button", "/^Close$/");
 } catch (error) {
   console.error("e2e check threw:", error);
   failures.push(String(error));

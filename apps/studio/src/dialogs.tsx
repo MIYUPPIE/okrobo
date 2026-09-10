@@ -96,7 +96,7 @@ export function OpenDialog({
 
 const SHORTCUTS: Array<[string, string]> = [
   ["Undo / Redo", "Ctrl+Z / Ctrl+Y"],
-  ["Save project (desktop app)", "Ctrl+S"],
+  ["Save project", "Ctrl+S"],
   ["Drive the car", "Arrows / WASD"],
 ];
 

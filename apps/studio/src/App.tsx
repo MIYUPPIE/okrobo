@@ -606,13 +606,15 @@ export default function App() {
     setBuiltRobotDialogOpen(true);
   };
 
-  // Desktop window title follows the open project.
+  // The window title (desktop) / tab title (web) follows the open
+  // project -- same visual parity on both platforms now that Save/Open
+  // work on web too, not just the desktop app.
   useEffect(() => {
-    if (!inDesktop) return;
     const title = currentProject
       ? `${currentProject.name} · OKHUB Robotics Studio`
       : "OKHUB Robotics Studio";
-    void getCurrentWindow().setTitle(title);
+    if (inDesktop) void getCurrentWindow().setTitle(title);
+    else document.title = title;
   }, [currentProject]);
 
   const showNotice = (text: string) => {
@@ -838,9 +840,8 @@ export default function App() {
     blocksRef.current?.cleanUp();
   };
 
-  // Ctrl+S saves in the desktop app.
+  // Ctrl+S saves -- works on web now too (webStore.ts), not desktop-only.
   useEffect(() => {
-    if (!inDesktop) return;
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
@@ -903,12 +904,7 @@ export default function App() {
         <span className="app-name">OKHUB Robotics Studio</span>
         <nav className="menus">
           <div className="menu-wrap">
-            <button
-              className="menu-item"
-              disabled={!inDesktop}
-              title={inDesktop ? undefined : "Available in the desktop app"}
-              onClick={() => toggleMenu("file")}
-            >
+            <button className="menu-item" onClick={() => toggleMenu("file")}>
               File
             </button>
             {openMenu === "file" && (
@@ -928,6 +924,8 @@ export default function App() {
                 </button>
                 <div className="menu-sep" />
                 <button
+                  disabled={!inDesktop}
+                  title={inDesktop ? undefined : "Available in the desktop app"}
                   onClick={() => {
                     closeMenu();
                     setDialog("store");
@@ -1072,9 +1070,7 @@ export default function App() {
             Compete
           </button>
         </div>
-        {inDesktop && (
-          <span className="project-chip">{currentProject ? currentProject.name : "untitled"}</span>
-        )}
+        <span className="project-chip">{currentProject ? currentProject.name : "untitled"}</span>
       </header>
 
       {(mode === "simulate" || mode === "compete") && (

@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { ChangeEvent } from "react";
 import type { RobotDef } from "../contracts/robotDef";
+import { importRobotDef } from "./importRobot";
 import { listPackRobots, type PackRobots } from "./packRobots";
 import { TEMPLATE_OPTIONS } from "./robotTemplates";
 
@@ -16,9 +18,19 @@ import { TEMPLATE_OPTIONS } from "./robotTemplates";
 // Loading is async (two IPC round-trips per installed pack); most packs
 // today carry none (only lessons/worlds/URDF-robots exist yet), which is
 // an expected, quiet empty state, not an error banner.
+//
+// Web persistence round (2026-09-10): a third section imports a robot-def
+// JSON file (exportRobot.ts's own output, or one handed over by someone
+// else) via a plain <input type="file">. This dialog is only ever opened
+// from the empty robotDef===null state (App.tsx's single setDialog(
+// "new-robot") call site) -- so importing here never risks silently
+// clobbering an in-progress robot, the same safety every other row already
+// has for free, no extra confirm step needed.
 
 export function TemplateDialog({ onPick, onCancel }: { onPick: (robot: RobotDef) => void; onCancel: () => void }) {
   const [packRobots, setPackRobots] = useState<PackRobots[] | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,6 +45,19 @@ export function TemplateDialog({ onPick, onCancel }: { onPick: (robot: RobotDef)
       cancelled = true;
     };
   }, []);
+
+  const handleFileChosen = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same file name after an error
+    if (!file) return;
+    try {
+      const robot = await importRobotDef(file);
+      setImportError(null);
+      onPick(robot);
+    } catch (error) {
+      setImportError(`Couldn't import that file: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
 
   return (
     <div className="dialog-backdrop" onClick={onCancel}>
@@ -68,6 +93,29 @@ export function TemplateDialog({ onPick, onCancel }: { onPick: (robot: RobotDef)
             )}
           </ul>
         )}
+
+        <h4 className="template-section-header">From a file</h4>
+        <ul className="project-list">
+          <li>
+            <button
+              type="button"
+              className="project-row template-row"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <span className="project-name">Import a robot file…</span>
+              <span className="template-description">Load a .robot-def.json file (from Export, or shared by someone else)</span>
+            </button>
+          </li>
+        </ul>
+        {importError && <p className="dialog-empty error">{importError}</p>}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json,.json"
+          aria-label="import robot file"
+          style={{ display: "none" }}
+          onChange={(e) => void handleFileChosen(e)}
+        />
 
         <div className="dialog-actions">
           <button onClick={onCancel}>Cancel</button>

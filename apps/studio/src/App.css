@@ -246,6 +246,10 @@ body {
   color: var(--text-dim);
 }
 
+.dialog-empty.error {
+  color: #ff7a7a;
+}
+
 /* Compete mode (Competition Arena C2): a small always-visible scoreboard
    while a run is live, top-left of the same .viewport a plain Viewport3D
    already occupies -- same "position: absolute overlay inside a relative

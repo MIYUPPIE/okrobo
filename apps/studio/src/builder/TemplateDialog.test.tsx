@@ -98,4 +98,39 @@ describe("TemplateDialog", () => {
     await user.click(screen.getByText("Rover"));
     expect(onPick).toHaveBeenCalledWith(packRobot);
   });
+
+  // Web persistence round: importing a robot-def file, the reciprocal of
+  // Build mode's "Export" button.
+  it("importing a well-formed robot-def file calls onPick with the parsed robot", async () => {
+    const importedRobot: RobotDef = {
+      id: "imported-rover",
+      name: "Imported Rover",
+      description: "",
+      root_placement: { position: [0, 0, 0], rotation_rpy: [0, 0, 0] },
+      bodies: [{ id: "chassis", name: "Chassis", transform: { position: [0, 0, 0], rotation_rpy: [0, 0, 0] }, mass: 1, inertia: { ixx: 0.01, iyy: 0.01, izz: 0.01 } }],
+      joints: [],
+      actuators: [],
+      sensors: [],
+    };
+    const file = new File([JSON.stringify(importedRobot)], "imported-rover.robot-def.json", { type: "application/json" });
+
+    const onPick = vi.fn();
+    const user = userEvent.setup();
+    render(<TemplateDialog onPick={onPick} onCancel={() => {}} />);
+
+    await user.upload(screen.getByLabelText("import robot file"), file);
+    await waitFor(() => expect(onPick).toHaveBeenCalledWith(importedRobot));
+  });
+
+  it("importing a malformed file shows an inline error and never calls onPick", async () => {
+    const file = new File(["not valid json"], "broken.robot-def.json", { type: "application/json" });
+
+    const onPick = vi.fn();
+    const user = userEvent.setup();
+    render(<TemplateDialog onPick={onPick} onCancel={() => {}} />);
+
+    await user.upload(screen.getByLabelText("import robot file"), file);
+    await waitFor(() => expect(screen.getByText(/Couldn't import that file/)).toBeInTheDocument());
+    expect(onPick).not.toHaveBeenCalled();
+  });
 });
