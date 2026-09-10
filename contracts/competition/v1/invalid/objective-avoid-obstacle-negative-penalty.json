@@ -1,0 +1,19 @@
+{
+  "id": "avoid-obstacle-negative-penalty",
+  "name": "Avoid Obstacle Negative Penalty",
+  "robot": "car",
+  "arena": {
+    "name": "Plain Arena",
+    "arena_width": 2,
+    "arena_height": 2,
+    "robot_radius": 0.1,
+    "wheel_base": 0.15,
+    "start": { "x": 0.5, "y": 0.5, "theta": 0 },
+    "obstacles": [
+      { "x": 1, "y": 1, "width": 0.2, "height": 0.2, "color": [200, 60, 60] }
+    ]
+  },
+  "objectives": [
+    { "type": "avoid_obstacle_collision", "penalty_per_hit": -5 }
+  ]
+}

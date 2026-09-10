@@ -50,6 +50,17 @@ describe("CompeteReport", () => {
     expect(screen.getByText(/Time ran out/)).toBeInTheDocument();
   });
 
+  it("uses a reach_zone's own label instead of the generic wording when present", () => {
+    const labeled: CompetitionDef = {
+      ...competition,
+      objectives: [{ type: "reach_zone", x: 5, y: 5, radius: 0.3, points: 100, label: "Delivery zone" }],
+    };
+    const run = finishRun(evaluateTick(labeled, initRunState(labeled), { x: 5, y: 5, theta: 0 }, 0.1), "stopped");
+    render(<CompeteReport competition={labeled} run={run} onRunAgain={() => {}} onChooseAnother={() => {}} />);
+    expect(screen.getByText("Delivery zone")).toBeInTheDocument();
+    expect(screen.queryByText("Reach the zone")).not.toBeInTheDocument();
+  });
+
   it("Run again and Choose another competition call their own handlers", async () => {
     const run = finishRun(initRunState(competition), "program_ended");
     const onRunAgain = vi.fn();

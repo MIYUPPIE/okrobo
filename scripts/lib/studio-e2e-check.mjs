@@ -1689,13 +1689,19 @@ try {
   check("Compete mode: switching in opens the competition picker", competeDialogShown);
   const competeBundledListed = await waitForCondition(
     "[...document.querySelectorAll('.template-row .project-name')].map(n => n.textContent).join(',') === " +
-      "'Obstacle Slalom,Precision Docking,Sprint to the Zone' && " +
+      "'Maze Challenge,Object Delivery Race,Obstacle Slalom,Precision Docking,Sprint to the Zone' && " +
       "[...document.querySelectorAll('.dialog-empty')].some(p => p.textContent?.includes('No installed packs carry a competition'))",
     5000,
   );
-  check("Compete mode: the picker lists the three real bundled competitions", competeBundledListed);
+  check("Compete mode: the picker lists the five real bundled competitions", competeBundledListed);
 
-  await page.clickText(".template-row .project-name", "/^Sprint to the Zone$/");
+  // evalClickText, not clickText: the list grew to 5 rows this session
+  // (Competition Arena C4 added 2 more, both sorting before Sprint's own
+  // row) -- a coordinate-based click computed then dispatched can miss if
+  // the layout shifts in between (see evalClick's own docstring in
+  // cdp.mjs), the exact race this file's Robot Builder D1 section already
+  // hit and fixed the same way once its own toolbar grew.
+  await page.evalClickText(".template-row .project-name", "/^Sprint to the Zone$/");
   const competeHudShown = await waitForCondition(
     "document.querySelector('.compete-hud h4')?.textContent === 'Sprint to the Zone' && " +
       "!!document.querySelector('.viewport-3d canvas')",
@@ -1728,6 +1734,56 @@ try {
     5000,
   );
   check("Compete mode: 'Choose another competition' returns to the picker", competePickerReopened);
+
+  // -- Competition Arena C4: ordered checkpoints (Object Delivery Race) ----
+  // The sequencing LOGIC itself (locked -> unlocked -> achieved, tiers,
+  // v0-shaped competitions unaffected) is proven directly, tick by tick,
+  // by score.test.ts -- driving a real robot through both zones via a
+  // synthesized Blocks/Python program isn't re-derived here. This only
+  // proves the real browser wiring: a sequenced competition's delivery
+  // zone actually renders locked (🔒) before its prerequisite is met,
+  // which needs App.tsx's zoneStatesRef plumbing and CompeteHud's own
+  // rendering to all be wired correctly end to end. Ticks start flowing
+  // the moment Run is pressed, whether or not the car itself moves.
+  await page.evalClickText(".template-row .project-name", "/^Object Delivery Race$/");
+  // Picking a competition changes `world` (its own arena), which
+  // re-instantiates the WASM engine from scratch asynchronously -- `engine`
+  // itself goes briefly null while `engineStatus` (only ever flipped by
+  // that same effect's own success/failure callback) stays stale at
+  // "ready" from the PREVIOUS engine, so the Run button doesn't actually
+  // re-disable during that window. Waiting on the HUD title alone (which
+  // depends only on `competition`/`competeRun`, set synchronously) can
+  // therefore race a Run click against a still-null `engine`, on which
+  // run() silently no-ops. Waiting for the canvas too (the exact same two-
+  // condition wait Sprint's own pick already uses successfully above) is
+  // enough margin in practice -- found by this section itself flaking
+  // ~1/3 of real runs before this fix, not assumed.
+  const deliveryRaceHudShown = await waitForCondition(
+    "document.querySelector('.compete-hud h4')?.textContent === 'Object Delivery Race' && " +
+      "!!document.querySelector('.viewport-3d canvas')",
+    5000,
+  );
+  check("Compete mode: Object Delivery Race loads with its own scoreboard", deliveryRaceHudShown);
+
+  // Self-contained, not relying on the Blocks tab still being active from
+  // line ~1683 above -- Run silently no-ops if the code tab has drifted to
+  // Python with no sidecar connected in this headless harness (no ticks
+  // ever flow, so `locked` never computes), the same self-contained-
+  // fixture idiom every other section in this file already follows.
+  await page.evalClickText(".code-tab", "/^Blocks$/");
+  await page.evalClick(".run-bar .run");
+  const deliveryLockedShown = await waitForCondition(
+    "[...document.querySelectorAll('.compete-objective')].some(li => li.classList.contains('locked') && li.textContent?.includes('Delivery zone'))",
+    5000,
+  );
+  check("Compete mode: the delivery zone starts locked (🔒) until the pickup zone is reached first", deliveryLockedShown);
+  const pickupNotLocked = await page.evaluate(
+    "![...document.querySelectorAll('.compete-objective')].some(li => li.classList.contains('locked') && li.textContent?.includes('Pickup zone'))",
+  );
+  check("Compete mode: the pickup zone (no prerequisite) is never locked", pickupNotLocked);
+
+  await page.evalClick(".run-bar .run + button"); // Stop
+  await page.evalClickText(".dialog-actions button", "/Choose another competition/");
   await page.evalClickText(".dialog-actions button", "/^Cancel$/");
 
   await page.clickText(".mode-toggle button", "/^Simulate$/");

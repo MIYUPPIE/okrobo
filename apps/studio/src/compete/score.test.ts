@@ -73,6 +73,67 @@ describe("reach_zone", () => {
   });
 });
 
+// Competition Arena C4: ordered checkpoints (reach_zone's own `sequence`).
+describe("reach_zone sequencing", () => {
+  const pickup: Objective = { type: "reach_zone", x: 1, y: 1, radius: 0.5, points: 80, sequence: 0 };
+  const delivery: Objective = { type: "reach_zone", x: 5, y: 5, radius: 0.5, points: 150, sequence: 1 };
+  const def = makeDef([pickup, delivery]);
+
+  it("a higher-sequence zone starts locked and cannot be achieved by standing in it", () => {
+    let state = initRunState(def);
+    for (let i = 0; i < 5; i++) state = evaluateTick(def, state, { x: 5, y: 5, theta: 0 }, 0.1);
+    expect(state.outcomes[1].locked).toBe(true);
+    expect(state.outcomes[1].achieved).toBe(false);
+    expect(state.totalScore).toBe(0);
+  });
+
+  it("a lower-sequence zone is never locked", () => {
+    const state = evaluateTick(def, initRunState(def), { x: 0, y: 0, theta: 0 }, 0.1);
+    expect(state.outcomes[0].locked).toBe(false);
+  });
+
+  it("achieving the prerequisite unlocks the next zone one tick later, and it becomes achievable", () => {
+    let state = initRunState(def);
+    state = evaluateTick(def, state, { x: 1, y: 1, theta: 0 }, 0.1); // reach pickup
+    expect(state.outcomes[0].achieved).toBe(true);
+    expect(state.outcomes[1].locked).toBe(true); // still locked THIS tick (gated on the previous tick)
+
+    state = evaluateTick(def, state, { x: 5, y: 5, theta: 0 }, 0.1); // now at delivery
+    expect(state.outcomes[1].locked).toBe(false);
+    expect(state.outcomes[1].achieved).toBe(true);
+    expect(state.totalScore).toBe(230); // 80 + 150
+  });
+
+  it("standing in the locked zone before its prerequisite, then reaching the prerequisite, still requires re-entering (or already being there next tick)", () => {
+    let state = initRunState(def);
+    state = evaluateTick(def, state, { x: 5, y: 5, theta: 0 }, 0.1); // delivery first -- locked, no-op
+    state = evaluateTick(def, state, { x: 1, y: 1, theta: 0 }, 0.1); // now reach pickup
+    expect(state.outcomes[0].achieved).toBe(true);
+    expect(state.outcomes[1].achieved).toBe(false); // robot isn't at delivery's position this tick
+
+    state = evaluateTick(def, state, { x: 5, y: 5, theta: 0 }, 0.1); // back at delivery, now unlocked
+    expect(state.outcomes[1].achieved).toBe(true);
+  });
+
+  it("equal sequence values form a concurrently-reachable tier -- neither is locked by the other", () => {
+    const tierDef = makeDef([
+      { type: "reach_zone", x: 1, y: 1, radius: 0.5, points: 50, sequence: 0 },
+      { type: "reach_zone", x: 8, y: 8, radius: 0.5, points: 50, sequence: 0 },
+    ]);
+    let state = initRunState(tierDef);
+    state = evaluateTick(tierDef, state, { x: 1, y: 1, theta: 0 }, 0.1);
+    expect(state.outcomes[0].achieved).toBe(true);
+    expect(state.outcomes[1].locked).toBe(false); // same tier, not gated by its sibling
+  });
+
+  it("a reach_zone with no sequence at all is never locked, regardless of any other objective (v0's own behavior, unchanged)", () => {
+    const unorderedDef = makeDef([{ type: "reach_zone", x: 5, y: 5, radius: 0.5, points: 150 }]);
+    const state = evaluateTick(unorderedDef, initRunState(unorderedDef), { x: 5, y: 5, theta: 0 }, 0.1);
+    expect(state.outcomes[0].locked).toBe(false);
+    expect(state.outcomes[0].achieved).toBe(true);
+  });
+});
+
 describe("avoid_obstacle_collision", () => {
   const def = makeDef([{ type: "avoid_obstacle_collision", penaltyPerHit: 10 }]);
 

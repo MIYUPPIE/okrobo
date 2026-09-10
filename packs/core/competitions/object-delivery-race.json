@@ -1,0 +1,24 @@
+{
+  "id": "object-delivery-race",
+  "name": "Object Delivery Race",
+  "description": "Reach the pickup zone first -- the delivery zone stays locked until you do. Then carry on to the delivery zone before time runs out. One crate sits on the direct path between them, so a straight line won't work.",
+  "robot": "car",
+  "arena": {
+    "name": "Delivery Arena",
+    "description": "A 4x2 m arena with a pickup zone, a crate, and a delivery zone further along.",
+    "arena_width": 4,
+    "arena_height": 2,
+    "robot_radius": 0.1,
+    "wheel_base": 0.15,
+    "start": { "x": 0.3, "y": 1.0, "theta": 0 },
+    "obstacles": [
+      { "x": 2.9, "y": 1.0, "width": 0.3, "height": 0.3, "color": [230, 160, 60], "label": "crate" }
+    ]
+  },
+  "objectives": [
+    { "type": "reach_zone", "x": 2.0, "y": 1.0, "radius": 0.2, "points": 80, "sequence": 0, "label": "Pickup zone" },
+    { "type": "reach_zone", "x": 3.6, "y": 1.0, "radius": 0.2, "points": 150, "sequence": 1, "label": "Delivery zone" },
+    { "type": "avoid_obstacle_collision", "penalty_per_hit": 15 },
+    { "type": "time_limit", "seconds": 60 }
+  ]
+}

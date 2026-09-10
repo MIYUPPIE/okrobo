@@ -8,7 +8,7 @@ import type { CompetitionRunState, FinishReason } from "./score";
 function objectiveLabel(objective: Objective): string {
   switch (objective.type) {
     case "reach_zone":
-      return "Reach the zone";
+      return objective.label ?? "Reach the zone";
     case "avoid_obstacle_collision":
       return "Avoid obstacles";
     case "time_limit":

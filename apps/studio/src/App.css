@@ -302,6 +302,13 @@ body {
   color: var(--text);
 }
 
+/* Competition Arena C4: a sequenced reach_zone not reachable yet -- matches
+   the ground-ring marker's own dim/gray "locked" state in Viewport3D. */
+.compete-objective.locked {
+  color: var(--text-dim);
+  opacity: 0.55;
+}
+
 /* The end-of-run report -- a more prominent centred card over the same
    .viewport, not a full dialog-backdrop: the student can still see the
    robot's own final resting pose behind it. */

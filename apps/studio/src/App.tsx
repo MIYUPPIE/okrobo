@@ -53,7 +53,7 @@ import {
 } from "./python/PythonBridge";
 import { type OutputLine, PythonPanel, type PythonPanelHandle } from "./PythonPanel";
 import { Viewport } from "./Viewport";
-import { CRUISE_SPEED, type HudInfo, Viewport3D } from "./Viewport3D";
+import { CRUISE_SPEED, type HudInfo, type ZoneMarkerState, Viewport3D } from "./Viewport3D";
 import { WorldPanel } from "./WorldPanel";
 import "./App.css";
 
@@ -106,6 +106,13 @@ export default function App() {
   const flashing = flash?.stage === "compile" || flash?.stage === "upload";
   const [hud, setHud] = useState<HudInfo | null>(null);
   const autopilotRef = useRef(false);
+  // Competition Arena C4: one entry per reach_zone objective, read every
+  // Viewport3D animate-loop frame to color its ground ring. Populated by
+  // the useEffect below (watching competeRun), never inside the
+  // setCompeteRun updater itself -- see that updater's own comment on why
+  // a side effect doesn't belong there (React/Strict Mode can invoke an
+  // updater more than once to check for purity).
+  const zoneStatesRef = useRef<ZoneMarkerState[]>([]);
   const programActiveRef = useRef(false);
   const pythonActiveRef = useRef(false);
   // The WASM world steps every animation frame regardless of Run/Stop (see
@@ -208,6 +215,16 @@ export default function App() {
     let created: EngineWorld | null = null;
     let createdArm: EngineArm | null = null;
     let createdDrone: EngineDrone | null = null;
+    // Every re-run (any world change -- a new competition, a World tab
+    // Apply) re-instantiates the WASM engine from scratch asynchronously;
+    // `engine` itself goes null via this effect's own cleanup the instant
+    // `world` changes, but engineStatus previously stayed stale at "ready"
+    // from the OLD engine until the new one resolved -- Run/Reset/Compete-
+    // entry stayed enabled during that window and silently no-op'd against
+    // a null engine if clicked. Found via a real e2e flake (Competition
+    // Arena C4's own "pick a second competition, click Run immediately"
+    // check), not a hypothetical.
+    setEngineStatus("loading");
     loadEngine()
       .then((module) => {
         if (cancelled) return;
@@ -435,6 +452,15 @@ export default function App() {
     if (competeRun?.timeUp) haltEverything();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [competeRun?.timeUp]);
+  // Competition Arena C4: keeps zoneStatesRef in sync with the live run,
+  // read by Viewport3D's own animate loop to color each ground ring --
+  // derives the same locked/achieved score.ts already computed per tick
+  // rather than a second, possibly-drifting computation.
+  useEffect(() => {
+    zoneStatesRef.current = (competeRun?.outcomes ?? [])
+      .filter((outcome) => outcome.objective.type === "reach_zone")
+      .map((outcome): ZoneMarkerState => (outcome.locked ? "locked" : outcome.achieved ? "achieved" : "active"));
+  }, [competeRun]);
   const onCode = useCallback((js: string, python: string, cpp: string) => {
     jsCodeRef.current = js;
     setPythonCode(python);
@@ -1241,6 +1267,8 @@ export default function App() {
             onState={onState}
             onAutoStop={onAutoStop}
             onEngineStep={mode === "compete" ? onEngineStep : undefined}
+            competition={mode === "compete" ? (competition ?? undefined) : undefined}
+            zoneStatesRef={zoneStatesRef}
           />
         ) : (
           <>

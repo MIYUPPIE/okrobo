@@ -1,15 +1,35 @@
-// Runtime validation/serialization for contracts/competition/v0 -- see
+// Runtime validation/serialization for contracts/competition/v1 -- see
 // contract.md there for the model and the "why TypeScript-only" reasoning
 // (no Python/C++ mirror: a competition's own arena/objectives are never seen
 // by a student's program or the engine, only by this studio-side scoring
 // layer). Reuses ../lib/validateWorld's own WorldDef/obstacle parsing for
 // the embedded `arena` field directly, rather than a second, possibly-
 // drifting copy of the same rules.
+//
+// v0 -> v1 (Competition Arena C4): reach_zone gained optional `sequence`/
+// `label` fields for ordered checkpoints -- v0 is now frozen, a historical
+// reference nothing points at anymore (contracts/robot-def's own v0->v1->v2
+// precedent). Every v0-shaped competition (no `sequence`/`label` on any
+// objective) still parses and behaves identically.
 
 import { validateWorld, type WorldDef } from "../lib/validateWorld";
 
 export type Objective =
-  | { type: "reach_zone"; x: number; y: number; radius: number; points: number }
+  | {
+      type: "reach_zone";
+      x: number;
+      y: number;
+      radius: number;
+      points: number;
+      /** New in v1. Omitted = always immediately reachable (v0's only
+       * behavior). When set, this zone can only be achieved once every
+       * other reach_zone with a strictly lower sequence has been achieved
+       * -- see score.ts's own `locked` computation. */
+      sequence?: number;
+      /** New in v1. Shown in the HUD/report instead of the generic "Reach
+       * the zone" wording when present. */
+      label?: string;
+    }
   | { type: "avoid_obstacle_collision"; penaltyPerHit: number }
   | { type: "time_limit"; seconds: number };
 
@@ -53,7 +73,21 @@ function parseObjective(value: unknown, index: number): Objective {
       }
       if (!isFiniteNumber(o.radius)) throw new Error(`competition: objective ${index} (reach_zone) needs a numeric radius`);
       if (!isFiniteNumber(o.points)) throw new Error(`competition: objective ${index} (reach_zone) needs numeric points`);
-      return { type: "reach_zone", x: o.x, y: o.y, radius: o.radius, points: o.points };
+      if (o.sequence !== undefined && !isFiniteNumber(o.sequence)) {
+        throw new Error(`competition: objective ${index} (reach_zone) sequence must be numeric if present`);
+      }
+      if (o.label !== undefined && typeof o.label !== "string") {
+        throw new Error(`competition: objective ${index} (reach_zone) label must be a string if present`);
+      }
+      return {
+        type: "reach_zone",
+        x: o.x,
+        y: o.y,
+        radius: o.radius,
+        points: o.points,
+        sequence: o.sequence as number | undefined,
+        label: o.label as string | undefined,
+      };
     }
     case "avoid_obstacle_collision": {
       if (!isFiniteNumber(o.penalty_per_hit)) {
@@ -111,6 +145,9 @@ export function validateCompetitionDef(def: CompetitionDef): Issue[] {
       if (objective.points <= 0) {
         issues.push({ rule: "objective-reach-zone-invalid-points", severity: "error", objective_index: index, message: `Objective ${index} (reach_zone): points must be > 0` });
       }
+      if (objective.sequence !== undefined && (!Number.isInteger(objective.sequence) || objective.sequence < 0)) {
+        issues.push({ rule: "objective-reach-zone-invalid-sequence", severity: "error", objective_index: index, message: `Objective ${index} (reach_zone): sequence must be a non-negative integer` });
+      }
     } else if (objective.type === "avoid_obstacle_collision") {
       if (objective.penaltyPerHit < 0) {
         issues.push({ rule: "objective-avoid-obstacle-negative-penalty", severity: "error", objective_index: index, message: `Objective ${index} (avoid_obstacle_collision): penalty_per_hit must be >= 0` });
@@ -132,8 +169,12 @@ export function validateCompetitionDef(def: CompetitionDef): Issue[] {
 
 function objectiveToJson(o: Objective): unknown {
   switch (o.type) {
-    case "reach_zone":
-      return { type: "reach_zone", x: o.x, y: o.y, radius: o.radius, points: o.points };
+    case "reach_zone": {
+      const out: Record<string, unknown> = { type: "reach_zone", x: o.x, y: o.y, radius: o.radius, points: o.points };
+      if (o.sequence !== undefined) out.sequence = o.sequence;
+      if (o.label !== undefined) out.label = o.label;
+      return out;
+    }
     case "avoid_obstacle_collision":
       return { type: "avoid_obstacle_collision", penalty_per_hit: o.penaltyPerHit };
     case "time_limit":

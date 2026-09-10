@@ -1,4 +1,4 @@
-// Gate tests for contracts/competition/v0's own (and only) TypeScript
+// Gate tests for contracts/competition/v1's own (and only) TypeScript
 // mirror. Mirrors apps/studio/src/contracts/robotDef.test.ts's own harness
 // shape exactly: glob examples/ (parse, validate clean, round-trip),
 // glob invalid/ (each fixture triggers exactly its own rule, with a pinned
@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseCompetitionDef, competitionDefToJson, validateCompetitionDef, type Issue } from "./competitionDef";
 
-const CONTRACT_DIR = join(process.cwd(), "..", "..", "contracts", "competition", "v0");
+const CONTRACT_DIR = join(process.cwd(), "..", "..", "contracts", "competition", "v1");
 const EXAMPLES_DIR = join(CONTRACT_DIR, "examples");
 const INVALID_DIR = join(CONTRACT_DIR, "invalid");
 
@@ -23,7 +23,7 @@ const fixtureNames = (dir: string): string[] =>
     .map((f) => f.replace(/\.json$/, ""))
     .sort();
 
-describe("competition-def v0 examples", () => {
+describe("competition-def v1 examples", () => {
   const names = fixtureNames(EXAMPLES_DIR);
 
   it("has at least one example", () => {
@@ -39,7 +39,7 @@ describe("competition-def v0 examples", () => {
   });
 });
 
-describe("competition-def v0 invalid fixtures", () => {
+describe("competition-def v1 invalid fixtures", () => {
   const rules = fixtureNames(INVALID_DIR);
 
   it("has at least one fixture", () => {
@@ -57,6 +57,7 @@ describe("competition-def v0 invalid fixtures", () => {
     "objective-duplicate-time-limit": "At most one time_limit objective is allowed",
     "objective-reach-zone-invalid-points": "Objective 0 (reach_zone): points must be > 0",
     "objective-reach-zone-invalid-radius": "Objective 0 (reach_zone): radius must be > 0",
+    "objective-reach-zone-invalid-sequence": "Objective 0 (reach_zone): sequence must be a non-negative integer",
     "objective-time-limit-invalid-seconds": "Objective 0 (time_limit): seconds must be > 0",
   };
 
@@ -71,7 +72,7 @@ describe("competition-def v0 invalid fixtures", () => {
   });
 });
 
-describe("competition-def v0 parsing", () => {
+describe("competition-def v1 parsing", () => {
   const base = {
     id: "test",
     name: "Test",
@@ -116,5 +117,67 @@ describe("competition-def v0 parsing", () => {
   it("throws on too many obstacles (reused from validateWorld's own MAX_OBSTACLES)", () => {
     const obstacles = Array.from({ length: 17 }, (_, i) => ({ x: i, y: 0, width: 0.1, height: 0.1 }));
     expect(() => parseCompetitionDef({ ...base, arena: { ...base.arena, obstacles } })).toThrow(/at most 16 obstacles/);
+  });
+});
+
+// Competition Arena C4: v1's own new fields.
+describe("competition-def v1 sequence/label (reach_zone)", () => {
+  const base = {
+    id: "test",
+    name: "Test",
+    robot: "car",
+    arena: {
+      name: "Arena",
+      arena_width: 4,
+      arena_height: 2,
+      robot_radius: 0.1,
+      wheel_base: 0.15,
+      start: { x: 0.5, y: 0.5, theta: 0 },
+      obstacles: [],
+    },
+  };
+
+  it("parses sequence and label when present, and round-trips them", () => {
+    const competition = parseCompetitionDef({
+      ...base,
+      objectives: [{ type: "reach_zone", x: 1, y: 1, radius: 0.2, points: 10, sequence: 1, label: "Delivery zone" }],
+    });
+    const objective = competition.objectives[0];
+    expect(objective).toMatchObject({ sequence: 1, label: "Delivery zone" });
+    expect(validateCompetitionDef(competition)).toEqual([]);
+
+    const reparsed = parseCompetitionDef(competitionDefToJson(competition));
+    expect(reparsed).toEqual(competition);
+  });
+
+  it("omitting sequence/label parses exactly as v0 always did (both undefined)", () => {
+    const competition = parseCompetitionDef({
+      ...base,
+      objectives: [{ type: "reach_zone", x: 1, y: 1, radius: 0.2, points: 10 }],
+    });
+    expect(competition.objectives[0]).toMatchObject({ sequence: undefined, label: undefined });
+  });
+
+  it("throws on a non-numeric sequence (structural, not validate-time)", () => {
+    expect(() =>
+      parseCompetitionDef({ ...base, objectives: [{ type: "reach_zone", x: 1, y: 1, radius: 0.2, points: 10, sequence: "first" }] }),
+    ).toThrow(/sequence must be numeric/);
+  });
+
+  it("throws on a non-string label", () => {
+    expect(() =>
+      parseCompetitionDef({ ...base, objectives: [{ type: "reach_zone", x: 1, y: 1, radius: 0.2, points: 10, label: 5 }] }),
+    ).toThrow(/label must be a string/);
+  });
+
+  it("validate-time: a negative or non-integer sequence is rejected, a valid one is not", () => {
+    const negative = parseCompetitionDef({ ...base, objectives: [{ type: "reach_zone", x: 1, y: 1, radius: 0.2, points: 10, sequence: -1 }] });
+    expect(validateCompetitionDef(negative).map((i) => i.rule)).toEqual(["objective-reach-zone-invalid-sequence"]);
+
+    const fractional = parseCompetitionDef({ ...base, objectives: [{ type: "reach_zone", x: 1, y: 1, radius: 0.2, points: 10, sequence: 1.5 }] });
+    expect(validateCompetitionDef(fractional).map((i) => i.rule)).toEqual(["objective-reach-zone-invalid-sequence"]);
+
+    const valid = parseCompetitionDef({ ...base, objectives: [{ type: "reach_zone", x: 1, y: 1, radius: 0.2, points: 10, sequence: 0 }] });
+    expect(validateCompetitionDef(valid)).toEqual([]);
   });
 });

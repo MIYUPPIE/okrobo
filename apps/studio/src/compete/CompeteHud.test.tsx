@@ -56,4 +56,26 @@ describe("CompeteHud", () => {
     render(<CompeteHud competition={noTimeLimit} run={run} />);
     expect(screen.getByText("0.1s")).toBeInTheDocument();
   });
+
+  // Competition Arena C4: ordered checkpoints.
+  it("uses a reach_zone's own label when present, and shows a locked zone as locked", () => {
+    const sequenced: CompetitionDef = {
+      ...competition,
+      objectives: [
+        { type: "reach_zone", x: 1, y: 1, radius: 0.3, points: 80, sequence: 0, label: "Pickup zone" },
+        { type: "reach_zone", x: 5, y: 5, radius: 0.3, points: 150, sequence: 1, label: "Delivery zone" },
+      ],
+    };
+    // initRunState alone never computes `locked` (that only happens inside
+    // evaluateTick) -- one tick away from either zone is what App.tsx's own
+    // very first onEngineStep call would already have produced.
+    const run = evaluateTick(sequenced, initRunState(sequenced), { x: 9, y: 9, theta: 0 }, 0.1);
+    render(<CompeteHud competition={sequenced} run={run} />);
+
+    expect(screen.getByText("Pickup zone (+80)")).toBeInTheDocument();
+    expect(screen.getByText("Delivery zone (+150)")).toBeInTheDocument();
+    expect(screen.getByText("🔒")).toBeInTheDocument();
+    expect(screen.getByText("Delivery zone (+150)").closest("li")).toHaveClass("locked");
+    expect(screen.getByText("Pickup zone (+80)").closest("li")).not.toHaveClass("locked");
+  });
 });

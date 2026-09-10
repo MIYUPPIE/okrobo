@@ -1,0 +1,24 @@
+{
+  "id": "maze-challenge",
+  "name": "Maze Challenge",
+  "description": "A wall blocks the direct path to the exit. Head south around it to Checkpoint 1, then continue east and north to the exit zone -- the only way through, fully visible from the start.",
+  "robot": "car",
+  "arena": {
+    "name": "Known Maze",
+    "description": "A 3.5x3.5 m arena. One large wall seals off the north route -- south around it is the only way through.",
+    "arena_width": 3.5,
+    "arena_height": 3.5,
+    "robot_radius": 0.1,
+    "wheel_base": 0.15,
+    "start": { "x": 0.3, "y": 1.75, "theta": 0 },
+    "obstacles": [
+      { "x": 1.75, "y": 2.175, "width": 1.8, "height": 2.65, "color": [120, 120, 120], "label": "maze wall" }
+    ]
+  },
+  "objectives": [
+    { "type": "reach_zone", "x": 1.75, "y": 0.4, "radius": 0.25, "points": 100, "sequence": 0, "label": "Checkpoint 1" },
+    { "type": "reach_zone", "x": 3.2, "y": 1.75, "radius": 0.25, "points": 200, "sequence": 1, "label": "Exit zone" },
+    { "type": "avoid_obstacle_collision", "penalty_per_hit": 20 },
+    { "type": "time_limit", "seconds": 90 }
+  ]
+}

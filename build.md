@@ -2428,3 +2428,54 @@ styling class, so a bare `.template-row .project-name` query started
 picking it up too) -- found and fixed by actually running the suite. Passed
 twice in a row for stability. See
 docs/decisions/robot-builder-web-persistence.md.
+
+## Competition Arena C4: ordered checkpoints (2026-09-10)
+
+Continuing `nextphase.md`'s "OKHUB FutureLab" brainstorm (the same source
+Competition Arena C1-C3 was carved from) -- user picked "ordered checkpoints
++ two new competitions" from a shortlist of 3 candidate next slices. Closes
+brainstorm items #9 (Object Delivery Race) and #10 (Maze Challenge), and the
+deferral C1's own decision doc named explicitly ("an ordered-sequence
+objective is a natural, contained addition once real students have used the
+unordered version").
+
+Scoped via plan-mode. `contracts/competition/v0` forked to `v1` (the
+project's own stated versioning policy): `reach_zone` gained optional
+`sequence`/`label` fields, fully backward compatible (omitted = v0's only
+behavior, unchanged). `score.ts`'s `ObjectiveOutcome` gained `locked`,
+gated against the previous tick's outcomes so the result never depends on
+objective ordering in the JSON.
+
+A real, pre-existing gap surfaced while designing this and folded into
+scope: `reach_zone` objectives had no visual representation anywhere in
+`Viewport3D.tsx` -- fine with one zone per competition, unplayable with
+ordered ones a student can't see. Fixed for all 5 competitions (not just
+the 2 new ones): a ground ring per zone, colored locked/active/achieved,
+via a new `zoneStatesRef` prop mirroring `autopilotRef`'s own existing
+plain-ref convention in that component.
+
+**A real, pre-existing product bug found by this phase's own e2e check**:
+picking a second competition mid-session re-instantiates the WASM engine
+asynchronously, but `engineStatus` never reset to "loading" during that
+window -- Run stayed visually enabled and silently no-op'd if clicked
+inside it. Found via a genuine ~1-in-3 e2e flake, traced with a hand-rolled
+CDP probe, fixed at the root (`setEngineStatus("loading")` now runs
+synchronously at the top of the `[world]` effect) rather than just papered
+over in the test.
+
+New content: Object Delivery Race (pickup-then-delivery, a crate blocking
+the naive straight line) and Maze Challenge (one wall sealing off the
+direct route and the whole north side, leaving exactly one solvable path)
+-- the maze's own solvability is asserted by a permanent test
+(`bundledCompetitions.test.ts`) sampling a real waypoint path through
+`score.ts`'s own `circleIntersectsAabb`, not just eyeballed. A new lesson
+(`06-ordered-checkpoints.md`) introduces the locked-zone concept.
+
+Tests: `bundledCompetitions.test.ts` (5, new), `competitionDef.test.ts`
+(+6), `score.test.ts` (+6), `CompeteHud.test.tsx`/`CompeteReport.test.tsx`
+(+2). `npm run test` (899 passing, up from 878), `npm run typecheck`,
+`npm run build`. `./scripts/check-studio-e2e.sh` -- 4 consecutive clean
+runs after the `engineStatus` fix (down from ~1-in-3 flaky before it), plus
+two manual screenshot passes confirming the ground markers and maze layout
+are visibly correct in a real browser, not just numerically so. See
+docs/decisions/competition-arena-definition-scoring.md's C4 addendum.

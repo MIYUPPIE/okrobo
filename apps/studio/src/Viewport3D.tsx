@@ -1,7 +1,9 @@
 import { useEffect, useRef } from "react";
+import type { RefObject } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { RobotKind } from "./blocks/okroboBlocks";
+import type { CompetitionDef } from "./compete/competitionDef";
 import {
   type ArmState,
   DEFAULT_ARM,
@@ -34,6 +36,18 @@ export type HudInfo =
   | { kind: "arm"; state: ArmState }
   | { kind: "drone"; state: DroneState };
 
+/** Competition Arena C4: one entry per reach_zone objective, in the same
+ * order they appear in `competition.objectives` (filtered to that type) --
+ * read every animate-loop frame via `zoneStatesRef` to recolor each ground
+ * ring without re-running the (expensive) scene-construction effect. */
+export type ZoneMarkerState = "locked" | "active" | "achieved";
+
+const ZONE_MARKER_COLOR: Record<ZoneMarkerState, number> = {
+  locked: 0x555555,
+  active: 0xffcc33,
+  achieved: 0x4caf50,
+};
+
 export interface Viewport3DProps {
   robot: RobotKind;
   engine: EngineWorld;
@@ -51,6 +65,15 @@ export interface Viewport3DProps {
    * outside Compete mode, so nothing else changes. See
    * docs/decisions/competition-arena-definition-scoring.md. */
   onEngineStep?: (state: State, dt: number) => void;
+  /** Competition Arena C4: when set (Compete mode only), a ground ring
+   * marker is rendered for every reach_zone objective in `competition`.
+   * `zoneStatesRef` is read every animate-loop frame (mirrors
+   * `autopilotRef`'s own plain-mutable-ref convention in this component) to
+   * recolor each ring locked/active/achieved -- the same state
+   * score.ts's own ObjectiveOutcome.locked/achieved already compute, not a
+   * second parallel computation. */
+  competition?: CompetitionDef;
+  zoneStatesRef?: RefObject<ZoneMarkerState[]>;
 }
 
 export function Viewport3D({
@@ -64,6 +87,8 @@ export function Viewport3D({
   onState,
   onAutoStop,
   onEngineStep,
+  competition,
+  zoneStatesRef,
 }: Viewport3DProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -149,6 +174,29 @@ export function Viewport3D({
         );
         box.position.set(obstacle.x, 0.1, -obstacle.y);
         scene.add(box);
+      }
+    }
+
+    // Competition Arena C4: a ground ring for every reach_zone objective --
+    // before this, a zone had no visual representation anywhere, so a
+    // student could only guess where to drive from the competition's own
+    // description text. Ring radius matches the objective's own radius
+    // exactly (the literal boundary the student's program is scored
+    // against), same world->scene mapping the obstacle boxes above use.
+    // Only ever built in Compete mode (both robot==="car" and a real
+    // competition are required).
+    const zoneMarkers: THREE.Mesh[] = [];
+    if (robot === "car" && competition) {
+      for (const objective of competition.objectives) {
+        if (objective.type !== "reach_zone") continue;
+        const ring = new THREE.Mesh(
+          new THREE.RingGeometry(objective.radius * 0.85, objective.radius, 32),
+          new THREE.MeshBasicMaterial({ color: ZONE_MARKER_COLOR.active, transparent: true, opacity: 0.85, side: THREE.DoubleSide }),
+        );
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.set(objective.x, 0.006, -objective.y);
+        scene.add(ring);
+        zoneMarkers.push(ring);
       }
     }
 
@@ -395,6 +443,14 @@ export function Viewport3D({
         if (frame++ % 10 === 0) onState({ kind: "drone", state });
       }
 
+      if (zoneMarkers.length > 0) {
+        const states = zoneStatesRef?.current;
+        zoneMarkers.forEach((ring, i) => {
+          const state = states?.[i] ?? "active";
+          (ring.material as THREE.MeshBasicMaterial).color.setHex(ZONE_MARKER_COLOR[state]);
+        });
+      }
+
       controls.update();
       renderer.render(scene, camera);
     };
@@ -407,7 +463,7 @@ export function Viewport3D({
       renderer.dispose();
       container.removeChild(renderer.domElement);
     };
-  }, [robot, engine, arm, drone, world, runner, autopilotRef, onState, onAutoStop, onEngineStep]);
+  }, [robot, engine, arm, drone, world, runner, autopilotRef, onState, onAutoStop, onEngineStep, competition, zoneStatesRef]);
 
   return <div ref={containerRef} className="viewport-3d" />;
 }

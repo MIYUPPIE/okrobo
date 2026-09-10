@@ -9,7 +9,7 @@ import type { CompetitionRunState } from "./score";
 function objectiveLabel(objective: Objective): string {
   switch (objective.type) {
     case "reach_zone":
-      return `Reach the zone (+${objective.points})`;
+      return `${objective.label ?? "Reach the zone"} (+${objective.points})`;
     case "avoid_obstacle_collision":
       return `Avoid obstacles (-${objective.penaltyPerHit}/hit)`;
     case "time_limit":
@@ -38,14 +38,25 @@ export function CompeteHud({ competition, run }: { competition: CompetitionDef; 
       </div>
       <ul className="compete-hud-objectives">
         {run.outcomes.map((outcome) => (
-          <li key={outcome.index} className={outcome.achieved || outcome.hits > 0 ? "compete-objective active" : "compete-objective"}>
+          <li
+            key={outcome.index}
+            className={
+              outcome.locked
+                ? "compete-objective locked"
+                : outcome.achieved || outcome.hits > 0
+                  ? "compete-objective active"
+                  : "compete-objective"
+            }
+          >
             <span>{objectiveLabel(outcome.objective)}</span>
             <span>
-              {outcome.objective.type === "avoid_obstacle_collision"
-                ? `${outcome.hits} hit${outcome.hits === 1 ? "" : "s"}`
-                : outcome.achieved
-                  ? "✓"
-                  : ""}
+              {outcome.locked
+                ? "🔒"
+                : outcome.objective.type === "avoid_obstacle_collision"
+                  ? `${outcome.hits} hit${outcome.hits === 1 ? "" : "s"}`
+                  : outcome.achieved
+                    ? "✓"
+                    : ""}
             </span>
           </li>
         ))}

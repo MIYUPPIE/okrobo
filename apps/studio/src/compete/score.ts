@@ -18,6 +18,13 @@ export interface ObjectiveOutcome {
   achieved: boolean;
   /** Only meaningful for avoid_obstacle_collision -- how many separate hits so far. */
   hits: number;
+  /** Only meaningful for a sequenced reach_zone (Competition Arena C4) --
+   * true while at least one other reach_zone with a strictly lower
+   * `sequence` hasn't been achieved yet. Always false for every other
+   * objective, and for a reach_zone with no `sequence` at all (v0's own
+   * always-reachable behavior, unchanged). Computed fresh every tick from
+   * the PREVIOUS tick's outcomes -- see evaluateTick. */
+  locked: boolean;
 }
 
 export type FinishReason = "time_up" | "stopped" | "program_ended";
@@ -57,7 +64,7 @@ export function initRunState(def: CompetitionDef): CompetitionRunState {
   return {
     elapsedSeconds: 0,
     totalScore: 0,
-    outcomes: def.objectives.map((objective, index) => ({ index, objective, points: 0, achieved: false, hits: 0 })),
+    outcomes: def.objectives.map((objective, index) => ({ index, objective, points: 0, achieved: false, hits: 0, locked: false })),
     timeUp: false,
     finished: false,
     finishReason: null,
@@ -85,7 +92,23 @@ export function evaluateTick(
   for (const outcome of outcomes) {
     const objective = outcome.objective;
     if (objective.type === "reach_zone") {
-      if (!outcome.achieved) {
+      // Gated against the PREVIOUS tick's own outcomes (`state.outcomes`,
+      // not the `outcomes` array being built this same tick) -- a zone
+      // unlocking one tick (10ms) after its prerequisite is achieved is
+      // imperceptible, and this sidesteps any dependency on the order
+      // objectives happen to appear in the JSON. See
+      // docs/decisions/competition-arena-definition-scoring.md.
+      const locked =
+        objective.sequence !== undefined &&
+        state.outcomes.some(
+          (other) =>
+            other.objective.type === "reach_zone" &&
+            other.objective.sequence !== undefined &&
+            other.objective.sequence < objective.sequence! &&
+            !other.achieved,
+        );
+      outcome.locked = locked;
+      if (!outcome.achieved && !locked) {
         const dx = pose.x - objective.x;
         const dy = pose.y - objective.y;
         if (dx * dx + dy * dy <= objective.radius * objective.radius) {
