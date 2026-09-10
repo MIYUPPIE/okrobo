@@ -25,12 +25,44 @@ describe("ProgramRunner movements (real WASM engine)", () => {
   });
 
   it("forward stops early at the wall", async () => {
+    // Faced north first: ARENA's own default start (1, 1, 0) has a real
+    // obstacle directly ahead along +x since the engine's own obstacle
+    // collision fix (a car now physically stops at an obstacle box, not
+    // just the outer walls) -- north is clear of both of ARENA's boxes, so
+    // this keeps testing the wall specifically, not an obstacle.
+    const { engine, runner } = await makeRunner();
+    const turn = runner.api.turnLeft(90);
+    runner.tick(100);
+    await turn;
+    const move = runner.api.forward(5.0);
+    runner.tick(3000);
+    await move;
+    expect(engine.state().pose.y).toBeCloseTo(1.9, 9);
+    expect(runner.api.distance()).toBeCloseTo(0.0, 9);
+    engine.destroy();
+  });
+
+  it("forward stops early at an obstacle, same as the outer wall", async () => {
+    // ARENA's own red box sits at (1.7, 1.0), directly ahead of the (1, 1,
+    // 0) default start -- the engine's real obstacle collision (previously
+    // obstacles were visual/scoring-only, see docs/decisions/car-obstacle-
+    // collision.md) now stops the car robot_radius short of its nearest
+    // edge (1.6), same as it already does at the outer walls. Not
+    // asserting `collided` here (mirrors the wall-stop test above, which
+    // doesn't either): the flag is instantaneous, true only on a tick that
+    // actively re-clamps a still-moving robot (proven directly, driving
+    // continuously, by engine/tests/test_world.cpp's own test_obstacle_
+    // stop) -- once ProgramRunner has already stopped the wheels here, a
+    // resting robot at the exact boundary distance no longer re-clamps
+    // every tick, so reading it this late would be checking the wrong
+    // moment, not a real behavior question.
     const { engine, runner } = await makeRunner();
     const move = runner.api.forward(5.0);
     runner.tick(3000);
     await move;
-    expect(engine.state().pose.x).toBeCloseTo(1.9, 9);
-    expect(runner.api.distance()).toBeCloseTo(0.0, 9);
+    const state = engine.state();
+    expect(state.pose.x).toBeCloseTo(1.5, 9);
+    expect(state.pose.y).toBeCloseTo(1.0, 9);
     engine.destroy();
   });
 

@@ -2519,3 +2519,39 @@ gained a real two-competition-run localStorage round trip (first run shows
 no best line, the picker's own row then shows the recorded best, a second
 run shows the comparison) -- 3 consecutive clean real-browser runs after
 the fix. See docs/decisions/competition-run-history.md.
+
+## Real obstacle collision for the Car (2026-09-10)
+
+User observed: "there something i observed there is no physics / the robots
+can enter into the obstacles anytime." Confirmed real and pre-existing
+(`engine/src/world.cpp` only ever clamped against the arena's outer walls,
+never obstacle boxes -- documented since Competition Arena C1, and
+`world.hpp`'s own `Obstacle` comment "the robot can see and bump into"
+already implied this was unfinished). Asked whether to fix it (a real
+engine change) before scoping; user said yes. Scoped via plan-mode.
+
+Standard circle-vs-AABB push-out added to `World::step` -- geometrically
+correct at corners (verified with a dedicated diagonal-approach test),
+unlike a simpler inflated-box clamp would have been. Had to change TWO
+implementations identically: `engine/src/world.cpp` and its own reference
+model, `runtime/python/okrobo/_sim.py`, which `engine/tests/parity/
+parity.mjs` locks together tick-by-tick at 1e-9 tolerance. Extended the
+shared parity scenario with a real drive-into-an-obstacle phase (now 2037
+states compared, max diff 8.88e-16) to prove parity on the new behavior
+itself, not just inherit it by accident. `apps/studio/src/compete/
+score.ts`'s own scoring penalty needed no changes -- it's an independent
+overlap check that already composes correctly with real physical blocking.
+
+One pre-existing studio test needed updating (`ProgramRunner.test.ts`'s
+"forward stops early at the wall") since the shared default arena has a
+real obstacle directly ahead of the default start pose that now blocks it
+before the wall -- turned the robot to face a genuinely clear direction for
+that test, added a new test asserting the obstacle-stop position
+specifically.
+
+Verified against the exact production WASM artifact (not a mock): driving
+the shipped Arena's car straight for 10s now stops at x=1.4999999999999998
+(0.1m short of the red box) instead of reaching the far wall at x=1.9.
+`ctest` 13/13, `pytest` 223 passing, parity check clean, `npm run test` 913
+passing, typecheck, build, full `check-studio-e2e.sh` green twice in a row.
+Full `test-all.sh` green. See docs/decisions/car-obstacle-collision.md.

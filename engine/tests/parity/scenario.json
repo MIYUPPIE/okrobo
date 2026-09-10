@@ -8,6 +8,8 @@
     { "command": { "type": "stop" }, "steps": 10 },
     { "command": { "type": "drive", "left": -0.3, "right": -0.3 }, "steps": 400 },
     { "command": { "type": "reset" }, "steps": 5 },
-    { "command": { "type": "drive", "left": 0.1, "right": 0.3 }, "steps": 250 }
+    { "command": { "type": "drive", "left": 0.1, "right": 0.3 }, "steps": 250 },
+    { "command": { "type": "reset" }, "steps": 5 },
+    { "command": { "type": "drive", "left": 0.5, "right": 0.5 }, "steps": 300 }
   ]
 }

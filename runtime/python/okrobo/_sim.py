@@ -138,12 +138,44 @@ class World:
             p.y -= r * (math.cos(p.theta + w * dt) - math.cos(p.theta))
             p.theta = _normalize_angle(p.theta + w * dt)
 
+        # Obstacle collision: standard circle-vs-AABB push-out, resolved
+        # sequentially per obstacle (a later obstacle in the same tick sees
+        # the already-corrected position) -- geometrically correct at
+        # corners, unlike clamping x/y independently against an inflated
+        # box. Mirrors engine/src/world.cpp's own World::step line-for-line;
+        # engine/tests/parity/parity.mjs locks the two together, so any
+        # change here must land there too. Runs before the wall clamp below,
+        # which stays the final authority on where the robot ends up.
+        obstacle_collided = False
+        for box in self.config.obstacles:
+            half_w = box.width / 2.0
+            half_h = box.height / 2.0
+            closest_x = min(max(p.x, box.x - half_w), box.x + half_w)
+            closest_y = min(max(p.y, box.y - half_h), box.y + half_h)
+            dx = p.x - closest_x
+            dy = p.y - closest_y
+            r2 = self.config.robot_radius * self.config.robot_radius
+            if dx * dx + dy * dy < r2:
+                dist = math.sqrt(dx * dx + dy * dy)
+                if dist < _OMEGA_EPSILON:
+                    # Degenerate: the robot's own centre sits exactly on/
+                    # inside the box's own boundary point (only reachable if
+                    # it spawned inside an obstacle or overshot severely in
+                    # one tick) -- push away from the box's own centre.
+                    dx, dy = p.x - box.x, p.y - box.y
+                    dist = math.sqrt(dx * dx + dy * dy)
+                    if dist < _OMEGA_EPSILON:
+                        dx, dy, dist = 1.0, 0.0, 1.0
+                p.x = closest_x + (dx / dist) * self.config.robot_radius
+                p.y = closest_y + (dy / dist) * self.config.robot_radius
+                obstacle_collided = True
+
         min_xy = self.config.robot_radius
         max_x = self.config.arena_width - self.config.robot_radius
         max_y = self.config.arena_height - self.config.robot_radius
         clamped_x = min(max(p.x, min_xy), max_x)
         clamped_y = min(max(p.y, min_xy), max_y)
-        self._collided = clamped_x != p.x or clamped_y != p.y
+        self._collided = obstacle_collided or clamped_x != p.x or clamped_y != p.y
         p.x = clamped_x
         p.y = clamped_y
 

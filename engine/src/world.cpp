@@ -54,13 +54,53 @@ void World::step(double dt) {
         pose_.theta = normalize_angle(pose_.theta + w * dt);
     }
 
+    // Obstacle collision: standard circle-vs-AABB push-out, resolved
+    // sequentially per obstacle (a later obstacle in the same tick sees the
+    // already-corrected position) -- geometrically correct at corners,
+    // unlike clamping x/y independently against an inflated box. Mirrored
+    // line-for-line in runtime/python/okrobo/_sim.py's own World.step;
+    // engine/tests/parity/parity.mjs locks the two together, so any change
+    // here must land there too. Runs before the wall clamp below, which
+    // stays the final authority on where the robot ends up.
+    bool obstacle_collided = false;
+    for (int i = 0; i < config_.obstacle_count; ++i) {
+        const Obstacle& box = config_.obstacles[i];
+        const double half_w = box.width / 2.0;
+        const double half_h = box.height / 2.0;
+        const double closest_x = std::clamp(pose_.x, box.x - half_w, box.x + half_w);
+        const double closest_y = std::clamp(pose_.y, box.y - half_h, box.y + half_h);
+        double dx = pose_.x - closest_x;
+        double dy = pose_.y - closest_y;
+        const double r2 = config_.robot_radius * config_.robot_radius;
+        if (dx * dx + dy * dy < r2) {
+            double dist = std::sqrt(dx * dx + dy * dy);
+            if (dist < kOmegaEpsilon) {
+                // Degenerate: the robot's own centre sits exactly on/inside
+                // the box's own boundary point (only reachable if it spawned
+                // inside an obstacle or overshot severely in one tick) --
+                // push away from the box's own centre instead.
+                dx = pose_.x - box.x;
+                dy = pose_.y - box.y;
+                dist = std::sqrt(dx * dx + dy * dy);
+                if (dist < kOmegaEpsilon) {
+                    dx = 1.0;
+                    dy = 0.0;
+                    dist = 1.0;
+                }
+            }
+            pose_.x = closest_x + (dx / dist) * config_.robot_radius;
+            pose_.y = closest_y + (dy / dist) * config_.robot_radius;
+            obstacle_collided = true;
+        }
+    }
+
     const double min_x = config_.robot_radius;
     const double max_x = config_.arena_width - config_.robot_radius;
     const double min_y = config_.robot_radius;
     const double max_y = config_.arena_height - config_.robot_radius;
     const double clamped_x = std::clamp(pose_.x, min_x, max_x);
     const double clamped_y = std::clamp(pose_.y, min_y, max_y);
-    collided_ = (clamped_x != pose_.x) || (clamped_y != pose_.y);
+    collided_ = obstacle_collided || (clamped_x != pose_.x) || (clamped_y != pose_.y);
     pose_.x = clamped_x;
     pose_.y = clamped_y;
 
