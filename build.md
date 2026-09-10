@@ -2618,3 +2618,47 @@ green. Manual screenshots confirmed the panel genuinely grows, the drag
 persists across a reload, and the toolbox's if/elseif/else shape renders
 and is directly draggable. See
 docs/decisions/blocks-editor-usability.md.
+
+## Top nav bar (titlebar) responsiveness on narrow windows (2026-09-10)
+
+Direct follow-up question after the Blocks-usability pass: "how about the
+interface color and the nav bar responsiveness." Color was already done;
+the titlebar (app name, File/Edit/Robot/Simulation/Help menus, the
+Simulate/Build/Compete mode toggle, the project-name chip) had not been
+touched. Confirmed the bug with a real 550px-wide headless-Chrome
+screenshot before assuming anything: `.titlebar` was a plain flex row
+with no wrap/overflow handling -- "OKHUB Robotics Studio" wrapped to 3
+lines, blowing out the fixed 40px row height and pushing the mode toggle
+(Build/Compete became fully unreachable) and the project chip off the
+visible window edge with no way back.
+
+Two-layer fix, in the order a user actually hits them: (1) `flex-shrink:
+0` + `white-space: nowrap` on every titlebar child so the row can never
+wrap or break its own height, with `overflow-x: auto` as the safety net
+underneath; (2) rather than just permitting a silent sideways scroll (a
+real discoverability trap for a kid -- nothing on screen hints Build/
+Compete exist off-canvas), a `max-width: 720px` media query swaps the
+wordmark for a short "OKHUB" form and tightens the row's own spacing.
+Measured, not guessed: closed the shortfall from 225px to 11px at 550px
+wide -- every control (5 menus, the full 3-way mode toggle, the project
+chip) fully visible with no scrolling needed; the 11px is headroom for
+anything narrower still.
+
+**A real bug caught mid-verification**: the media query's first draft sat
+*before* the base `.menu-item`/`.mode-toggle button` rules later in the
+file -- at equal specificity, source order decides ties regardless of the
+media condition, so the padding overrides silently lost the cascade.
+Caught empirically: re-ran the screenshot script after adding them and
+got byte-identical layout numbers to the prior run, which was the tell.
+Fixed by moving the block to after the last base rule it needs to win
+against.
+
+`npm run test -- --run` (924/924), `npm run typecheck`, `npm run build`
+all clean -- pure CSS/markup, no new dependencies. `./scripts/
+check-studio-e2e.sh` run twice, fully green both times (the existing
+suite's own titlebar menu/mode-toggle interactions already exercise this
+row on every run). Full `test-all.sh` green. Real headless-Chrome
+screenshots confirmed both ends: 550px wide now shows everything on one
+line with only the short "OKHUB" form; 1280px wide is pixel-for-pixel
+unchanged from before this fix (`scrollWidth === width`, full wordmark).
+See docs/decisions/titlebar-responsiveness.md.

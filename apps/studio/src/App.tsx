@@ -962,7 +962,10 @@ export default function App() {
   return (
     <div className={mode === "build" ? "studio mode-build" : "studio"}>
       <header className="titlebar">
-        <span className="app-name">OKHUB Robotics Studio</span>
+        <span className="app-name">
+          <span className="app-name-full">OKHUB Robotics Studio</span>
+          <span className="app-name-short">OKHUB</span>
+        </span>
         <nav className="menus">
           <div className="menu-wrap">
             <button className="menu-item" onClick={() => toggleMenu("file")}>
