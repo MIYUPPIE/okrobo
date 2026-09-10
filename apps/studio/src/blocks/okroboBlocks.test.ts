@@ -6,15 +6,18 @@ import * as Blockly from "blockly/core";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   ARM_STARTER_WORKSPACE,
+  ARM_TOOLBOX,
   BUILT_STARTER_WORKSPACE,
   BUILT_TOOLBOX,
   DRONE_STARTER_WORKSPACE,
+  DRONE_TOOLBOX,
   generateCpp,
   generateJavaScript,
   generatePython,
   setBuiltRobotFields,
   STARTER_WORKSPACE,
   starterWorkspace,
+  TOOLBOX,
   toolboxFor,
 } from "./okroboBlocks";
 
@@ -615,5 +618,79 @@ describe("built-robot blocks (Robot Builder Phase 6)", () => {
     expect(js).toContain("await robot.wait(1);");
     expect(js).not.toContain("robot.set(");
     expect(js).not.toContain("robot.read(");
+  });
+});
+
+// A real usability report ("can't use else if at all") traced to the
+// controls_if mutator's own small drag target being especially hard to use
+// -- see docs/decisions/blocks-editor-usability.md. Fixed with three
+// ready-made toolbox shapes of the same stock block (seeded via Blockly's
+// own extraState mechanism, no custom block code), so a student can drag
+// the shape they need directly rather than fighting the mutator popup.
+describe("if/else toolbox shapes (Blocks editor usability)", () => {
+  const controlsIfEntries = (toolbox: { contents: Array<{ type?: string; extraState?: unknown }> }) =>
+    toolbox.contents.filter((entry) => entry.type === "controls_if");
+
+  it("every robot's toolbox offers plain if, if/else, and if/else-if/else, not just plain if", () => {
+    for (const toolbox of [TOOLBOX, ARM_TOOLBOX, DRONE_TOOLBOX, BUILT_TOOLBOX]) {
+      const entries = controlsIfEntries(toolbox);
+      expect(entries).toHaveLength(3);
+      expect(entries[0].extraState).toBeUndefined();
+      expect(entries[1].extraState).toEqual({ hasElse: true });
+      expect(entries[2].extraState).toEqual({ elseIfCount: 1, hasElse: true });
+    }
+  });
+
+  it("an extraState-seeded if/else block loads with a real ELSE input, not just plain if", () => {
+    const ws = load({
+      blocks: {
+        languageVersion: 0,
+        blocks: [
+          {
+            type: "controls_if",
+            extraState: { hasElse: true },
+            x: 0,
+            y: 0,
+            inputs: {
+              DO0: { block: { type: "okrobo_forward", fields: { METERS: 0.05 } } },
+              ELSE: { block: { type: "okrobo_backward", fields: { METERS: 0.05 } } },
+            },
+          },
+        ],
+      },
+    });
+    const block = ws.getAllBlocks(false)[0];
+    expect(block.type).toBe("controls_if");
+    expect(block.getInput("ELSE")).not.toBeNull();
+    expect(Blockly.serialization.blocks.save(block)).toMatchObject({ extraState: { hasElse: true } });
+  });
+
+  it("all three extraState-seeded shapes generate correct JavaScript/Python/C++, not just plain if", () => {
+    const shapes: Array<{ extraState?: { elseIfCount?: number; hasElse?: boolean }; expectJs: string[]; rejectJs?: string[] }> = [
+      { extraState: undefined, expectJs: ["if ("], rejectJs: ["else"] },
+      { extraState: { hasElse: true }, expectJs: ["if (", "} else {"], rejectJs: ["else if"] },
+      { extraState: { elseIfCount: 1, hasElse: true }, expectJs: ["if (", "} else if (", "} else {"] },
+    ];
+    for (const { extraState, expectJs, rejectJs } of shapes) {
+      const blockJson: Record<string, unknown> = {
+        type: "controls_if",
+        x: 0,
+        y: 0,
+        inputs: {
+          IF0: { block: { type: "logic_boolean", fields: { BOOL: "TRUE" } } },
+          DO0: { block: { type: "okrobo_forward", fields: { METERS: 0.05 } } },
+          ...(extraState?.hasElse ? { ELSE: { block: { type: "okrobo_backward", fields: { METERS: 0.05 } } } } : {}),
+          ...(extraState?.elseIfCount ? { IF1: { block: { type: "logic_boolean", fields: { BOOL: "FALSE" } } } } : {}),
+        },
+      };
+      if (extraState) blockJson.extraState = extraState;
+
+      const ws = () => load({ blocks: { languageVersion: 0, blocks: [blockJson] } });
+      const js = generateJavaScript(ws());
+      for (const fragment of expectJs) expect(js).toContain(fragment);
+      for (const fragment of rejectJs ?? []) expect(js).not.toContain(fragment);
+      expect(() => generatePython(ws(), "car")).not.toThrow();
+      expect(() => generateCpp(ws(), "car")).not.toThrow();
+    }
   });
 });

@@ -45,7 +45,7 @@ for _ in $(seq 1 40); do
   sleep 0.5
 done
 
-"$BROWSER" --headless=new --disable-gpu --no-sandbox \
+"$BROWSER" --headless=new --disable-gpu --no-sandbox --window-size=1280,900 \
   --remote-debugging-port="$CDP_PORT" --user-data-dir="$TMP/chrome" \
   about:blank >"$TMP/chrome.log" 2>&1 &
 CHROME_PID=$!

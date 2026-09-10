@@ -87,6 +87,71 @@ try {
   const carStatusReady = await waitForCondition("/d 0\\.50 m/.test(document.querySelector('.run-bar .status')?.textContent ?? '')");
   check("starts on the Car with the shipped arena (red box 0.5 m ahead)", carStatusReady, await status());
 
+  // -- Blocks editor usability: resizable code panel, if/else toolbox shapes --
+  // A real usability report ("can't use else if at all") traced to the
+  // code panel being hardcoded to a fixed 220px regardless of window size
+  // -- see docs/decisions/blocks-editor-usability.md. The if/else-if
+  // *shapes themselves* round-tripping through code generation is proven
+  // directly by okroboBlocks.test.ts; this only proves the real browser
+  // wiring: the panel is genuinely bigger/resizable, and the toolbox
+  // really does offer the pre-built shapes in a live workspace.
+  const codePanelHeightBefore = await page.evaluate("document.querySelector('.code-panel').getBoundingClientRect().height");
+  // max(220px, 35vh): never smaller than the old fixed height, genuinely
+  // bigger on any window taller than ~630px (this harness's own window is
+  // set explicitly below check-studio-e2e.sh's own launch flags -- real
+  // Tauri/browser windows are essentially always taller than that).
+  check("the code panel is at least as tall as the old fixed 220px, genuinely bigger on a real window", codePanelHeightBefore >= 220, `${codePanelHeightBefore}px`);
+
+  // A small, deliberately modest drag (80px, not several hundred) -- this
+  // resize persists to localStorage for the rest of this browser session,
+  // and a large one visibly squeezes the sidebar/viewport enough to break
+  // later, unrelated coordinate-based clicks further down this script
+  // (found empirically: an earlier 200px version of this check cascaded
+  // into failures in the Arm/Drone-switching sections much later on,
+  // purely from the leftover layout shift). Cleaned up explicitly below
+  // regardless, so this stays a non-issue either way.
+  const gutterBox = await page.evaluate(`(() => {
+    const r = document.querySelector('.code-gutter').getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  })()`);
+  await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x: gutterBox.x, y: gutterBox.y, button: "left", clickCount: 1 });
+  for (const step of [20, 40, 60, 80]) {
+    await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: gutterBox.x, y: gutterBox.y - step, button: "left" });
+  }
+  await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: gutterBox.x, y: gutterBox.y - 80, button: "left" });
+  const codePanelHeightAfterDrag = await waitForCondition(
+    `document.querySelector('.code-panel').getBoundingClientRect().height > ${codePanelHeightBefore + 40}`,
+    3000,
+  );
+  check("dragging the code panel's own handle up actually grows it", codePanelHeightAfterDrag);
+
+  await page.navigate(TARGET);
+  const codePanelHeightPersisted = await waitForCondition(
+    `document.querySelector('.code-panel') && document.querySelector('.code-panel').getBoundingClientRect().height > ${codePanelHeightBefore + 40}`,
+    5000,
+  );
+  check("the resized code panel height survives a reload (a real localStorage round trip)", codePanelHeightPersisted);
+  await waitForCondition("(() => { const b = document.querySelector('.run-bar .run'); return !!b && !b.disabled; })()"); // settle back in before continuing
+
+  // Clean up: restore the default layout for the rest of this script --
+  // every later section assumes today's normal panel proportions.
+  await page.evaluate("localStorage.removeItem('okrobo:panel:code-height')");
+  await page.navigate(TARGET);
+  await waitForCondition("(() => { const b = document.querySelector('.run-bar .run'); return !!b && !b.disabled; })()");
+
+  await page.evalClickText(".code-tab", "/^Blocks$/");
+  const ifShapeCount = await waitForCondition(
+    "[...document.querySelectorAll('.blocklyFlyout .blocklyDraggable')].filter(b => (b.textContent ?? '').startsWith('if')).length >= 3",
+    5000,
+  );
+  check(
+    "the toolbox offers all three pre-built if shapes (plain if, if/else, if/elseif/else), not just one",
+    ifShapeCount,
+    await page.evaluate(
+      "[...document.querySelectorAll('.blocklyFlyout .blocklyDraggable')].filter(b => (b.textContent ?? '').startsWith('if')).map(b => b.textContent).join(' | ')",
+    ),
+  );
+
   // -- camera preview: live, non-blank frames ----------------------------------
   const cameraCanvasReady = await waitForCondition("!!document.querySelector('.camera-canvas')");
   check("camera preview canvas present", cameraCanvasReady);

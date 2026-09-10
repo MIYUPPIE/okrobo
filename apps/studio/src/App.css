@@ -1,13 +1,31 @@
+/* A livelier palette for a robotics IDE built for kids -- the dark base
+   stays (a bright light theme would wash out the 3D viewport's own object
+   colours, and it isn't what read as "dull" here), but the accent/status
+   colours are more saturated, and each robot gets its own real accent
+   colour (Car/Arm/Drone/Built robot, applied to their own sidebar rows in
+   App.tsx's ROBOTS array) instead of one blue for everything -- the same
+   category-colour idea Scratch's own block palette uses to read as lively
+   rather than uniform. --error/--warning/--green replace what used to be
+   ad-hoc hex literals scattered across this file (some places already used
+   var(--green), most didn't -- now genuinely centralized, not just mostly).
+   See docs/decisions/blocks-editor-usability.md. */
 :root {
-  --bg: #16181d;
-  --panel: #1e2128;
-  --panel-2: #23262e;
-  --border: #2e323c;
-  --text: #d7dae2;
-  --text-dim: #8b90a0;
-  --accent: #4ea1ff;
-  --green: #37c871;
+  --bg: #14151c;
+  --panel: #1c1f28;
+  --panel-2: #232733;
+  --border: #333849;
+  --text: #e4e7f0;
+  --text-dim: #9aa0b4;
+  --accent: #3d8bff;
+  --green: #2ecc71;
+  --warning: #f9ca24;
+  --error: #ff6b6b;
   --floor: #1a2230;
+
+  --car-color: #3d8bff;
+  --arm-color: #ff9f43;
+  --drone-color: #a55eea;
+  --built-color: #26de81;
 }
 
 * {
@@ -21,29 +39,94 @@ body {
   color: var(--text);
 }
 
+/* Panel sizes are CSS custom properties, not flat pixel values -- so a
+   student can drag them (ResizeHandle.tsx writes to these on
+   document.documentElement) and so the code panel's own default is
+   proportional to the actual window (35vh), not a fixed 220px that stayed
+   cramped no matter how big the window was. Each gutter (`*-gutter` grid
+   areas) hosts one <ResizeHandle>, occupying a dedicated thin track rather
+   than floating over its neighbours. See docs/decisions/
+   blocks-editor-usability.md. */
 .studio {
   height: 100vh;
   display: grid;
-  grid-template-columns: 180px 1fr;
-  grid-template-rows: 40px 1fr 220px 44px;
+  grid-template-columns: var(--sidebar-width, 180px) 6px 1fr;
+  grid-template-rows: 40px 1fr 6px var(--code-panel-height, max(220px, 35vh)) 44px;
   grid-template-areas:
-    "titlebar titlebar"
-    "sidebar viewport"
-    "code code"
-    "runbar runbar";
+    "titlebar titlebar titlebar"
+    "sidebar sidebar-gutter viewport"
+    "code-gutter code-gutter code-gutter"
+    "code code code"
+    "runbar runbar runbar";
 }
 
 /* Build mode has no code tabs (Blockly/Python/C++ don't apply to a
-   robot-def document) -- the 220px code-tabs row is replaced entirely by a
+   robot-def document) -- the code-tabs row is replaced entirely by a
    hierarchy/stage/inspector row, rather than trying to fit a hierarchy and
    an inspector into that short strip. */
 .studio.mode-build {
-  grid-template-columns: 220px 1fr 300px;
+  grid-template-columns: var(--hierarchy-width, 220px) 6px 1fr 6px var(--inspector-width, 300px);
   grid-template-rows: 40px 1fr 44px;
   grid-template-areas:
-    "titlebar titlebar titlebar"
-    "hierarchy stage inspector"
-    "runbar runbar runbar";
+    "titlebar titlebar titlebar titlebar titlebar"
+    "hierarchy hierarchy-gutter stage inspector-gutter inspector"
+    "runbar runbar runbar runbar runbar";
+}
+
+.resize-handle {
+  background: transparent;
+  position: relative;
+  outline: none;
+}
+
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  background: var(--border);
+  transition: background 0.1s ease;
+}
+
+.resize-handle-row {
+  cursor: row-resize;
+}
+
+.resize-handle-row::after {
+  left: 0;
+  right: 0;
+  top: 2px;
+  height: 2px;
+}
+
+.resize-handle-column {
+  cursor: col-resize;
+}
+
+.resize-handle-column::after {
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+}
+
+.resize-handle:hover::after,
+.resize-handle:focus-visible::after {
+  background: var(--accent);
+}
+
+.sidebar-gutter {
+  grid-area: sidebar-gutter;
+}
+
+.code-gutter {
+  grid-area: code-gutter;
+}
+
+.hierarchy-gutter {
+  grid-area: hierarchy-gutter;
+}
+
+.inspector-gutter {
+  grid-area: inspector-gutter;
 }
 
 .titlebar {
@@ -72,7 +155,7 @@ body {
   color: var(--text-dim);
   font-size: 13px;
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: 5px;
 }
 
 .menu-item:not(:disabled) {
@@ -110,7 +193,7 @@ body {
   font-size: 13px;
   text-align: left;
   padding: 7px 10px;
-  border-radius: 5px;
+  border-radius: 6px;
   cursor: pointer;
   display: flex;
   justify-content: space-between;
@@ -209,7 +292,7 @@ body {
 .dialog input {
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--text);
   font-size: 13px;
   padding: 8px 10px;
@@ -227,7 +310,7 @@ body {
   color: var(--text);
   font-size: 13px;
   padding: 6px 14px;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
 }
 
@@ -247,7 +330,7 @@ body {
 }
 
 .dialog-empty.error {
-  color: #ff7a7a;
+  color: var(--error);
 }
 
 /* Compete mode (Competition Arena C2): a small always-visible scoreboard
@@ -361,12 +444,12 @@ body {
 }
 
 .compete-report-best.new-best {
-  color: #4caf50;
+  color: var(--green);
   font-weight: 600;
 }
 
 .template-best-score {
-  color: #4caf50;
+  color: var(--green);
 }
 
 .compete-sidebar-note {
@@ -415,7 +498,7 @@ body {
   gap: 12px;
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--text);
   font-size: 13px;
   padding: 8px 12px;
@@ -459,18 +542,18 @@ body {
   background: none;
   border: 1px solid transparent;
   color: var(--text-dim);
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
   padding: 0 8px;
 }
 
 .delete-btn:hover {
-  color: #ff7a7a;
+  color: var(--error);
 }
 
 .delete-btn.confirm {
-  color: #ff7a7a;
-  border-color: #ff7a7a;
+  color: var(--error);
+  border-color: var(--error);
   font-size: 11px;
 }
 
@@ -485,7 +568,7 @@ body {
   flex: 1;
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--text);
   font-size: 12px;
   padding: 7px 10px;
@@ -497,7 +580,7 @@ body {
   color: var(--text);
   font-size: 12px;
   padding: 6px 14px;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
 }
 
@@ -515,7 +598,7 @@ body {
   align-items: center;
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 8px 12px;
   font-size: 13px;
 }
@@ -526,7 +609,7 @@ body {
   color: var(--text);
   font-size: 12px;
   padding: 0 14px;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
 }
 
@@ -591,7 +674,7 @@ body {
   align-items: center;
   gap: 8px;
   padding: 7px 8px;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 13px;
   color: var(--text-dim);
 }
@@ -612,6 +695,29 @@ body {
 .robot.selectable.active {
   background: var(--panel-2);
   border-color: var(--accent);
+}
+
+/* Each robot gets its own real accent colour (car/arm/drone/built --
+   ROBOTS array + the "Built robot…" row, App.tsx) instead of one blue for
+   everything, the same category-colour idea Scratch's own block palette
+   uses. Only the ACTIVE row's own border/icon picks up its colour --
+   everything else stays the shared --panel-2/--accent hover/idle styling
+   above, so the sidebar doesn't turn into four different bright borders
+   fighting for attention at once. */
+.robot-car.active {
+  border-color: var(--car-color);
+}
+
+.robot-arm.active {
+  border-color: var(--arm-color);
+}
+
+.robot-drone.active {
+  border-color: var(--drone-color);
+}
+
+.robot-built.active {
+  border-color: var(--built-color);
 }
 
 .viewport {
@@ -654,7 +760,7 @@ body {
   width: 100%;
   image-rendering: pixelated;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   display: block;
 }
 
@@ -709,7 +815,7 @@ body {
   font-family: inherit;
   font-size: 12px;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
   width: 100%;
   text-align: left;
@@ -726,7 +832,7 @@ body {
   font-family: inherit;
   font-size: 12px;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
   flex: 0 0 auto;
 }
@@ -907,7 +1013,7 @@ body {
 
 .lesson-step code {
   background: var(--panel-2);
-  border-radius: 4px;
+  border-radius: 5px;
   padding: 1px 5px;
   font-size: 12px;
   color: #c8e1ff;
@@ -940,7 +1046,7 @@ body {
   color: var(--text);
   font-size: 11px;
   padding: 4px 10px;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
 }
 
@@ -984,7 +1090,7 @@ body {
 }
 
 .out-err {
-  color: #ff7a7a;
+  color: var(--error);
 }
 
 .python-note {
@@ -1042,15 +1148,34 @@ body {
   color: var(--text);
   font-size: 13px;
   padding: 6px 14px;
-  border-radius: 6px;
+  border-radius: 8px;
+  cursor: pointer;
 }
 
 .run-bar button:disabled {
   color: var(--text-dim);
+  cursor: not-allowed;
 }
 
+/* The single most-pressed control in the whole app gets real visual
+   weight -- a solid fill, not just a coloured outline like every other
+   run-bar button -- instead of blending in with Stop/Reset. */
 .run-bar .run {
+  background: var(--green);
   border-color: var(--green);
+  color: #0e1116;
+  font-weight: 600;
+}
+
+.run-bar .run:not(:disabled):hover {
+  filter: brightness(1.08);
+}
+
+.run-bar .run:disabled {
+  background: var(--panel-2);
+  border-color: var(--border);
+  color: var(--text-dim);
+  font-weight: 400;
 }
 
 .run-bar .status {
@@ -1104,7 +1229,7 @@ body {
 .world-panel input[type="text"] {
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--text);
   font-size: 13px;
   padding: 6px 8px;
@@ -1139,7 +1264,7 @@ body {
   height: 28px;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: none;
   cursor: pointer;
 }
@@ -1150,7 +1275,7 @@ body {
 }
 
 .world-remove:hover {
-  color: #ff7a7a;
+  color: var(--error);
 }
 
 .world-add {
@@ -1160,7 +1285,7 @@ body {
   color: var(--text);
   font-size: 12px;
   padding: 6px 12px;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
 }
 
@@ -1178,7 +1303,7 @@ body {
 .world-error {
   margin: 0;
   font-size: 12px;
-  color: #ff7a7a;
+  color: var(--error);
 }
 
 .world-actions {
@@ -1193,7 +1318,7 @@ body {
   color: var(--text);
   font-size: 13px;
   padding: 6px 14px;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
 }
 
@@ -1238,7 +1363,7 @@ body {
 }
 
 .builder-issue-count.error {
-  color: #ff7a7a;
+  color: var(--error);
 }
 
 /* Robot Builder Phase 8. */
@@ -1248,7 +1373,7 @@ body {
   color: var(--text);
   font-size: 11px;
   padding: 3px 8px;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -1263,14 +1388,14 @@ body {
   color: var(--text);
   font-size: 11px;
   padding: 3px 8px;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
   flex-shrink: 0;
 }
 
 .builder-new-robot-clear.confirm {
-  color: #ff7a7a;
-  border-color: #ff7a7a;
+  color: var(--error);
+  border-color: var(--error);
 }
 
 .hierarchy-list {
@@ -1299,7 +1424,7 @@ body {
   text-align: left;
   background: none;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--text-dim);
   font-size: 13px;
   font-family: inherit;
@@ -1335,7 +1460,7 @@ body {
   text-align: left;
   background: none;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--text-dim);
   font-size: 12px;
   font-family: inherit;
@@ -1362,7 +1487,7 @@ body {
   flex: none;
   background: none;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--text-dim);
   font-size: 11px;
   font-family: inherit;
@@ -1384,12 +1509,12 @@ body {
 }
 
 .feature-tree-delete:hover {
-  color: #ff7a7a;
+  color: var(--error);
 }
 
 .feature-tree-delete.confirm {
-  color: #ff7a7a;
-  border-color: #ff7a7a;
+  color: var(--error);
+  border-color: var(--error);
 }
 
 .feature-tree-insert-toggle {
@@ -1407,13 +1532,13 @@ body {
   padding: 6px;
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
 .feature-tree-insert-menu button {
   background: none;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--text);
   font-size: 11px;
   font-family: inherit;
@@ -1432,7 +1557,7 @@ body {
   color: var(--text);
   font-size: 12px;
   padding: 6px 12px;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
 }
 
@@ -1462,7 +1587,7 @@ body {
   color: var(--text);
   font-size: 13px;
   padding: 6px 14px;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
 }
 
@@ -1521,7 +1646,7 @@ body {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 5px;
   font-size: 12px;
   padding: 3px 6px;
 }
@@ -1568,7 +1693,7 @@ body {
   color: var(--text);
   font-size: 12px;
   padding: 4px 10px;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
 }
 
@@ -1646,7 +1771,7 @@ body {
 .body-inspector select {
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--text);
   font-size: 13px;
   padding: 6px 8px;
@@ -1663,7 +1788,7 @@ body {
   height: 28px;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: none;
   cursor: pointer;
 }
@@ -1686,16 +1811,16 @@ body {
 .body-issue {
   font-size: 12px;
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
 .body-issue.error {
-  color: #ff7a7a;
+  color: var(--error);
   background: rgba(255, 122, 122, 0.1);
 }
 
 .body-issue.warning {
-  color: #e8b34a;
+  color: var(--warning);
   background: rgba(232, 179, 74, 0.1);
 }
 
@@ -1704,12 +1829,12 @@ body {
 .cad-status {
   font-size: 12px;
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: 8px;
   color: #9aa4b2;
 }
 
 .cad-status.error {
-  color: #ff7a7a;
+  color: var(--error);
   background: rgba(255, 122, 122, 0.1);
 }
 
@@ -1725,7 +1850,7 @@ body {
   color: var(--text);
   font-size: 13px;
   padding: 6px 14px;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
 }
 
@@ -1790,7 +1915,7 @@ body {
   color: var(--text-dim);
   background: var(--panel);
   border: 1px solid var(--accent);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 6px 10px;
   text-align: center;
 }
@@ -1805,7 +1930,7 @@ body {
   color: var(--text-dim);
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 6px 10px;
   text-align: center;
 }

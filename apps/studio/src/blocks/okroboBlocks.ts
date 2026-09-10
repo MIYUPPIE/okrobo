@@ -581,8 +581,25 @@ export type RobotKind = "car" | "arm" | "drone";
  * content), none of which can ever target a built robot. */
 export type BlocksRobotKind = RobotKind | "built";
 
-const COMMON_TOOLBOX_TAIL = [
+// Three ready-made shapes of the same stock controls_if block, not three
+// custom blocks: Blockly's toolbox JSON supports seeding a block's own
+// mutator state directly via `extraState` (verified against the installed
+// build's own controls_if.saveExtraState/loadExtraState, which serialize
+// exactly `{ elseIfCount, hasElse }` -- node_modules/blockly/
+// blocks_compressed.js). A student drags whichever shape they need
+// straight from the toolbox; the mutator gear still exists afterward for
+// further tweaking, but isn't *required* for the two most common shapes.
+// Added after a real usability report ("can't use else if at all") traced
+// to the mutator's own small drag target being especially hard inside a
+// cramped code panel -- see docs/decisions/blocks-editor-usability.md.
+const IF_TOOLBOX_BLOCKS = [
   { kind: "block", type: "controls_if" },
+  { kind: "block", type: "controls_if", extraState: { hasElse: true } },
+  { kind: "block", type: "controls_if", extraState: { elseIfCount: 1, hasElse: true } },
+];
+
+const COMMON_TOOLBOX_TAIL = [
+  ...IF_TOOLBOX_BLOCKS,
   {
     kind: "block",
     type: "controls_repeat_ext",

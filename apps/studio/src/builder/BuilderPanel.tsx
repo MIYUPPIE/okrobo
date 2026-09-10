@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BlocksPanel } from "../BlocksPanel";
+import { ResizeHandle } from "../ResizeHandle";
 import { setBuiltRobotFields } from "../blocks/okroboBlocks";
 import type { CadEdgeOverlay, CadFaceOverlay, CadPreview, FacePick } from "../cad/cadClient";
 import { draft, shell } from "../cad/cadClient";
@@ -814,6 +815,17 @@ export function BuilderPanel({ robot, onChange, onNewRobot }: BuilderPanelProps)
         )}
       </aside>
 
+      <ResizeHandle
+        className="hierarchy-gutter"
+        cssVar="--hierarchy-width"
+        storageKey="okrobo:panel:hierarchy-width"
+        grow="right"
+        min={160}
+        max={480}
+        default={220}
+        label="Resize the hierarchy panel"
+      />
+
       {builderMode === "edit" ? (
         <div className="builder-stage">
           <BuilderViewport
@@ -1058,6 +1070,17 @@ export function BuilderPanel({ robot, onChange, onNewRobot }: BuilderPanelProps)
           </div>
         </div>
       )}
+
+      <ResizeHandle
+        className="inspector-gutter"
+        cssVar="--inspector-width"
+        storageKey="okrobo:panel:inspector-width"
+        grow="left"
+        min={220}
+        max={560}
+        default={300}
+        label="Resize the inspector panel"
+      />
 
       <aside className="builder-inspector">
         {builderMode === "edit" ? (

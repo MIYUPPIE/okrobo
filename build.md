@@ -2555,3 +2555,66 @@ the shipped Arena's car straight for 10s now stops at x=1.4999999999999998
 `ctest` 13/13, `pytest` 223 passing, parity check clean, `npm run test` 913
 passing, typecheck, build, full `check-studio-e2e.sh` green twice in a row.
 Full `test-all.sh` green. See docs/decisions/car-obstacle-collision.md.
+
+## Kid-usable Blocks: easier if/else, a resizable code panel, a livelier theme (2026-09-10)
+
+User sent a screenshot of the `controls_if` mutator popup: "work on the
+conditions too, i can't use the else if at all," plus "the code environment
+should be responsive and adjustable by users perfectly" and "i need the app
+color to be perfectly for kids... lively color." Investigated the mutator
+claim directly before assuming a Blockly bug: `controls_if` is Blockly's
+own stock, un-customized block -- the real root cause was `.studio`'s own
+CSS grid hardcoding the whole Blocks/Python/World/Lessons/C++ panel to a
+flat 220px row, measured at ~188px of real visible content height,
+regardless of window size. Not "Blockly is broken" -- "there's nowhere
+near enough room" for an already-fiddly mutator drag. Scoped via plan-mode.
+
+Three parts, closed together since they're genuinely related:
+- **If/else without the mutator**: verified Blockly's own toolbox JSON
+  supports seeding a block's mutator state via `extraState` (no custom
+  block code) -- the toolbox now offers plain if, if/else, and
+  if/elseif/else as three directly-draggable pre-built shapes.
+- **Real resizable panels**: new `ResizeHandle.tsx` (a thin draggable bar
+  writing directly to a CSS custom property during drag, persisted to
+  localStorage on release) replaces four previously-fixed pixel
+  dimensions (sidebar, code panel, Build mode's hierarchy/inspector) with
+  CSS-variable-driven, user-draggable ones. The code panel's own default
+  is `max(220px, 35vh)` -- genuinely responsive to window size, never
+  smaller than the old fixed height.
+- **A livelier, still-dark theme**: more saturated accent/status colours,
+  named `--error`/`--warning` variables replacing 18 scattered hex
+  literals (2 of which this session itself had introduced inconsistently
+  for the run-history feature), a real per-robot accent colour on each
+  sidebar row instead of one blue for everything, a uniform border-radius
+  bump (34 identical `6px` occurrences -> `8px`, safe because of that very
+  uniformity), and a solid-fill Run button.
+
+**A real, repeatable test gotcha closed for good**: `ResizeHandle`
+rendering inside `BuilderPanel.test.tsx` crashed ~73 unrelated tests --
+this repo's Node+vitest+jsdom doesn't provide a working `localStorage`
+(hit and separately worked around three times already this session via
+per-function DI). Rather than a fourth one-off fix, `src/testSetup.ts` now
+installs one global in-memory polyfill, closing this for any future
+component.
+
+**A real, self-inflicted e2e bug found and fixed**: the first version of
+the new resize check dragged the panel 200px and never reset it -- that
+persisted in localStorage for the rest of the script, squeezing the layout
+enough to break unrelated coordinate-based clicks in the Arm/Drone
+sections much further down. Fixed with a smaller delta plus an explicit
+cleanup + reload. Also found `check-studio-e2e.sh` never set an explicit
+`--window-size`, defaulting to headless Chrome's own tiny ~780x437 --
+where a naive `35vh`-only default would have been *smaller* than the old
+220px, an actual regression this feature's own check caught before
+shipping. Fixed both: the CSS default is `max(220px, 35vh)`, and the
+script now launches at a realistic 1280x900 (a permanent improvement to
+the whole suite, not just this feature's own checks).
+
+Tests: `ResizeHandle.test.tsx` (8, new), `okroboBlocks.test.ts` (+3).
+`npm run test` (924 passing, up from 912), `npm run typecheck`,
+`npm run build`. `./scripts/check-studio-e2e.sh` -- 3 consecutive clean
+runs after the window-size and self-cleanup fixes. Full `test-all.sh`
+green. Manual screenshots confirmed the panel genuinely grows, the drag
+persists across a reload, and the toolbox's if/elseif/else shape renders
+and is directly draggable. See
+docs/decisions/blocks-editor-usability.md.

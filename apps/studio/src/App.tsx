@@ -5,6 +5,7 @@ import pkg from "../package.json";
 import { AboutDialog, NameDialog, OpenDialog } from "./dialogs";
 import { AssetStore } from "./AssetStore";
 import { CameraView } from "./CameraView";
+import { ResizeHandle } from "./ResizeHandle";
 import type { RobotKind } from "./blocks/okroboBlocks";
 import { BlocksPanel, type BlocksPanelHandle } from "./BlocksPanel";
 import { BuilderPanel } from "./builder/BuilderPanel";
@@ -1174,7 +1175,7 @@ export default function App() {
           {ROBOTS.map((r) => (
             <li key={r.name}>
               <button
-                className={robot === r.id ? "robot selectable active" : "robot selectable"}
+                className={`robot selectable robot-${r.id}${robot === r.id ? " active" : ""}`}
                 onClick={() => switchRobot(r.id)}
               >
                 <span className="robot-icon">{r.icon}</span>
@@ -1183,7 +1184,7 @@ export default function App() {
             </li>
           ))}
           <li>
-            <button className="robot selectable" onClick={() => setBuiltRobotDialogOpen(true)}>
+            <button className="robot selectable robot-built" onClick={() => setBuiltRobotDialogOpen(true)}>
               <span className="robot-icon">🔧</span>
               <span>Built robot…</span>
             </button>
@@ -1271,6 +1272,17 @@ export default function App() {
         )}
       </aside>
 
+      <ResizeHandle
+        className="sidebar-gutter"
+        cssVar="--sidebar-width"
+        storageKey="okrobo:panel:sidebar-width"
+        grow="right"
+        min={140}
+        max={420}
+        default={180}
+        label="Resize the sidebar"
+      />
+
       <main className="viewport">
         {simulateBuilt ? (
           builtEngineStatus === "ready" && builtEngine && builtRunner ? (
@@ -1327,6 +1339,17 @@ export default function App() {
           />
         )}
       </main>
+
+      <ResizeHandle
+        className="code-gutter"
+        cssVar="--code-panel-height"
+        storageKey="okrobo:panel:code-height"
+        grow="up"
+        min={140}
+        max={900}
+        default={Math.round(window.innerHeight * 0.35)}
+        label="Resize the code panel"
+      />
 
       <section className="code-panel">
         <div className="code-tabs">
