@@ -5,7 +5,7 @@
 // numeric utilities (no scene graph, no rendering) -- still no React.
 
 import * as THREE from "three";
-import type { Actuator, Body, Feature, Geometry, Issue, RobotDef, Sensor, Transform } from "../contracts/robotDef";
+import type { Actuator, Body, Feature, Geometry, Issue, Joint, RobotDef, Sensor, Transform } from "../contracts/robotDef";
 
 const DEFAULT_STARTER_COLOR: [number, number, number] = [0.3, 0.5, 0.9];
 const DEFAULT_BODY_COLOR: [number, number, number] = [0.6, 0.6, 0.6];
@@ -160,6 +160,28 @@ export function nextJointId(robot: RobotDef): string {
   let n = robot.joints.length + 1;
   while (existing.has(`joint-${n}`)) n += 1;
   return `joint-${n}`;
+}
+
+/** Replaces the joint whose id is `replacingId`, in place -- JointCreator's
+ * own Apply when editing an existing joint (Robot Builder D3: fixing a
+ * mistyped joint, e.g. left at the default "fixed" type, no longer
+ * requires deleting the child body and starting over). */
+export function applyJoint(robot: RobotDef, joint: Joint, replacingId: string): RobotDef {
+  return { ...robot, joints: robot.joints.map((j) => (j.id === replacingId ? joint : j)) };
+}
+
+/** Removes a single joint by id -- re-parenting its own child back to an
+ * independent root (HierarchyList's own "Unattached" section already
+ * handles that case) -- and cascades through actuators targeting it and
+ * sensors referencing it, the same direct single-entity counterpart
+ * deleteActuator/deleteSensor already are to removeBody's own cascade. */
+export function deleteJoint(robot: RobotDef, jointId: string): RobotDef {
+  return {
+    ...robot,
+    joints: robot.joints.filter((j) => j.id !== jointId),
+    actuators: robot.actuators.filter((a) => a.target_joint !== jointId),
+    sensors: robot.sensors.filter((s) => s.joint !== jointId),
+  };
 }
 
 /** "actuator-N", bumped past any existing id collision -- mirrors nextJointId. */

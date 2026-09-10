@@ -33,7 +33,7 @@ import type { FeatureInsertKind } from "./FeatureTreeList";
 import { HierarchyList } from "./HierarchyList";
 import { JointCreator } from "./JointCreator";
 import { deleteFeatureStep, insertFeatureStep, moveFeatureStep, recomputeFeatureStep } from "./recomputeFeatureStep";
-import { deleteActuator, deleteSensor, makeDefaultBody, nextBodyId, removeBody } from "./robotEdits";
+import { deleteActuator, deleteJoint, deleteSensor, makeDefaultBody, nextBodyId, removeBody } from "./robotEdits";
 import { SensorCreator } from "./SensorCreator";
 import { SensorPanel } from "./SensorPanel";
 import { TestViewport } from "./TestViewport";
@@ -204,6 +204,13 @@ export function BuilderPanel({ robot, onChange, onNewRobot }: BuilderPanelProps)
   const isCutTool = CUT_TOOLS.has(builderTool);
   const isTargetPickTool = TARGET_PICK_TOOLS.has(builderTool);
   const isCadTool = isTargetPickTool || builderTool === "extrude" || builderTool === "revolve" || builderTool === "boundary" || editingStep !== null || insertingStep !== null;
+  // Add Actuator's own gate -- distinguished from "no joint at all" since
+  // a student who already added a joint but left its type at the default
+  // "fixed" (fixed joints don't move -- nothing to actuate) needs a very
+  // different, more specific message than "add a joint first", or the
+  // button reads as broken even though a joint visibly exists.
+  const hasAnyJoint = robot.joints.length > 0;
+  const hasMovableJoint = robot.joints.some((j) => j.type !== "fixed");
   // Robot Builder CAD Kernel Phase 7.3 (edit-any-step).
   const editingBody = editingStep ? robot.bodies.find((b) => b.id === editingStep.bodyId) : undefined;
   const editingFeature = editingStep ? editingBody?.features?.[editingStep.index] : undefined;
@@ -326,12 +333,20 @@ export function BuilderPanel({ robot, onChange, onNewRobot }: BuilderPanelProps)
     setJointDraft(null);
   };
 
-  // Robot Builder D1: editing an EXISTING actuator/sensor (from
-  // ActuatorSensorList) is a separate concern from the add-tools above --
-  // no re-picking needed, so it's its own pair of ids rather than folded
-  // into builderTool/pickTargetId.
+  // Robot Builder D1 (actuator/sensor)/D3 (joint): editing an EXISTING
+  // joint/actuator/sensor (from ActuatorSensorList) is a separate concern
+  // from the add-tools above -- no re-picking needed, so each is its own
+  // id rather than folded into builderTool/pickTargetId.
+  const [editingJointId, setEditingJointId] = useState<string | null>(null);
   const [editingActuatorId, setEditingActuatorId] = useState<string | null>(null);
   const [editingSensorId, setEditingSensorId] = useState<string | null>(null);
+
+  const applyJointEdit = (next: RobotDef) => {
+    onChange(next);
+    setEditingJointId(null);
+  };
+
+  const cancelJointEdit = () => setEditingJointId(null);
 
   const toggleActuatorTool = () => {
     setBuilderTool((current) => (current === "add-actuator" ? "transform" : "add-actuator"));
@@ -481,14 +496,23 @@ export function BuilderPanel({ robot, onChange, onNewRobot }: BuilderPanelProps)
     setPickTargetId(null);
   };
 
+  const startEditJoint = (id: string) => {
+    setBuilderTool("transform");
+    setEditingActuatorId(null);
+    setEditingSensorId(null);
+    setEditingJointId(id);
+  };
+
   const startEditActuator = (id: string) => {
     setBuilderTool("transform");
+    setEditingJointId(null);
     setEditingSensorId(null);
     setEditingActuatorId(id);
   };
 
   const startEditSensor = (id: string) => {
     setBuilderTool("transform");
+    setEditingJointId(null);
     setEditingActuatorId(null);
     setEditingSensorId(id);
   };
@@ -780,8 +804,10 @@ export function BuilderPanel({ robot, onChange, onNewRobot }: BuilderPanelProps)
         {builderMode === "edit" && (
           <ActuatorSensorList
             robot={robot}
+            onEditJoint={startEditJoint}
             onEditActuator={startEditActuator}
             onEditSensor={startEditSensor}
+            onDeleteJoint={(id) => onChange(deleteJoint(robot, id))}
             onDeleteActuator={(id) => onChange(deleteActuator(robot, id))}
             onDeleteSensor={(id) => onChange(deleteSensor(robot, id))}
           />
@@ -832,8 +858,14 @@ export function BuilderPanel({ robot, onChange, onNewRobot }: BuilderPanelProps)
             <button
               type="button"
               className={builderTool === "add-actuator" ? "active" : ""}
-              disabled={robot.joints.filter((j) => j.type !== "fixed").length === 0 || otherCadToolActive("add-actuator")}
-              title={robot.joints.filter((j) => j.type !== "fixed").length === 0 ? "Add a hinge, slider, ball, or free joint first" : undefined}
+              disabled={!hasMovableJoint || otherCadToolActive("add-actuator")}
+              title={
+                !hasMovableJoint
+                  ? hasAnyJoint
+                    ? "Every joint on this robot is 'fixed' (fixed joints don't move) -- edit one to a different type, or add a new hinge/slider/ball/free joint"
+                    : "Add a hinge, slider, ball, or free joint first"
+                  : undefined
+              }
               onClick={toggleActuatorTool}
             >
               Add Actuator
@@ -927,6 +959,13 @@ export function BuilderPanel({ robot, onChange, onNewRobot }: BuilderPanelProps)
           {builderTool === "shell" && pickTargetId === null && <p className="joint-pick-hint">Click the body to shell.</p>}
           {builderTool === "draft" && pickTargetId === null && <p className="joint-pick-hint">Click the body to draft.</p>}
           {builderTool === "add-sensor" && pickTargetId === null && <p className="joint-pick-hint">Click the body to mount the sensor on.</p>}
+          {builderTool === "transform" && hasAnyJoint && !hasMovableJoint && (
+            <p className="joint-pick-hint">
+              "Add Actuator" is grayed out because every joint here is "fixed" (fixed joints don't move, so there's
+              nothing to actuate) -- click a joint's own row to check its type, or add a new hinge/slider/ball/free
+              joint.
+            </p>
+          )}
         </div>
       ) : (
         <div className="builder-stage">
@@ -1022,7 +1061,21 @@ export function BuilderPanel({ robot, onChange, onNewRobot }: BuilderPanelProps)
 
       <aside className="builder-inspector">
         {builderMode === "edit" ? (
-          editingActuatorId ? (
+          editingJointId ? (
+            (() => {
+              const existingJoint = robot.joints.find((j) => j.id === editingJointId);
+              return existingJoint ? (
+                <JointCreator
+                  robot={robot}
+                  parentId={existingJoint.parent}
+                  childId={existingJoint.child}
+                  existing={existingJoint}
+                  onApply={applyJointEdit}
+                  onCancel={cancelJointEdit}
+                />
+              ) : null;
+            })()
+          ) : editingActuatorId ? (
             <ActuatorCreator
               robot={robot}
               existing={robot.actuators.find((a) => a.id === editingActuatorId)}

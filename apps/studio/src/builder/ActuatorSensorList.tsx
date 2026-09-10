@@ -1,23 +1,36 @@
 import { useState } from "react";
 import type { RobotDef } from "../contracts/robotDef";
 
-// Build mode's own list of existing actuators/sensors (Robot Builder D1) --
-// neither has a tree position the way bodies do (HierarchyList.tsx), so
-// this is a flat, separate list rather than an extension of that
-// component. Row shape mirrors FeatureTreeList.tsx's own "click to edit,
-// separate two-click delete" idiom exactly, reusing its
+// Build mode's own list of existing joints/actuators/sensors (Robot
+// Builder D1, joints added in D3) -- none of the three has a tree
+// position the way bodies do (HierarchyList.tsx only shows the body
+// tree), so this is a flat, separate list rather than an extension of
+// that component. Row shape mirrors FeatureTreeList.tsx's own "click to
+// edit, separate two-click delete" idiom exactly, reusing its
 // .feature-tree-row/.feature-tree-step/.feature-tree-delete CSS -- no new
-// classes needed.
+// classes needed. Joints are listed first: a student who left one at the
+// default "fixed" type (unactuatable) needs to find and fix it here
+// before Add Actuator's own gate (BuilderPanel.tsx) will let them past.
 
 export interface ActuatorSensorListProps {
   robot: RobotDef;
+  onEditJoint: (id: string) => void;
   onEditActuator: (id: string) => void;
   onEditSensor: (id: string) => void;
+  onDeleteJoint: (id: string) => void;
   onDeleteActuator: (id: string) => void;
   onDeleteSensor: (id: string) => void;
 }
 
-export function ActuatorSensorList({ robot, onEditActuator, onEditSensor, onDeleteActuator, onDeleteSensor }: ActuatorSensorListProps) {
+export function ActuatorSensorList({
+  robot,
+  onEditJoint,
+  onEditActuator,
+  onEditSensor,
+  onDeleteJoint,
+  onDeleteActuator,
+  onDeleteSensor,
+}: ActuatorSensorListProps) {
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const jointById = new Map(robot.joints.map((j) => [j.id, j] as const));
   const bodyById = new Map(robot.bodies.map((b) => [b.id, b] as const));
@@ -33,6 +46,34 @@ export function ActuatorSensorList({ robot, onEditActuator, onEditSensor, onDele
 
   return (
     <div className="actuator-sensor-list">
+      <h5 className="hierarchy-section">Joints</h5>
+      {robot.joints.length === 0 ? (
+        <p className="inspector-note">None yet -- use "Add Joint" above.</p>
+      ) : (
+        <ul>
+          {robot.joints.map((joint) => (
+            <li key={joint.id}>
+              <div className="feature-tree-row">
+                <button type="button" className="feature-tree-step" onClick={() => onEditJoint(joint.id)}>
+                  {joint.name}{" "}
+                  <span className="feature-tree-step-label">
+                    {bodyById.get(joint.parent)?.name ?? joint.parent} → {bodyById.get(joint.child)?.name ?? joint.child} ({joint.type})
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={confirmingDeleteId === joint.id ? "feature-tree-delete confirm" : "feature-tree-delete"}
+                  aria-label={`delete joint ${joint.name}`}
+                  onClick={() => requestDelete(joint.id, onDeleteJoint)}
+                >
+                  {confirmingDeleteId === joint.id ? "delete?" : "Delete"}
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
       <h5 className="hierarchy-section">Actuators</h5>
       {robot.actuators.length === 0 ? (
         <p className="inspector-note">None yet -- use "Add Actuator" above.</p>

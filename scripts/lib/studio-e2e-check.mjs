@@ -1435,13 +1435,59 @@ try {
   await page.evalClickText(".hierarchy-row", new RegExp(`^${firstNew}$`));
   await page.evalClickText(".hierarchy-row", new RegExp(`^${secondNew}$`));
   await waitForCondition("document.querySelector('.builder-inspector h4')?.textContent === 'New joint'", 5000);
-  await page.setSelectValue('[aria-label="joint type"]', "hinge");
+
+  // Reproduces the actual user bug report ("the actuator not working
+  // again") end to end: Apply is clicked WITHOUT ever touching the "Joint
+  // type" dropdown -- the single most natural first-time flow, and the
+  // one that leaves a joint at its default "fixed" type (fixed joints
+  // don't move, so Add Actuator's own gate correctly keeps rejecting it).
+  // Robot Builder D3 fixed this: a student can now find and re-type that
+  // joint via the new Joints list instead of deleting the child body.
+  const newJointName = await page.evaluate('document.querySelector(\'[aria-label="joint name"]\')?.value');
   await page.evalClickText(".inspector-actions button", "/^Apply$/");
-  const hingeJointAdded = await waitForCondition(
+  const fixedJointAdded = await waitForCondition(
     "document.querySelector('.builder-inspector h4')?.textContent !== 'New joint'",
     5000,
   );
-  check("Build mode: a fresh hinge joint is added for the actuator/sensor fixture", hingeJointAdded);
+  check("Build mode: a joint left at its default 'fixed' type is added (the actual user flow)", fixedJointAdded);
+
+  const actuatorDisabledForFixedOnly = await waitForCondition(
+    "(() => { const btn = [...document.querySelectorAll('.builder-toolbar button')].find(b => b.textContent === 'Add Actuator'); " +
+      "return !!btn && btn.disabled && btn.title.includes(\"Every joint on this robot is 'fixed'\"); })()",
+    5000,
+  );
+  check(
+    "Build mode: Add Actuator shows the distinguishing 'every joint is fixed' message, not a generic disabled state",
+    actuatorDisabledForFixedOnly,
+  );
+
+  const inlineHintShown = await waitForCondition(
+    "[...document.querySelectorAll('.joint-pick-hint')].some(p => p.textContent?.includes('grayed out because every joint here is \"fixed\"'))",
+    5000,
+  );
+  check("Build mode: an always-visible inline hint explains why Add Actuator is grayed out", inlineHintShown);
+
+  await page.evalClickText(".actuator-sensor-list .feature-tree-step", new RegExp(`^${newJointName}`));
+  const jointEditShown = await waitForCondition(
+    `document.querySelector('.builder-inspector h4')?.textContent === 'Edit joint' && document.querySelector('[aria-label="joint name"]')?.value === ${JSON.stringify(newJointName)}`,
+    5000,
+  );
+  check("Build mode: clicking the joint in the new Joints list opens it for editing, prefilled", jointEditShown);
+
+  await page.setSelectValue('[aria-label="joint type"]', "hinge");
+  await page.evalClickText(".inspector-actions button", "/^Apply$/");
+  const hingeJointAdded = await waitForCondition(
+    "document.querySelector('.builder-inspector h4')?.textContent !== 'Edit joint'",
+    5000,
+  );
+  check("Build mode: editing the joint to 'hinge' in place fixes it -- no body deletion needed", hingeJointAdded);
+
+  const actuatorNowEnabled = await waitForCondition(
+    "(() => { const btn = [...document.querySelectorAll('.builder-toolbar button')].find(b => b.textContent === 'Add Actuator'); " +
+      "return !!btn && !btn.disabled; })()",
+    5000,
+  );
+  check("Build mode: Add Actuator becomes enabled once the joint is fixed to a movable type", actuatorNowEnabled);
 
   await page.evalClickText(".builder-toolbar button", "/^Add Actuator$/");
   const actuatorFormShown = await waitForCondition(

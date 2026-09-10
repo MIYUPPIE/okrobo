@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Joint, JointType, RobotDef, Transform } from "../contracts/robotDef";
 import { validateRobotDef } from "../contracts/robotDef";
-import { computeJointOrigin, issuesIntroducedBy, nextJointId } from "./robotEdits";
+import { applyJoint, computeJointOrigin, issuesIntroducedBy, nextJointId } from "./robotEdits";
 
 // Build mode's joint-creation panel (parent and child are picked in the 3D
 // viewport -- see BuilderPanel.tsx/BuilderViewport.tsx's "Add Joint" tool),
@@ -14,6 +14,15 @@ import { computeJointOrigin, issuesIntroducedBy, nextJointId } from "./robotEdit
 // its error on either body, the joint itself, or the whole robot (a cycle),
 // not reliably on one predictable element_id. See
 // docs/decisions/robot-builder-joints.md.
+//
+// Robot Builder D3: also doubles as the joint EDITOR (`existing` prop) --
+// a student who left a joint at the default "fixed" type (unactuatable,
+// see Add Actuator's own gate in BuilderPanel.tsx) previously had no way
+// to fix it short of deleting the child body and starting over. Editing
+// reuses this exact same form/validation; only the candidate-construction
+// step differs (replace the existing joint, don't reset the child's
+// transform again -- that already happened once, when the joint was
+// first created).
 
 const HAS_AXIS: ReadonlySet<JointType> = new Set(["hinge", "slider"]);
 const HAS_DAMPING: ReadonlySet<JointType> = new Set(["hinge", "slider", "ball"]);
@@ -44,23 +53,34 @@ const radToDeg = (r: number) => (r * 180) / Math.PI;
 const degToRad = (d: number) => (d * Math.PI) / 180;
 const num = (s: string) => Number.parseFloat(s);
 
-function initialDraft(name: string, origin: Transform): Draft {
-  return {
+function initialDraft(name: string, origin: Transform, existing?: Joint): Draft {
+  const base = {
     name,
-    type: "fixed",
     originPosX: String(origin.position[0]),
     originPosY: String(origin.position[1]),
     originPosZ: String(origin.position[2]),
     originRotXDeg: String(round2(radToDeg(origin.rotation_rpy[0]))),
     originRotYDeg: String(round2(radToDeg(origin.rotation_rpy[1]))),
     originRotZDeg: String(round2(radToDeg(origin.rotation_rpy[2]))),
-    axisX: "0",
-    axisY: "1",
-    axisZ: "0",
-    limitsLower: "",
-    limitsUpper: "",
-    damping: "",
-    friction: "",
+  };
+  if (!existing) {
+    return { ...base, type: "fixed", axisX: "0", axisY: "1", axisZ: "0", limitsLower: "", limitsUpper: "", damping: "", friction: "" };
+  }
+  const axis = existing.type === "hinge" || existing.type === "slider" ? existing.axis : [0, 1, 0];
+  const limits = existing.type === "hinge" || existing.type === "slider" ? existing.limits : undefined;
+  const damping = existing.type === "hinge" || existing.type === "slider" || existing.type === "ball" ? existing.damping : undefined;
+  const friction = existing.type === "hinge" || existing.type === "slider" ? existing.friction : undefined;
+  return {
+    ...base,
+    name: existing.name,
+    type: existing.type,
+    axisX: String(axis[0]),
+    axisY: String(axis[1]),
+    axisZ: String(axis[2]),
+    limitsLower: limits ? String(limits.lower) : "",
+    limitsUpper: limits ? String(limits.upper) : "",
+    damping: damping !== undefined ? String(damping) : "",
+    friction: friction !== undefined ? String(friction) : "",
   };
 }
 
@@ -96,18 +116,27 @@ export interface JointCreatorProps {
   robot: RobotDef;
   parentId: string;
   childId: string;
+  /** Set when editing an existing joint (Robot Builder D3) -- prefills the
+   * draft from it, and Apply replaces it in place instead of appending a
+   * new one. `parentId`/`childId` should match `existing.parent`/`.child`
+   * exactly; no re-picking happens in edit mode. */
+  existing?: Joint;
   /** Called only with a document that introduces no new error-severity issue. */
   onApply: (nextRobot: RobotDef) => void;
   onCancel: () => void;
 }
 
-export function JointCreator({ robot, parentId, childId, onApply, onCancel }: JointCreatorProps) {
+export function JointCreator({ robot, parentId, childId, existing, onApply, onCancel }: JointCreatorProps) {
   const parentBody = robot.bodies.find((b) => b.id === parentId);
   const childBody = robot.bodies.find((b) => b.id === childId);
-  const jointId = useMemo(() => nextJointId(robot), [robot]);
+  const jointId = useMemo(() => existing?.id ?? nextJointId(robot), [robot, existing]);
 
   const [draft, setDraft] = useState<Draft>(() =>
-    initialDraft(jointId, parentBody && childBody ? computeJointOrigin(parentBody, childBody) : IDENTITY),
+    initialDraft(
+      jointId,
+      existing ? existing.origin : parentBody && childBody ? computeJointOrigin(parentBody, childBody) : IDENTITY,
+      existing,
+    ),
   );
 
   const { candidateRobot, newIssues } = useMemo(() => {
@@ -116,15 +145,19 @@ export function JointCreator({ robot, parentId, childId, onApply, onCancel }: Jo
     // The origin above already carries whatever offset childBody's own
     // transform used to encode as a root; reset it to identity so the
     // child's rendered/simulated world pose is unchanged by adding this
-    // joint (see docs/decisions/robot-builder-joints.md).
-    const candidate: RobotDef = {
-      ...robot,
-      bodies: robot.bodies.map((b) => (b.id === childId ? { ...b, transform: IDENTITY } : b)),
-      joints: [...robot.joints, joint],
-    };
+    // joint (see docs/decisions/robot-builder-joints.md). Editing an
+    // existing joint never touches the child's transform again -- that
+    // reset already happened once, the moment the joint was first created.
+    const candidate: RobotDef = existing
+      ? applyJoint(robot, joint, existing.id)
+      : {
+          ...robot,
+          bodies: robot.bodies.map((b) => (b.id === childId ? { ...b, transform: IDENTITY } : b)),
+          joints: [...robot.joints, joint],
+        };
     const issues = issuesIntroducedBy(validateRobotDef(robot), validateRobotDef(candidate));
     return { candidateRobot: candidate, newIssues: issues };
-  }, [robot, draft, jointId, parentId, childId, parentBody, childBody]);
+  }, [robot, draft, jointId, parentId, childId, parentBody, childBody, existing]);
 
   if (!parentBody || !childBody) return null;
 
@@ -139,7 +172,7 @@ export function JointCreator({ robot, parentId, childId, onApply, onCancel }: Jo
 
   return (
     <div className="body-inspector">
-      <h4>New joint</h4>
+      <h4>{existing ? "Edit joint" : "New joint"}</h4>
       <p className="inspector-note">
         {parentBody.name} → {childBody.name}
       </p>

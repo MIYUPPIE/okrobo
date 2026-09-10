@@ -545,6 +545,72 @@ describe("BuilderPanel", () => {
     expect(onChange.mock.calls[0][0].sensors).toEqual([]);
   });
 
+  it("Joints list: clicking an existing joint opens it for editing, prefilled; switching fixed to hinge and Apply replaces it in place", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    const base = makeRobot();
+    const robot: RobotDef = {
+      ...base,
+      bodies: [...base.bodies, { id: "wheel", name: "Wheel", transform: identity, mass: 0.1, inertia }],
+      // The motivating D3 case -- a joint left at the default "fixed" type,
+      // which is exactly why "Add Actuator" stays disabled below until it's fixed.
+      joints: [{ id: "joint-1", name: "Joint 1", type: "fixed", parent: "base", child: "wheel", origin: identity }],
+    };
+    render(<BuilderPanel robot={robot} onChange={onChange} />);
+
+    expect(screen.getByRole("button", { name: "Add Actuator" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: /^Joint 1/ }));
+    expect(screen.getByText("Edit joint")).toBeInTheDocument();
+    expect(screen.getByLabelText("joint name")).toHaveValue("Joint 1");
+    expect(screen.getByLabelText("joint type")).toHaveValue("fixed");
+
+    await user.selectOptions(screen.getByLabelText("joint type"), "hinge");
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next: RobotDef = onChange.mock.calls[0][0];
+    expect(next.joints).toHaveLength(1); // replaced, not appended
+    expect(next.joints[0]).toMatchObject({ id: "joint-1", type: "hinge" });
+  });
+
+  it("Joints list: two-click delete removes the joint via onChange", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    const base = makeRobot();
+    const robot: RobotDef = {
+      ...base,
+      bodies: [...base.bodies, { id: "wheel", name: "Wheel", transform: identity, mass: 0.1, inertia }],
+      joints: [{ id: "joint-1", name: "Joint 1", type: "hinge", parent: "base", child: "wheel", origin: identity, axis: [0, 1, 0] }],
+    };
+    render(<BuilderPanel robot={robot} onChange={onChange} />);
+
+    const deleteButton = screen.getByRole("button", { name: "delete joint Joint 1" });
+    await user.click(deleteButton);
+    expect(onChange).not.toHaveBeenCalled();
+    await user.click(deleteButton);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange.mock.calls[0][0].joints).toEqual([]);
+  });
+
+  it("Add Actuator: distinguishes 'no joint at all' from 'every joint is fixed' (the actual D3 bug report)", () => {
+    const base = makeRobot();
+    const withNoJoint = render(<BuilderPanel robot={base} onChange={() => {}} />);
+    expect(screen.getByRole("button", { name: "Add Actuator" }).title).toBe("Add a hinge, slider, ball, or free joint first");
+    withNoJoint.unmount();
+
+    const robotWithFixedJoint: RobotDef = {
+      ...base,
+      bodies: [...base.bodies, { id: "wheel", name: "Wheel", transform: identity, mass: 0.1, inertia }],
+      joints: [{ id: "joint-1", name: "Joint 1", type: "fixed", parent: "base", child: "wheel", origin: identity }],
+    };
+    render(<BuilderPanel robot={robotWithFixedJoint} onChange={() => {}} />);
+    const addActuator = screen.getByRole("button", { name: "Add Actuator" });
+    expect(addActuator).toBeDisabled();
+    expect(addActuator.title).toMatch(/every joint on this robot is 'fixed'/i);
+    expect(screen.getByText(/"Add Actuator" is grayed out because every joint here is "fixed"/)).toBeInTheDocument();
+  });
+
   it("Extrude shows the CadExtrudeCreator stub and hides BodyInspector", async () => {
     const user = userEvent.setup();
     render(<BuilderPanel robot={makeRobot()} onChange={() => {}} />);

@@ -2328,3 +2328,52 @@ confirms before clearing, and Blocks/Python content survives the clear
 untouched. This closes the Robot Builder initiative's full D1+D2 scope --
 sensors/actuators can be authored, explained, saved, and reused. See
 docs/decisions/robot-builder-lifecycle.md for the complete reasoning.
+
+## Robot Builder — D3: joint editing (2026-09-10)
+
+The user reported the same symptom twice: "actuator button not clicking,"
+then, after that first fix shipped, "alot still wrong" / "the actuator
+not working again." The first report's root cause (no `:disabled` CSS on
+`.builder-toolbar button`, D1) was real and fixed, but reproducing the
+user's exact realistic flow in a live browser session -- Add Joint, pick
+two bodies, Apply without touching the "Joint type" dropdown -- exposed a
+second, deeper bug wearing the same symptom: `JointCreator.tsx` defaults
+new joints to `type: "fixed"`, which can't be actuated, and there was no
+UI to fix an existing joint's type short of deleting its child body and
+starting over (`HierarchyList.tsx` only ever rendered bodies, never
+joints).
+
+Fixed by making joints a first-class editable/deletable entity, mirroring
+D1's own actuator/sensor edit-in-place pattern: `robotEdits.ts` gained
+`applyJoint`/`deleteJoint`; `JointCreator.tsx` gained an `existing?: Joint`
+prop with per-type-narrowed prefill; `ActuatorSensorList.tsx` gained a
+new Joints section, listed *first* since fixing a wrongly-typed joint is
+the prerequisite for Add Actuator's own gate. "Add Actuator" now
+distinguishes "no joint at all" from "a joint exists but every one is
+fixed" with two different messages (button title + a new always-visible
+inline hint, not just a hover tooltip), since a beginner who doesn't
+think to hover a disabled button would otherwise never learn why.
+
+Tests: `robotEdits.test.ts` extended (+2 describe blocks, 44 passing),
+`JointCreator.test.tsx` extended (+3, "editing an existing joint"),
+`ActuatorSensorList.test.tsx` rewritten with a `renderList` helper (+1
+test, 6 total -- also fixed two pre-existing ambiguous assertions once
+"Joint 1" started matching both a joint row and an actuator's target
+label), `BuilderPanel.test.tsx` extended (+3: open-for-edit-prefilled and
+fixed-to-hinge-replace-in-place, two-click joint delete, the no-joint-vs-
+only-fixed-joints distinguishing message). `npm run test` (860 passing,
+up from 857), `npm run typecheck`, `npm run build`.
+
+`./scripts/check-studio-e2e.sh`'s existing Add Actuator/Add Sensor section
+now deliberately leaves its fixture joint at the default "fixed" type
+(rather than immediately setting it to hinge) and walks the full
+disabled-message -> edit-in-list -> hinge -> enabled -> real-actuator
+sequence -- passed twice in a row for stability alongside the full
+existing suite. A hand-written CDP script separately reproduced the
+user's exact original bug report end to end against a fresh dev-server +
+headless-Chrome session (Blank robot, add a body, Add Joint, pick both,
+Apply without touching the type dropdown, confirm the specific disabled
+message, fix it via the new Joints list, confirm Add Actuator becomes
+enabled and actually works) -- every step passed. See
+docs/decisions/robot-builder-joint-editing.md for the complete reasoning.
+This closes the Robot Builder initiative's full D1+D2+D3 scope.

@@ -3,7 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RobotDef } from "../contracts/robotDef";
-import { ActuatorSensorList } from "./ActuatorSensorList";
+import { ActuatorSensorList, type ActuatorSensorListProps } from "./ActuatorSensorList";
 
 afterEach(() => cleanup());
 
@@ -26,39 +26,76 @@ function makeRobot(): RobotDef {
   };
 }
 
+/** Every test only cares about a subset of the callbacks -- this fills in
+ * no-op defaults for the rest so each test only overrides what it checks. */
+function renderList(robot: RobotDef, overrides: Partial<ActuatorSensorListProps> = {}) {
+  return render(
+    <ActuatorSensorList
+      robot={robot}
+      onEditJoint={() => {}}
+      onEditActuator={() => {}}
+      onEditSensor={() => {}}
+      onDeleteJoint={() => {}}
+      onDeleteActuator={() => {}}
+      onDeleteSensor={() => {}}
+      {...overrides}
+    />,
+  );
+}
+
 describe("ActuatorSensorList", () => {
-  it("shows an empty state when the robot has neither", () => {
-    const robot: RobotDef = { ...makeRobot(), actuators: [], sensors: [] };
-    render(<ActuatorSensorList robot={robot} onEditActuator={() => {}} onEditSensor={() => {}} onDeleteActuator={() => {}} onDeleteSensor={() => {}} />);
+  it("shows an empty state when the robot has none of the three", () => {
+    const robot: RobotDef = { ...makeRobot(), joints: [], actuators: [], sensors: [] };
+    renderList(robot);
+    expect(screen.getByText(/use "Add Joint" above/)).toBeInTheDocument();
     expect(screen.getByText(/use "Add Actuator" above/)).toBeInTheDocument();
     expect(screen.getByText(/use "Add Sensor" above/)).toBeInTheDocument();
   });
 
-  it("lists each actuator and sensor by name and target", () => {
-    render(<ActuatorSensorList robot={makeRobot()} onEditActuator={() => {}} onEditSensor={() => {}} onDeleteActuator={() => {}} onDeleteSensor={() => {}} />);
-    expect(screen.getByText("Shoulder Motor", { exact: false })).toBeInTheDocument();
-    expect(screen.getByText(/Joint 1/)).toBeInTheDocument();
-    expect(screen.getByText("Front Lidar", { exact: false })).toBeInTheDocument();
-    expect(screen.getByText(/Link 1/)).toBeInTheDocument();
+  it("lists each joint, actuator, and sensor by name and target", () => {
+    renderList(makeRobot());
+    expect(screen.getByRole("button", { name: /^Joint 1/ })).toBeInTheDocument();
+    expect(screen.getByText(/Base → Link 1 \(hinge\)/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Shoulder Motor/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Front Lidar/ })).toBeInTheDocument();
+    expect(screen.getByText(/on Link 1/)).toBeInTheDocument();
   });
 
   it("clicking a row's own label calls the matching onEdit with its id", async () => {
+    const onEditJoint = vi.fn();
     const onEditActuator = vi.fn();
     const onEditSensor = vi.fn();
     const user = userEvent.setup();
-    render(<ActuatorSensorList robot={makeRobot()} onEditActuator={onEditActuator} onEditSensor={onEditSensor} onDeleteActuator={() => {}} onDeleteSensor={() => {}} />);
+    renderList(makeRobot(), { onEditJoint, onEditActuator, onEditSensor });
 
-    await user.click(screen.getByText("Shoulder Motor", { exact: false }));
+    await user.click(screen.getByRole("button", { name: /^Joint 1/ }));
+    expect(onEditJoint).toHaveBeenCalledWith("joint1");
+
+    await user.click(screen.getByRole("button", { name: /^Shoulder Motor/ }));
     expect(onEditActuator).toHaveBeenCalledWith("actuator-1");
 
-    await user.click(screen.getByText("Front Lidar", { exact: false }));
+    await user.click(screen.getByRole("button", { name: /^Front Lidar/ }));
     expect(onEditSensor).toHaveBeenCalledWith("sensor-1");
+  });
+
+  it("deleting a joint needs a first click to confirm, a second to actually delete", async () => {
+    const onDeleteJoint = vi.fn();
+    const user = userEvent.setup();
+    renderList(makeRobot(), { onDeleteJoint });
+
+    const deleteButton = screen.getByRole("button", { name: "delete joint Joint 1" });
+    await user.click(deleteButton);
+    expect(onDeleteJoint).not.toHaveBeenCalled();
+    expect(deleteButton).toHaveTextContent("delete?");
+
+    await user.click(deleteButton);
+    expect(onDeleteJoint).toHaveBeenCalledWith("joint1");
   });
 
   it("deleting an actuator needs a first click to confirm, a second to actually delete", async () => {
     const onDeleteActuator = vi.fn();
     const user = userEvent.setup();
-    render(<ActuatorSensorList robot={makeRobot()} onEditActuator={() => {}} onEditSensor={() => {}} onDeleteActuator={onDeleteActuator} onDeleteSensor={() => {}} />);
+    renderList(makeRobot(), { onDeleteActuator });
 
     const deleteButton = screen.getByRole("button", { name: "delete actuator Shoulder Motor" });
     await user.click(deleteButton);
@@ -72,7 +109,7 @@ describe("ActuatorSensorList", () => {
   it("deleting a sensor needs a first click to confirm, a second to actually delete", async () => {
     const onDeleteSensor = vi.fn();
     const user = userEvent.setup();
-    render(<ActuatorSensorList robot={makeRobot()} onEditActuator={() => {}} onEditSensor={() => {}} onDeleteActuator={() => {}} onDeleteSensor={onDeleteSensor} />);
+    renderList(makeRobot(), { onDeleteSensor });
 
     const deleteButton = screen.getByRole("button", { name: "delete sensor Front Lidar" });
     await user.click(deleteButton);

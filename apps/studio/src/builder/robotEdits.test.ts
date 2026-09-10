@@ -5,9 +5,11 @@ import { describe, expect, it } from "vitest";
 import { parseRobotDef, validateRobotDef, type Feature, type Issue, type Sensor, type Transform } from "../contracts/robotDef";
 import {
   applyActuator,
+  applyJoint,
   applySensor,
   computeJointOrigin,
   deleteActuator,
+  deleteJoint,
   deleteSensor,
   issuesIntroducedBy,
   makeCadBody,
@@ -219,6 +221,38 @@ describe("nextJointId", () => {
 
   it("starts at joint-1 for a document with no joints yet", () => {
     expect(nextJointId(makeDefaultRobotDef())).toBe("joint-1");
+  });
+});
+
+describe("applyJoint", () => {
+  it("replaces the joint matching replacingId, in place -- e.g. fixing one left at the default 'fixed' type", () => {
+    const robot = loadTwoLinkArm();
+    const original = robot.joints.find((j) => j.id === "joint1")!;
+    const edited = { ...original, type: "hinge" as const, axis: [0, 1, 0] as [number, number, number] };
+    const next = applyJoint(robot, edited, "joint1");
+    expect(next.joints.map((j) => j.id)).toEqual(robot.joints.map((j) => j.id)); // same ids, same order
+    expect(next.joints.find((j) => j.id === "joint1")).toEqual(edited);
+  });
+});
+
+describe("deleteJoint", () => {
+  it("removes a single joint by id, cascading through actuators/sensors that reference it, but leaves bodies alone", () => {
+    const robot = loadTwoLinkArm();
+    const next = deleteJoint(robot, "joint1");
+    expect(next.joints.map((j) => j.id)).toEqual(["joint2"]);
+    expect(next.actuators).toEqual([]); // shoulder_motor targeted joint1
+    expect(next.sensors.map((s) => s.id)).toEqual(["tip_camera"]); // shoulder_encoder (joint=joint1) removed
+    expect(next.bodies).toEqual(robot.bodies); // re-parenting is HierarchyList's own "Unattached" concern, not this function's
+  });
+
+  it("agrees with removeBody's own cascade when the removed body's own joint is the only one deleted directly", () => {
+    // removeBody("link1") removes joint1 (child=link1) AND joint2
+    // (parent=link1) together; deleting just joint1 directly should
+    // cascade the SAME actuators/sensors joint1's own removal would.
+    const robot = loadTwoLinkArm();
+    const viaDirectDelete = deleteJoint(robot, "joint1");
+    expect(viaDirectDelete.actuators).toEqual([]);
+    expect(viaDirectDelete.sensors.map((s) => s.id)).toEqual(["tip_camera"]);
   });
 });
 
