@@ -13,6 +13,9 @@ cmake -S "$ROOT/firmware" -B "$ROOT/firmware/build" -DCMAKE_BUILD_TYPE=Release >
 cmake --build "$ROOT/firmware/build" --parallel >/dev/null
 ctest --test-dir "$ROOT/firmware/build" --output-on-failure
 
+echo "== cross-platform python runtime fetch (OS/arch detection) =="
+bash "$ROOT/scripts/lib/fetch-python-runtime-check.sh"
+
 echo "== runtime/python =="
 if [ ! -d "$ROOT/runtime/python/.deps" ]; then
   (cd "$ROOT/runtime/python" && python3 -m pip install --quiet --target=.deps -r requirements.txt)

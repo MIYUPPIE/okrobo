@@ -26,10 +26,32 @@ the studio shows `py ✓` in the status bar once it connects.
 
 ## Desktop app
 
+Zero-install, no Docker: a native app any laptop can just double-click and
+run, with a fully offline, bundled Python (no system Python, no internet)
+so a real robot's students' programs work out of the box.
+
 ```bash
 ./scripts/fetch-python-runtime.sh   # once: bundle standalone CPython (offline installs)
-./scripts/build-desktop.sh          # deb + AppImage in apps/studio/src-tauri/target/release/bundle
+./scripts/build-desktop.sh          # this OS's native installer, in apps/studio/src-tauri/target/release/bundle
 ```
+
+Both scripts auto-detect the host OS/arch and run unmodified on Linux,
+Windows, and macOS. Locally you only get an installer for the OS you're
+running on; `.github/workflows/build-desktop.yml` builds all three at once
+(one native GitHub Actions runner per OS — no cross-compiling, no
+containers) and uploads them as workflow artifacts. Trigger it from the
+Actions tab (Build Desktop App → Run workflow) or by pushing a `studio-v*`
+tag, then hand out the matching download:
+
+| Laptop | File | Run it |
+|---|---|---|
+| Linux | `okrobo-studio_*.AppImage` | `chmod +x`, then double-click (or `.deb` via your package manager) |
+| Windows | `okrobo-studio_*-setup.exe` | run the installer |
+| macOS | `okrobo-studio_*.dmg` | open, drag to Applications |
+
+These builds are unsigned (no code-signing certificate configured), so
+Windows shows a SmartScreen prompt and macOS a Gatekeeper prompt the first
+time — click through once, same as any indie app without a paid cert.
 
 ## School server
 

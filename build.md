@@ -2662,3 +2662,63 @@ screenshots confirmed both ends: 550px wide now shows everything on one
 line with only the short "OKHUB" form; 1280px wide is pixel-for-pixel
 unchanged from before this fix (`scrollWidth === width`, full wordmark).
 See docs/decisions/titlebar-responsiveness.md.
+
+## Cross-platform desktop builds: Linux, Windows, macOS (2026-09-12)
+
+The desktop app had only ever been built and tested on Linux -- deb +
+AppImage, a hardcoded `x86_64-unknown-linux-gnu` python-build-standalone
+target, `sidecar.rs`'s interpreter resolution baked in `bin/python3` and
+`PR_SET_PDEATHSIG` (a Linux-only `prctl(2)` flag not even present in
+`libc`'s macOS bindings). Schools on Windows or macOS laptops -- the actual
+majority case -- had no installer at all.
+
+`scripts/fetch-python-runtime.sh` now auto-detects the host OS/arch
+(`detect_target()`: Linux, macOS Intel, macOS Apple Silicon, Windows) and
+picks the matching python-build-standalone release asset and the right
+extracted-interpreter path (`python/bin/python3` everywhere except
+Windows's `python/python.exe`). `sidecar.rs` mirrors the same branch with
+an explicit `bundled_python_relpath_for(windows: bool)` / `system_python_for
+(windows: bool)` pair -- an explicit bool parameter rather than reading
+`cfg!(target_os = "windows")` inline, specifically so both platforms'
+behavior is unit-tested from this one Linux dev machine (2 new tests, both
+passing here while asserting the Windows branch too).
+`apps/studio/src-tauri/tauri.macos.conf.json` / `tauri.windows.conf.json`
+add the per-OS bundle targets (dmg+app, nsis) via Tauri's own automatic
+overlay-config merge. `.github/workflows/build-desktop.yml` runs the exact
+same `fetch-python-runtime.sh` / `build-desktop.sh` a contributor would run
+locally, once per OS on GitHub's own hosted runners (no cross-compiling, no
+Docker -- mujoco's `.deps` wheel has real compiled native extensions per
+platform, which rules out cross-compiling the Python side regardless of
+what's done with the Rust side).
+
+**One Linux-only wrinkle, root-caused before patching anything**: mujoco's
+Linux wheel ships plugin `.so` files with a build-machine-absolute
+`RUNPATH` baked in from DeepMind's own CI. A plain `import mujoco` never
+notices (the plugin `dlopen`s `libmujoco.so` by soname, already loaded by
+the main extension module, so its own broken `RUNPATH` is never
+consulted) -- but `linuxdeploy` (which `tauri build` invokes for the
+AppImage) does a strict static dependency walk that resolves `RUNPATH`
+literally and aborts the whole bundle. `scripts/fix-mujoco-plugin-rpath.sh`
+repoints each plugin's `RUNPATH` to `$ORIGIN/..` with `patchelf`, and
+no-ops immediately on anything but Linux -- confirmed, not assumed, that
+macOS's bundler doesn't do this kind of strict walk and Windows resolves
+plugin DLLs via the process search path rather than an embedded rpath, so
+neither of the other two platforms has anything to patch.
+
+Unsigned for V1 on purpose: no Windows Authenticode or macOS Developer ID
+certificate configured (both cost money and need an ongoing identity to
+maintain). Windows shows a SmartScreen prompt, macOS a Gatekeeper prompt,
+on first launch -- one click through, same as any indie app without a
+paid cert, never blocking install.
+
+Tests: `scripts/lib/fetch-python-runtime-check.sh` (new) -- a
+deterministic, network-free gate shadowing `uname` to exercise every
+OS/arch branch from this one machine, wired into `test-all.sh`; 2 new
+Rust unit tests for `sidecar.rs`'s OS-branching helpers; 3 existing
+`sidecar.rs` resolution tests updated to call the same helpers instead of
+hardcoding `"python3"`. `cargo test`, `pytest` (223), `npm run test`
+(924), typecheck, build, both browser E2E checks, and the full
+`test-all.sh` all green on this machine. Did **not** run an actual `tauri
+build` on Windows or macOS here (no such machine available) -- the CI
+matrix is what proves those two for real, the first time it runs. See
+docs/decisions/desktop-cross-platform-build.md.

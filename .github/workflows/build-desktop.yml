@@ -1,0 +1,95 @@
+name: Build Desktop App
+
+# Produces a zero-install, no-Docker native installer for every laptop OS:
+# Linux (.deb / .AppImage), Windows (NSIS .exe), macOS (.dmg / .app). Each
+# matrix job runs on that OS's own GitHub-hosted runner (no cross-compiling,
+# no containers) so its bundled Python runtime, its compiled .deps wheels,
+# and the final Tauri bundler are all genuinely native to that platform.
+#
+# Unsigned builds: Windows will show a SmartScreen warning and macOS a
+# Gatekeeper warning on first launch (no code-signing certificate configured
+# yet). Users click through once; this does not block installation.
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - "studio-v*"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: linux
+          - os: windows-latest
+            artifact: windows
+          - os: macos-latest
+            artifact: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux Tauri build dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf build-essential libssl-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/studio/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        working-directory: apps/studio
+        run: npm ci
+
+      - name: Fetch bundled Python runtime (this OS/arch)
+        shell: bash
+        run: bash scripts/fetch-python-runtime.sh
+
+      - name: Install Python dependencies into runtime/python/.deps (native wheels for this OS)
+        shell: bash
+        run: |
+          cd runtime/python
+          python -m pip install --upgrade pip
+          python -m pip install --target=.deps -r requirements.txt
+
+      - name: Install patchelf (Linux only, for the mujoco plugin rpath fix)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get install -y patchelf
+
+      - name: Fix mujoco plugin rpath (Linux AppImage bundling needs this; no-op elsewhere)
+        shell: bash
+        run: bash scripts/fix-mujoco-plugin-rpath.sh
+
+      - name: Fetch the vision model weight
+        shell: bash
+        run: bash scripts/fetch-vision-model.sh
+
+      - name: Build the Tauri desktop app
+        working-directory: apps/studio
+        run: npx tauri build
+
+      - name: Upload bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: okrobo-studio-${{ matrix.artifact }}
+          path: |
+            apps/studio/src-tauri/target/release/bundle/**/*.deb
+            apps/studio/src-tauri/target/release/bundle/**/*.AppImage
+            apps/studio/src-tauri/target/release/bundle/**/*.msi
+            apps/studio/src-tauri/target/release/bundle/**/*.exe
+            apps/studio/src-tauri/target/release/bundle/**/*.dmg
+            apps/studio/src-tauri/target/release/bundle/**/*.app
+          if-no-files-found: error
