@@ -2718,7 +2718,24 @@ Rust unit tests for `sidecar.rs`'s OS-branching helpers; 3 existing
 `sidecar.rs` resolution tests updated to call the same helpers instead of
 hardcoding `"python3"`. `cargo test`, `pytest` (223), `npm run test`
 (924), typecheck, build, both browser E2E checks, and the full
-`test-all.sh` all green on this machine. Did **not** run an actual `tauri
-build` on Windows or macOS here (no such machine available) -- the CI
-matrix is what proves those two for real, the first time it runs. See
+`test-all.sh` all green on this machine.
+
+**Closes a real previously-deferred bug, proven with a real build, not
+just trusted from the fix's own reasoning**: ran `scripts/build-desktop.sh`
+for real on this machine specifically to check whether
+`fix-mujoco-plugin-rpath.sh` actually fixes the AppImage/`linuxdeploy`
+bundling failure that had been left "deferred by user choice, not fixed."
+`patchelf` wasn't installed here (no sudo in this environment) --
+installed it via `pip install --target=<scratch dir> patchelf` (a real
+prebuilt binary on PyPI) rather than skip the check. Result: all 4 mujoco
+plugin `.so` files patched, `tauri build` produced a real
+`okrobo-studio_0.1.0_amd64.AppImage` with no linuxdeploy failure, and
+running it for real (`chmod +x`, execute) self-extracted and launched the
+actual Tauri binary, which spawned the bundled sidecar from inside the
+extraction using the bundle's own `runtime-dist/cpython/bin/python3` --
+proof the bundled offline Python+mujoco stack works from the built
+artifact itself, not just from source. The AppImage/linuxdeploy item is
+no longer on the "remaining work" list below. Did **not** run an actual
+`tauri build` on Windows or macOS here (no such machine available) -- the
+CI matrix is what proves those two for real, the first time it runs. See
 docs/decisions/desktop-cross-platform-build.md.
